@@ -3,13 +3,9 @@ import streamlit as st
 # The URL you want to redirect to
 target_url = "https://academic-genealogy.academyrh.info/"
 
-# This code injects JavaScript to redirect the page
+# Using a meta tag for automatic redirection
 st.markdown(
-    f"""
-    <script>
-        window.top.location.href = "{target_url}";
-    </script>
-    """,
+    f'<meta http-equiv="refresh" content="0; url={target_url}">',
     unsafe_allow_html=True
 )
 
