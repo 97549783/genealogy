@@ -41,7 +41,7 @@
 4. Доля пересечения от общего количества оппонентов:
        d_O(i→j) = |M_i ∩ O_j| / |O_j|
 
-5. Количество школ, привлёкших членов этой школы в качестве оппонентов:
+5. Количество школ, привлекших членов этой школы в качестве оппонентов:
        out(i) = |{j ≠ i : M_i ∩ O_j ≠ ∅}|        (исходящая степень)
 
 6. Количество школ, привлечённых этой школой в качестве оппонентов:
@@ -76,9 +76,7 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 
 AUTHOR_COLUMN = "candidate_name"
-
 SUPERVISOR_COLUMNS = [f"supervisors_{i}.name" for i in (1, 2)]
-
 OPPONENT_COLUMNS = [f"opponents_{i}.name" for i in (1, 2, 3)]
 
 SCOPE_LABELS = {
@@ -91,7 +89,14 @@ SCOPE_LABELS = {
 # ---------------------------------------------------------------------------
 
 def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s.replace("ё", "е")).strip().lower()
+    """
+    FIX #1: Нормализация ФИО совместима с streamlit_app.py:
+    - заменяет точки пробелами (инициалы «И.И.» → «и и»)
+    - заменяет «ё» → «е»
+    - приводит к нижнему регистру
+    - сжимает множественные пробелы
+    """
+    return re.sub(r"\s+", " ", s.replace(".", " ").replace("ё", "е")).strip().lower()
 
 
 def _split_full(full: str) -> Tuple[str, str, str]:
@@ -152,7 +157,6 @@ def _collect_members(
         _G, subset = lineage_func(df, index, root)
 
     members: Set[str] = set()
-    # Корень — тоже член школы
     members.add(_norm(root))
 
     if not subset.empty and AUTHOR_COLUMN in subset.columns:
@@ -164,9 +168,7 @@ def _collect_members(
 
 
 def _collect_opponents(subset: pd.DataFrame) -> Set[str]:
-    """
-    Из выборки диссертаций школы извлекает множество оппонентов.
-    """
+    """Извлекает множество оппонентов из выборки диссертаций школы."""
     opponents: Set[str] = set()
     for col in OPPONENT_COLUMNS:
         if col in subset.columns:
@@ -186,11 +188,11 @@ def compute_intersection_analysis(
     """
     Принимает  {school_name: (M_i, O_i)}.
     Возвращает 6 DataFrame:
-      - raw_matrix:    |M_i ∩ O_j|
+      - raw_matrix:     |M_i ∩ O_j|
       - jaccard_matrix: |M_i ∩ O_j| / |M_i ∪ O_j|
       - member_share:   |M_i ∩ O_j| / |M_i|
       - opponent_share: |M_i ∩ O_j| / |O_j|
-      - node_stats:    сводная таблица (in-/out-degree, размеры множеств и др.)
+      - node_stats:     сводная таблица (in-/out-degree, размеры множеств и др.)
       - persons_detail: подробно — кто именно пересёкся
     """
     names = sorted(school_data.keys())
@@ -231,19 +233,18 @@ def compute_intersection_analysis(
     m_share_df = pd.DataFrame(np.round(m_share, 4), index=names, columns=names)
     o_share_df = pd.DataFrame(np.round(o_share, 4), index=names, columns=names)
 
-    # Сводка по вершинам
     stats_rows = []
     for i, name in enumerate(names):
         Mi, Oi = school_data[name]
-        out_degree = int(np.sum(raw[i, :] > 0))  # строка i
-        in_degree = int(np.sum(raw[:, i] > 0))     # столбец i
+        out_degree = int(np.sum(raw[i, :] > 0))
+        in_degree  = int(np.sum(raw[:, i] > 0))
         out_weight = int(np.sum(raw[i, :]))
-        in_weight = int(np.sum(raw[:, i]))
+        in_weight  = int(np.sum(raw[:, i]))
         stats_rows.append({
             "Научная школа": name,
             "|M| (члены)": len(Mi),
             "|O| (оппоненты)": len(Oi),
-            "Кол-во школ, привлёкших членов этой школы в качестве оппонентов": out_degree,
+            "Кол-во школ, привлекших членов этой школы в качестве оппонентов": out_degree,
             "Суммарное исходящее пересечение": out_weight,
             "Кол-во школ, привлечённых этой школой в качестве оппонентов": in_degree,
             "Суммарное входящее пересечение": in_weight,
@@ -286,12 +287,9 @@ def render_opponents_intersection_tab(
     lineage_func: Callable,
     rows_for_func: Callable,
 ) -> None:
-    """
-    Отображает вкладку «Граф пересечения научных школ».
-    """
+    """Отображает вкладку «Граф пересечения научных школ»."""
 
     st.subheader("Граф пересечения научных школ")
-
     st.markdown(
         """
 Анализ строится на **двух множествах** для каждой научной школы:
@@ -364,33 +362,51 @@ def render_opponents_intersection_tab(
             help="Дуги с весом меньше порога не отображаются в графе.",
         )
 
-    # --- Кнопка запуска ---
+    # --- Кнопки запуска и сброса ---
     st.markdown("---")
 
-    if not st.button("Построить граф", key="opponents_intersection_run", type="primary"):
+    # FIX #3: кнопка сброса кэша рядом с кнопкой запуска
+    col_run, col_reset = st.columns([3, 1])
+    with col_run:
+        run_clicked = st.button("Построить граф", key="opponents_intersection_run", type="primary")
+    with col_reset:
+        if st.button("Сбросить кэш",
+                     key="opponents_intersection_reset",
+                     help="Очистить сохранённые результаты и пересчитать"):
+            cache_key = _cache_key(selected_schools, selected_scope)
+            if cache_key in st.session_state:
+                del st.session_state[cache_key]
+            st.rerun()
+
+    # FIX #2: показываем результат из кэша даже без нажатия кнопки
+    cache_key = _cache_key(selected_schools, selected_scope)
+    if not run_clicked and cache_key not in st.session_state:
         return
 
-    # --- Сбор данных ---
-    with st.spinner("Собираем множества членов и оппонентов..."):
-        school_data: Dict[str, Tuple[Set[str], Set[str]]] = {}
-        info_rows = []
-        progress = st.progress(0)
+    # --- FIX #2: Сбор данных с кэшированием ---
+    if run_clicked or cache_key not in st.session_state:
+        with st.spinner("Собираем множества членов и оппонентов..."):
+            school_data: Dict[str, Tuple[Set[str], Set[str]]] = {}
+            info_rows = []
+            progress = st.progress(0)
+            for i, school_name in enumerate(selected_schools):
+                members, subset = _collect_members(
+                    df, idx, school_name, selected_scope,
+                    lineage_func, rows_for_func,
+                )
+                opponents = _collect_opponents(subset)
+                school_data[school_name] = (members, opponents)
+                info_rows.append({
+                    "Научная школа": school_name,
+                    "Диссертаций": len(subset),
+                    "|M| (члены)": len(members),
+                    "|O| (оппоненты)": len(opponents),
+                })
+                progress.progress((i + 1) / len(selected_schools))
+            progress.empty()
+            st.session_state[cache_key] = (school_data, info_rows)
 
-        for i, school_name in enumerate(selected_schools):
-            members, subset = _collect_members(
-                df, idx, school_name, selected_scope,
-                lineage_func, rows_for_func,
-            )
-            opponents = _collect_opponents(subset)
-            school_data[school_name] = (members, opponents)
-            info_rows.append({
-                "Научная школа": school_name,
-                "Диссертаций": len(subset),
-                "|M| (члены)": len(members),
-                "|O| (оппоненты)": len(opponents),
-            })
-            progress.progress((i + 1) / len(selected_schools))
-        progress.empty()
+    school_data, info_rows = st.session_state[cache_key]
 
     # Краткая сводка по школам
     st.markdown("### Сводка по школам")
@@ -415,27 +431,17 @@ def render_opponents_intersection_tab(
         "Доля от общего кол-ва членов",
         "Доля от общего кол-ва оппонентов",
     ])
-
     with tab_raw:
         st.caption("w(i→j) = |M_i ∩ O_j|")
         st.dataframe(raw_df, use_container_width=True)
-
     with tab_jaccard:
         st.caption("k(i→j) = |M_i ∩ O_j| / |M_i ∪ O_j|")
         st.dataframe(jaccard_df, use_container_width=True)
-
     with tab_mshare:
-        st.caption(
-            "Доля пересечения членов и оппонентов от общего количества членов:  "
-            "d_M(i→j) = |M_i ∩ O_j| / |M_i|"
-        )
+        st.caption("d_M(i→j) = |M_i ∩ O_j| / |M_i|")
         st.dataframe(m_share_df, use_container_width=True)
-
     with tab_oshare:
-        st.caption(
-            "Доля пересечения членов и оппонентов от общего количества оппонентов:  "
-            "d_O(i→j) = |M_i ∩ O_j| / |O_j|"
-        )
+        st.caption("d_O(i→j) = |M_i ∩ O_j| / |O_j|")
         st.dataframe(o_share_df, use_container_width=True)
 
     # --- Сводка по вершинам ---
@@ -457,7 +463,6 @@ def render_opponents_intersection_tab(
             f" (порог веса ≥ {min_weight})"
         )
 
-        # Визуализация через pyvis
         try:
             from pyvis.network import Network as PyvisNetwork
             import json as _json
@@ -466,24 +471,13 @@ def render_opponents_intersection_tab(
                 height="700px", width="100%", directed=True, bgcolor="#ffffff"
             )
             net.toggle_physics(True)
-
             for node in G.nodes():
-                net.add_node(
-                    str(node),
-                    label=str(node),
-                    title=str(node),
-                    shape="box",
-                    color="#ADD8E6",
-                )
+                net.add_node(str(node), label=str(node), title=str(node),
+                             shape="box", color="#ADD8E6")
             for u, v, data in G.edges(data=True):
                 w = data.get("weight", 1)
-                net.add_edge(
-                    str(u), str(v),
-                    value=w,
-                    title=f"{u} → {v}: {w}",
-                    arrows="to",
-                )
-
+                net.add_edge(str(u), str(v), value=w,
+                             title=f"{u} → {v}: {w}", arrows="to")
             vis_opts = {
                 "nodes": {"font": {"size": 11}},
                 "edges": {
@@ -501,7 +495,6 @@ def render_opponents_intersection_tab(
                 },
             }
             net.set_options(_json.dumps(vis_opts))
-
             try:
                 html = net.generate_html()
             except AttributeError:
@@ -513,46 +506,32 @@ def render_opponents_intersection_tab(
                     tmp.unlink()
                 except Exception:
                     pass
-
             st.components.v1.html(html, height=720, scrolling=True)
 
         except ImportError:
-            st.info("Для интерактивной визуализации установите pyvis.")
-
-            # Fallback — matplotlib
             import matplotlib.pyplot as plt
-
             fig, ax = plt.subplots(figsize=(max(8, len(G) * 0.6), 6))
             pos = nx.spring_layout(G, k=2.5, seed=42)
             weights = [G[u][v]["weight"] for u, v in G.edges()]
             max_w = max(weights) if weights else 1
             widths = [1 + 4 * w / max_w for w in weights]
-            nx.draw(
-                G, pos,
-                with_labels=True,
-                node_color="#ADD8E6",
-                node_size=2500,
-                font_size=8,
-                arrows=True,
-                width=widths,
-                ax=ax,
-            )
+            nx.draw(G, pos, with_labels=True, node_color="#ADD8E6",
+                    node_size=2500, font_size=8, arrows=True, width=widths, ax=ax)
             edge_labels = {(u, v): d["weight"] for u, v, d in G.edges(data=True)}
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=7, ax=ax)
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
+                                         font_size=7, ax=ax)
             ax.set_title("Граф экспертного присутствия научных школ", fontsize=12)
             fig.tight_layout()
             st.pyplot(fig)
             plt.close(fig)
 
-    # --- Подробности: кто именно пересёкся ---
+    # --- Детализация: кто именно пересёкся ---
     st.markdown("---")
     st.markdown("### 6. Детализация пересечений (персоны)")
-
     if persons_df.empty:
         st.info("Пересечений не обнаружено.")
     else:
         st.caption(f"Всего записей: {len(persons_df)}")
-
         filter_source = st.selectbox(
             "Фильтр по школе-источнику",
             options=["Все"] + sorted(persons_df["Школа-источник (член)"].unique()),
@@ -561,13 +540,11 @@ def render_opponents_intersection_tab(
         display_df = persons_df
         if filter_source != "Все":
             display_df = display_df[display_df["Школа-источник (член)"] == filter_source]
-
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # --- Скачивание ---
     st.markdown("---")
     col_dl1, col_dl2 = st.columns(2)
-
     with col_dl1:
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -585,7 +562,6 @@ def render_opponents_intersection_tab(
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="opponents_intersection_download_xlsx",
         )
-
     with col_dl2:
         csv_data = raw_df.to_csv(encoding="utf-8-sig")
         st.download_button(
@@ -595,3 +571,8 @@ def render_opponents_intersection_tab(
             mime="text/csv",
             key="opponents_intersection_download_csv",
         )
+
+
+def _cache_key(selected_schools: List[str], scope: str) -> str:
+    """FIX #2: Уникальный ключ кэша для данного набора школ и глубины."""
+    return "opp_intersection_" + "|".join(sorted(selected_schools)) + "_" + scope
