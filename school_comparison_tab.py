@@ -6,11 +6,9 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -28,11 +26,9 @@ from school_comparison import (
     compute_silhouette_analysis,
     create_silhouette_plot,
     create_comparison_summary,
+    create_node_scores_table,
     interpret_silhouette_score,
     gather_school_dataset,
-    get_minimal_parent_nodes,
-    compute_node_distances,
-    create_node_distance_heatmap,
 )
 
 
@@ -41,7 +37,7 @@ from school_comparison import (
 # ==============================================================================
 
 DEFAULT_SCORES_FOLDER = "basic_scores"
-AUTHOR_COLUMN = "candidate.name"
+AUTHOR_COLUMN = "candidate_name"
 
 # ==============================================================================
 # ИНСТРУКЦИЯ ДЛЯ ВКЛАДКИ
@@ -59,6 +55,7 @@ INSTRUCTION_SCHOOL_COMPARISON = """
 
 - **Сравнение тематических профилей** нескольких научных школ
 - **Визуализация различий** с помощью графика силуэта
+- **Таблица средних баллов** по узлам классификатора для каждой школы
 - **Гибкий выбор параметров**: охват диссертаций, метрика расстояния, базис сравнения
 
 ---
@@ -69,8 +66,8 @@ INSTRUCTION_SCHOOL_COMPARISON = """
 2. **Настройте параметры анализа**:
    - *Охват*: только прямые диссертанты или все поколения
    - *Метрика*: евклидово или косинусное расстояние
-   - *Базис*: прямоугольный (стандартный) или косоугольный (учитывающий иерархическую структуру элементов классификатора)
-3. **Выберите тематический базис**: весь классификатор или конкретные разделы (например, уровни образования или предметные области)
+   - *Базис*: прямоугольный (стандартный) или косоугольный (учитывающий иерархию)
+3. **Выберите тематический базис**: весь классификатор или конкретные разделы
 4. **Запустите анализ** и изучите результаты
 
 ---
@@ -78,7 +75,7 @@ INSTRUCTION_SCHOOL_COMPARISON = """
 ### 📊 Интерпретация коэффициента силуэта
 
 | Значение | Интерпретация |
-|----------|---------------|
+|----------|--------------|
 | **0.71 – 1.00** | Отличное разделение — школы чётко различаются |
 | **0.51 – 0.70** | Хорошее разделение |
 | **0.26 – 0.50** | Умеренное разделение — есть пересечения |
@@ -103,29 +100,18 @@ INSTRUCTION_SCHOOL_COMPARISON = """
 def get_all_supervisors(df: pd.DataFrame) -> List[str]:
     """Получает список всех научных руководителей из DataFrame."""
     supervisor_cols = [
-        col for col in df.columns 
+        col for col in df.columns
         if "supervisor" in col.lower() and "name" in col.lower()
     ]
 
     all_supervisors: Set[str] = set()
     for col in supervisor_cols:
-        if col in df.columns:
-            all_supervisors.update(
-                str(v).strip() for v in df[col].dropna().unique() 
-                if str(v).strip()
-            )
+        all_supervisors.update(
+            str(v).strip() for v in df[col].dropna().unique()
+            if str(v).strip()
+        )
 
     return sorted(all_supervisors)
-
-
-def format_node_option(code: str, classifier_dict: Dict[str, str]) -> str:
-    """Форматирует узел для отображения в selectbox."""
-    depth = get_code_depth(code)
-    indent = "  " * (depth - 1)
-    title = classifier_dict.get(code, "")
-    if title:
-        return f"{indent}{code} — {title}"
-    return f"{indent}{code}"
 
 
 def show_instruction_dialog() -> None:
@@ -151,32 +137,32 @@ def render_school_comparison_tab(
 ) -> None:
     """
     Отрисовывает вкладку сравнения научных школ.
-    
+
     Args:
         df: Основной DataFrame с диссертациями
         idx: Индекс для поиска по именам
         lineage_func: Функция построения генеалогии
         rows_for_func: Функция поиска строк
-        scores_folder: Папка с CSV-профилями (настраивается в коде)
+        scores_folder: Папка с CSV-профилями
         specific_files: Список конкретных CSV-файлов (None = все из папки)
         classifier_labels: Словарь {код: название} для подписей узлов
     """
     if classifier_labels is None:
         classifier_labels = {}
-    
+
     # --- Кнопка инструкции ---
     if st.button("📖 Инструкция", key="instruction_school_comparison"):
         show_instruction_dialog()
-    
+
     st.subheader("🔬 Сравнение научных школ по тематическим профилям")
     st.markdown("""
     Сравните тематические профили диссертаций разных научных школ.
     Основная метрика — **коэффициент силуэта**, показывающий степень различия
     тематических направлений.
     """)
-    
+
     # =========================================================================
-    # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ (настройки в коде, не в UI)
+    # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
     # =========================================================================
     try:
         scores_df = load_scores_from_folder(
@@ -198,19 +184,19 @@ def render_school_comparison_tab(
     except Exception as e:
         st.error(f"❌ Ошибка загрузки данных: {e}")
         return
-    
+
     st.markdown("---")
-    
+
     # =========================================================================
     # ВЫБОР НАУЧНЫХ ШКОЛ
     # =========================================================================
     st.markdown("### 👥 Выбор научных школ для сравнения")
-    
+
     all_supervisors_sorted = get_all_supervisors(df)
     if not all_supervisors_sorted:
         st.error("❌ В данных не найдено научных руководителей")
         return
-    
+
     selected_schools = st.multiselect(
         "Выберите руководителей научных школ (минимум 2)",
         options=all_supervisors_sorted,
@@ -218,22 +204,21 @@ def render_school_comparison_tab(
         key="school_comp_selection",
         help="Выберите 2 или более научных руководителей для сравнения их школ"
     )
-    
+
     if len(selected_schools) < 2:
         st.warning("⚠️ Выберите минимум 2 научных руководителя для сравнения")
         return
-    
+
     st.markdown("---")
-    
+
     # =========================================================================
     # ПАРАМЕТРЫ АНАЛИЗА
     # =========================================================================
     col_params1, col_params2 = st.columns(2)
-    
+
     with col_params1:
         st.markdown("### 📐 Параметры анализа")
-        
-        # Выбор охвата диссертаций
+
         scope_options = list(SCOPE_LABELS.keys())
         scope_labels_list = [SCOPE_LABELS[s] for s in scope_options]
         scope_idx = st.radio(
@@ -248,8 +233,7 @@ def render_school_comparison_tab(
             )
         )
         selected_scope: ComparisonScope = scope_options[scope_idx]
-        
-        # Выбор метрики расстояния
+
         metric_options = list(DISTANCE_METRIC_LABELS.keys())
         metric_labels_list = [DISTANCE_METRIC_LABELS[m] for m in metric_options]
         metric_idx = st.selectbox(
@@ -264,10 +248,10 @@ def render_school_comparison_tab(
             )
         )
         selected_metric: DistanceMetric = metric_options[metric_idx]
-    
+
     with col_params2:
         st.markdown("### 🎯 Выбор тематического базиса")
-        
+
         basis_choice = st.radio(
             "Базис для сравнения",
             options=["full", "selected"],
@@ -278,9 +262,9 @@ def render_school_comparison_tab(
                 "**Конкретные разделы** — выберите узлы классификатора."
             )
         )
-        
+
         selected_nodes: Optional[List[str]] = None
-        
+
         if basis_choice == "selected":
             selectable = get_selectable_nodes(all_feature_columns, max_level=3)
             if not selectable:
@@ -289,19 +273,20 @@ def render_school_comparison_tab(
                 level1_nodes = [n for n in selectable if get_code_depth(n) == 1]
                 level2_nodes = [n for n in selectable if get_code_depth(n) == 2]
                 level3_nodes = [n for n in selectable if get_code_depth(n) == 3]
-                
+
                 st.caption("Выберите разделы классификатора:")
                 selected_nodes = []
-                
+
                 if level1_nodes:
-                    st.markdown("**Уровень 1:**")
+                    st.markdown("Уровень 1:")
                     cols_l1 = st.columns(min(4, len(level1_nodes)))
                     for i, node in enumerate(level1_nodes):
                         with cols_l1[i % len(cols_l1)]:
-                            label = classifier_labels.get(node, node)
-                            if st.checkbox(f"{node}", key=f"node_l1_{node}"):
+                            label = classifier_labels.get(node, "")
+                            display = f"{node}" + (f" — {label}" if label else "")
+                            if st.checkbox(display, key=f"node_l1_{node}"):
                                 selected_nodes.append(node)
-                
+
                 if level2_nodes:
                     with st.expander("Уровень 2", expanded=False):
                         cols_l2 = st.columns(3)
@@ -311,7 +296,7 @@ def render_school_comparison_tab(
                                 display = f"{node}" + (f" ({label})" if label else "")
                                 if st.checkbox(display, key=f"node_l2_{node}"):
                                     selected_nodes.append(node)
-                
+
                 if level3_nodes:
                     with st.expander("Уровень 3", expanded=False):
                         cols_l3 = st.columns(3)
@@ -321,7 +306,7 @@ def render_school_comparison_tab(
                                 display = f"{node}" + (f" ({label})" if label else "")
                                 if st.checkbox(display, key=f"node_l3_{node}"):
                                     selected_nodes.append(node)
-                
+
                 if selected_nodes:
                     filtered_cols = filter_columns_by_nodes(all_feature_columns, selected_nodes)
                     st.info(
@@ -330,7 +315,7 @@ def render_school_comparison_tab(
                     )
                 else:
                     st.warning("⚠️ Выберите хотя бы один раздел")
-    
+
     # Параметры косоугольного базиса
     decay_factor = 0.5
     if "oblique" in selected_metric:
@@ -344,14 +329,11 @@ def render_school_comparison_tab(
                 key="school_comp_decay",
                 help="Сила влияния родительских узлов на дочерние (0.5 — сбалансированно)"
             )
-    
+
     st.markdown("---")
-    
-    # Проверка готовности
-    ready_to_run = True
-    if basis_choice == "selected" and (not selected_nodes or len(selected_nodes) == 0):
-        ready_to_run = False
-    
+
+    ready_to_run = not (basis_choice == "selected" and not selected_nodes)
+
     # =========================================================================
     # ЗАПУСК АНАЛИЗА
     # =========================================================================
@@ -361,11 +343,12 @@ def render_school_comparison_tab(
         type="primary",
         disabled=not ready_to_run
     ):
+        # Инициализируем до spinner, чтобы переменные были доступны при любых исключениях
+        datasets: Dict[str, pd.DataFrame] = {}
+        missing_info_all: Dict[str, pd.DataFrame] = {}
+        stats_info = []
+
         with st.spinner("📥 Сбор данных научных школ..."):
-            datasets: Dict[str, pd.DataFrame] = {}
-            missing_info_all: Dict[str, pd.DataFrame] = {}
-            stats_info = []
-            
             progress_bar = st.progress(0)
             for i, school_name in enumerate(selected_schools):
                 try:
@@ -377,49 +360,45 @@ def render_school_comparison_tab(
                         scope=selected_scope,
                         lineage_func=lineage_func,
                         rows_for_func=rows_for_func,
+                        author_column=AUTHOR_COLUMN,
                     )
-                    
                     datasets[school_name] = dataset
                     if not missing_info.empty:
                         missing_info_all[school_name] = missing_info
-                    
                     stats_info.append({
                         "Школа": school_name,
                         "Найдено диссертаций": total_count,
                         "С профилями": len(dataset),
-                        "Без профилей": len(missing_info) if not missing_info.empty else 0
+                        "Без профилей": len(missing_info) if not missing_info.empty else 0,
                     })
                 except Exception as e:
                     st.warning(f"⚠️ Ошибка для школы '{school_name}': {e}")
-                
                 progress_bar.progress((i + 1) / len(selected_schools))
-            
             progress_bar.empty()
-        
+
         if stats_info:
             st.markdown("#### 📊 Статистика сбора данных")
-            stats_df = pd.DataFrame(stats_info)
-            st.dataframe(stats_df, use_container_width=True, hide_index=True)
-        
+            st.dataframe(pd.DataFrame(stats_info), use_container_width=True, hide_index=True)
+
         valid_datasets = {k: v for k, v in datasets.items() if not v.empty}
-        
+
         if len(valid_datasets) < 2:
             st.error(
                 "❌ Недостаточно данных для анализа. "
                 "Нужно минимум 2 школы с тематическими профилями."
             )
             return
-        
+
+        # Вычисление силуэта
         with st.spinner("🔬 Вычисление анализа силуэта..."):
             try:
                 nodes_for_analysis = selected_nodes if basis_choice == "selected" else None
-                
                 (
                     overall_score,
                     sample_scores,
                     labels,
                     school_order,
-                    used_columns
+                    used_columns,
                 ) = compute_silhouette_analysis(
                     datasets=valid_datasets,
                     feature_columns=all_feature_columns,
@@ -433,28 +412,34 @@ def render_school_comparison_tab(
             except Exception as e:
                 st.error(f"❌ Неожиданная ошибка: {e}")
                 return
-        
+
         # =====================================================================
         # РЕЗУЛЬТАТЫ
         # =====================================================================
         st.markdown("---")
         st.markdown("## 📈 Результаты анализа")
-        
+
         col_score, col_interp = st.columns([1, 2])
-        
         with col_score:
             st.metric(
                 label="Коэффициент силуэта",
                 value=f"{overall_score:.3f}",
                 help="Диапазон от -1 до 1. Чем выше, тем лучше разделение школ."
             )
-        
         with col_interp:
             st.info(interpret_silhouette_score(overall_score))
-        
-        basis_info = "весь базис" if basis_choice == "full" else f"узлы: {', '.join(selected_nodes or [])}"
-        st.caption(f"📌 Базис: {basis_info} | Признаков: {len(used_columns)} | Метрика: {DISTANCE_METRIC_LABELS[selected_metric]}")
-        
+
+        basis_info = (
+            "весь базис"
+            if basis_choice == "full"
+            else f"узлы: {', '.join(selected_nodes or [])}"
+        )
+        st.caption(
+            f"📌 Базис: {basis_info} | "
+            f"Признаков: {len(used_columns)} | "
+            f"Метрика: {DISTANCE_METRIC_LABELS[selected_metric]}"
+        )
+
         # =====================================================================
         # ГРАФИК СИЛУЭТА
         # =====================================================================
@@ -466,113 +451,69 @@ def render_school_comparison_tab(
             overall_score=overall_score,
             metric_label=DISTANCE_METRIC_LABELS[selected_metric],
         )
+        # Сохраняем в буфер до вывода и закрытия
+        buf_silhouette = io.BytesIO()
+        fig.savefig(buf_silhouette, format="png", dpi=150, bbox_inches="tight")
+        buf_silhouette.seek(0)
         st.pyplot(fig)
         plt.close(fig)
-        
-        # Скачивание графика силуэта
-        buf = io.BytesIO()
-        fig = create_silhouette_plot(
-            sample_scores=sample_scores,
-            labels=labels,
-            school_order=school_order,
-            overall_score=overall_score,
-            metric_label=DISTANCE_METRIC_LABELS[selected_metric],
+
+        st.download_button(
+            label="📥 Скачать график силуэта (PNG)",
+            data=buf_silhouette.getvalue(),
+            file_name="silhouette_plot.png",
+            mime="image/png",
+            key="school_comp_download_png"
         )
-        fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-        buf.seek(0)
-        plt.close(fig)
-        
-        col_dl1, col_dl2, col_dl3 = st.columns(3)
-        
-        with col_dl1:
-            st.download_button(
-                label="📥 Скачать график силуэта (PNG)",
-                data=buf.getvalue(),
-                file_name="silhouette_plot.png",
-                mime="image/png",
-                key="school_comp_download_png"
-            )
-        
+
         # =====================================================================
-        # НОВАЯ ВИЗУАЛИЗАЦИЯ: ТЕПЛОВАЯ КАРТА РАССТОЯНИЙ ПО УЗЛАМ
+        # ТАБЛИЦА СРЕДНИХ БАЛЛОВ ПО УЗЛАМ КЛАССИФИКАТОРА
         # =====================================================================
         st.markdown("---")
-        st.markdown("### 🔥 Тепловая карта тематических различий")
-        st.markdown("""
-        Эта карта показывает **какие тематические разделы наиболее различаются** между школами.
-        Каждая строка представляет тематический раздел (минимальный родительский узел),
-        а интенсивность цвета показывает расстояние между школами в этом разделе.
-        """)
-        
-        try:
-            with st.spinner("🔬 Вычисление расстояний по тематическим разделам..."):
-                distance_df, minimal_parents = compute_node_distances(
-                    datasets=valid_datasets,
-                    feature_columns=used_columns,
-                    metric=selected_metric,
-                    decay_factor=decay_factor,
-                )
-            
-            if not distance_df.empty:
-                heatmap_fig = create_node_distance_heatmap(
-                    distance_df=distance_df,
-                    classifier_labels=classifier_labels,
-                    metric_label=DISTANCE_METRIC_LABELS[selected_metric],
-                )
-                
-                st.pyplot(heatmap_fig)
-                plt.close(heatmap_fig)
-                
-                # Скачивание тепловой карты
-                buf_heatmap = io.BytesIO()
-                heatmap_fig = create_node_distance_heatmap(
-                    distance_df=distance_df,
-                    classifier_labels=classifier_labels,
-                    metric_label=DISTANCE_METRIC_LABELS[selected_metric],
-                )
-                heatmap_fig.savefig(buf_heatmap, format="png", dpi=300, bbox_inches="tight")
-                buf_heatmap.seek(0)
-                plt.close(heatmap_fig)
-                
-                with col_dl2:
-                    st.download_button(
-                        label="📥 Скачать тепловую карту (PNG)",
-                        data=buf_heatmap.getvalue(),
-                        file_name="node_distance_heatmap.png",
-                        mime="image/png",
-                        key="heatmap_download"
-                    )
-                
-                # Показать таблицу данных
-                with st.expander("📊 Значения расстояний по разделам", expanded=False):
-                    # Add readable labels
-                    display_df = distance_df.copy()
-                    display_df["Раздел"] = display_df["node"].apply(
-                        lambda x: f"{x} - {classifier_labels.get(x, '')}"
-                    )
-                    cols_order = ["Раздел"] + [c for c in display_df.columns if c not in ["node", "Раздел"]]
-                    display_df = display_df[cols_order]
-                    st.dataframe(display_df, use_container_width=True, hide_index=True)
-                    
-                    # Download CSV
-                    csv_dist = display_df.to_csv(index=False, encoding="utf-8-sig")
-                    st.download_button(
-                        label="📥 Скачать данные расстояний (CSV)",
-                        data=csv_dist.encode("utf-8-sig"),
-                        file_name="node_distances.csv",
-                        mime="text/csv",
-                        key="node_dist_csv"
-                    )
-            else:
-                st.warning("⚠️ Минимальных родительских узлов не найдено для анализа")
-        
-        except Exception as e:
-            st.error(f"❌ Ошибка создания тепловой карты: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-        
+        st.markdown("### 📊 Тематические профили по разделам классификатора")
+        st.markdown(
+            "Средний балл по разделу классификатора: среднее значение признаков всех потомков узла, "
+            "усреднённое по диссертациям школы."
+        )
+
+        scores_level = st.radio(
+            "Уровень детализации:",
+            options=[1, 2, 3],
+            index=1,
+            format_func=lambda x: f"Уровень {x}",
+            horizontal=True,
+            key="school_comp_scores_level",
+        )
+
+        nodes_for_table = selected_nodes if basis_choice == "selected" else None
+        node_scores_df = create_node_scores_table(
+            datasets=valid_datasets,
+            feature_columns=used_columns,
+            school_order=school_order,
+            classifier_labels=classifier_labels,
+            selected_nodes=nodes_for_table,
+            level=scores_level,
+        )
+
+        if not node_scores_df.empty:
+            st.dataframe(
+                node_scores_df,
+                use_container_width=True,
+                hide_index=True,
+            )
+            csv_scores = node_scores_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="📥 Скачать таблицу профилей (CSV)",
+                data=csv_scores.encode("utf-8-sig"),
+                file_name="school_node_scores.csv",
+                mime="text/csv",
+                key="school_comp_node_scores_csv"
+            )
+        else:
+            st.info("На выбранном уровне детализации узлы не найдены.")
+
         # =====================================================================
-        # СВОДНАЯ ТАБЛИЦА
+        # СВОДНАЯ СТАТИСТИКА
         # =====================================================================
         st.markdown("---")
         st.markdown("### 📋 Сводная статистика по школам")
@@ -582,42 +523,40 @@ def render_school_comparison_tab(
             school_order=school_order,
         )
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
-        
-        with col_dl3:
-            csv_data = summary_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                label="📥 Скачать сводку (CSV)",
-                data=csv_data.encode("utf-8-sig"),
-                file_name="school_comparison_summary.csv",
-                mime="text/csv",
-                key="school_comp_download_csv"
-            )
-        
+        csv_summary = summary_df.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button(
+            label="📥 Скачать сводку (CSV)",
+            data=csv_summary.encode("utf-8-sig"),
+            file_name="school_comparison_summary.csv",
+            mime="text/csv",
+            key="school_comp_download_csv"
+        )
+
         # =====================================================================
         # ДЕТАЛИ
         # =====================================================================
-        with st.expander(f"📝 Использовано признаков: {len(used_columns)}", expanded=False):
+        with st.expander(
+            f"📝 Использовано признаков: {len(used_columns)}",
+            expanded=False
+        ):
             by_level: Dict[int, List[str]] = {}
             for col in used_columns:
-                level = get_code_depth(col)
-                by_level.setdefault(level, []).append(col)
-            
-            for level in sorted(by_level.keys()):
-                cols = by_level[level]
-                st.markdown(f"**Уровень {level}** ({len(cols)} признаков)")
+                lv = get_code_depth(col)
+                by_level.setdefault(lv, []).append(col)
+            for lv in sorted(by_level.keys()):
+                cols = by_level[lv]
+                st.markdown(f"**Уровень {lv}** ({len(cols)} признаков)")
                 display_cols = []
                 for c in sorted(cols)[:30]:
-                    label = classifier_labels.get(c, "")
-                    display_cols.append(f"{c}" + (f" ({label})" if label else ""))
-                st.code(", ".join(display_cols) + ("..." if len(cols) > 30 else ""))
-        
+                    lbl = classifier_labels.get(c, "")
+                    display_cols.append(f"{c}" + (f" ({lbl})" if lbl else ""))
+                st.code(", ".join(display_cols) + ("…" if len(cols) > 30 else ""))
+
         if missing_info_all:
             with st.expander("⚠️ Диссертации без профилей", expanded=False):
                 for school_name, missing_df in missing_info_all.items():
                     st.markdown(f"**{school_name}**: {len(missing_df)} диссертаций")
-                    if not missing_df.empty and len(missing_df) <= 20:
-                        st.dataframe(missing_df, use_container_width=True, hide_index=True)
-                    elif len(missing_df) > 20:
-                        st.dataframe(missing_df.head(10), use_container_width=True, hide_index=True)
-                        st.caption(f"... и ещё {len(missing_df) - 10}")
-
+                    show_df = missing_df.head(20)
+                    st.dataframe(show_df, use_container_width=True, hide_index=True)
+                    if len(missing_df) > 20:
+                        st.caption(f"… и ещё {len(missing_df) - 20}")
