@@ -46,7 +46,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Константы (должны совпадать с именами колонок в db_lineages)
+# Константы
 # ---------------------------------------------------------------------------
 
 AUTHOR_COLUMN = "candidate_name"
@@ -58,16 +58,8 @@ CITY_COLUMN = "city"
 INSTITUTION_PREPARED_COLUMN = "institution_prepared"
 DEFENSE_LOCATION_COLUMN = "defense_location"
 LEADING_ORG_COLUMN = "leading_organization"
-
-# Колонки с тематическими профилями (basic_scores)
 SCORES_CODE_COLUMN = "Code"
-
-# Порог схожести для нечёткого поиска по строкам (rapidfuzz)
 FUZZY_THRESHOLD = 75
-
-# ---------------------------------------------------------------------------
-# Вспомогательные типы
-# ---------------------------------------------------------------------------
 
 SearchRow = Dict
 
@@ -78,21 +70,69 @@ SearchRow = Dict
 
 def _norm_initials(s: str) -> str:
     """
-    Канонизирует строку с именем для сравнения:
-      - приводит к нижнему регистру;
-      - заменяет ё → е («Пётр» == «Петр»);
-      - схлопывает лишние пробелы;
-      - убирает пробел между однобуквенными инициалами с точкой:
-        «Е. А.» → «е.а.», «А. Б. В.» → «а.б.в.»
+    Канонизирует строку для нечёткого поиска (не для дедубликации):
+      - нижний регистр, ё→е, схлопывание пробелов
+      - убирает пробел между однобуквенными инициалами: «Е. А.» → «е.а.»
     """
-    s = s.lower()
-    s = s.replace('ё', 'е')
+    s = s.lower().replace('ё', 'е')
     s = re.sub(r'\s+', ' ', s).strip()
     prev = None
     while prev != s:
         prev = s
         s = re.sub(r'([а-яеa-z])\. ([а-яеa-z]\.)', r'\1.\2', s)
     return s
+
+
+def _person_key(name: str) -> Optional[Tuple[str, str, str]]:
+    """
+    Извлекает ключ (фамилия, инициал_имени, инициал_отчества) для дедубликации.
+
+    Поддерживает два формата:
+      - «Фамилия И.О.»   / «Фамилия И. О.»  — инициальный формат
+      - «Фамилия Имя Отчество»             — полный формат
+
+    Возвращает None, если нельзя распознать структуру.
+    Все части приводятся к нижнему регистру, ё→е.
+
+    Примеры:
+      _person_key("Рожков М. И.")           → ("рожков", "м", "и")
+      _person_key("Рожков М.И.")            → ("рожков", "м", "и")
+      _person_key("Рожков Михаил Иосифович") → ("рожков", "м", "и")
+      _person_key("Третьяков Пётр Иванович")  → ("третьяков", "п", "и")
+      _person_key("Третьяков П. И.")          → ("третьяков", "п", "и")
+    """
+    s = name.strip().lower().replace('ё', 'е')
+    # Убираем лишние пробелы
+    s = re.sub(r'\s+', ' ', s).strip()
+    parts = s.split()
+    if len(parts) < 2:
+        return None
+
+    surname = parts[0]
+    rest = parts[1:]  # всё после фамилии
+
+    # Соединяем остаток и убираем все пробелы/точки чтобы получить чистые буквы
+    rest_joined = ''.join(rest).replace('.', '')
+
+    if len(rest_joined) == 0:
+        return None
+
+    if len(rest_joined) <= 2:
+        # Инициальный формат: "MИ" или "М" (только имя)
+        first_i = rest_joined[0]
+        patr_i = rest_joined[1] if len(rest_joined) > 1 else ""
+    else:
+        # Полный формат: берём первую букву каждого слова
+        words = [w for w in rest if re.sub(r'[^\u0430-яеa-z]', '', w)]
+        if len(words) == 0:
+            return None
+        first_i = words[0][0] if words[0] else ""
+        patr_i = words[1][0] if len(words) > 1 and words[1] else ""
+
+    if not first_i:
+        return None
+
+    return (surname, first_i, patr_i)
 
 
 # ---------------------------------------------------------------------------
@@ -103,51 +143,59 @@ def _norm_initials(s: str) -> str:
 def _dedup_result_df(df: pd.DataFrame, metric_col: str) -> pd.DataFrame:
     """
     Схлопывает строки результирующей таблицы, которые относятся к одному
-    руководителю (разные варианты написания одного имени).
+    руководителю (разные варианты написания).
 
-    Определяет дубликаты через _norm_initials("Руководитель").
+    Ключ дедубликации = _person_key("Руководитель") = (фамилия, инициал_имени, инициал_отчества).
+    Например, "Рожков М. И.", "Рожков М.И.", "Рожков Михаил Иосифович" — все дают ("рожков", "м", "и").
+    Если ключ вычислить невозможно, фоллбэк — _norm_initials.
+
     Для каждой группы:
-      - выбирает самое длинное имя в колонке "Руководитель";
-      - суммирует числовое значение metric_col (если оно числовое);
-      - выбирает максимальные значения для остальных колонок ("Всего членов" и др.);
-      - строковые колонки ("Годы активности", "Найденные варианты" и др.) берётся из первой строки группы.
-
-    Порядок строк сохраняется, нумерация # переписывается.
+      - "Руководитель" → самое длинное имя (полное ФИО > инициалы)
+      - числовая метрика → сумма по группе
+      - "Всего членов" и др. числовые колонки → также сумма
+      - строковые колонки → из строки с самым длинным именем
     """
     if df.empty or "Руководитель" not in df.columns:
         return df
 
     df = df.copy()
-    df["_norm_key"] = df["Руководитель"].astype(str).map(_norm_initials)
 
-    # Для каждого нормализованного ключа выбираем строку с самым длинным именем
+    # Вычисляем ключ дедубликации
+    def _key(name: str) -> str:
+        pk = _person_key(name)
+        if pk is not None:
+            return str(pk)  # e.g. "('\u0440\u043e\u0436\u043a\u043e\u0432', '\u043c', '\u0438')"
+        return _norm_initials(name)  # фоллбэк
+
+    df["_dedup_key"] = df["Руководитель"].astype(str).map(_key)
     df["_name_len"] = df["Руководитель"].str.len()
-    # Сортируем: сначала по ключу, затем по длине имени руководителя по убыванию
-    df = df.sort_values(["_norm_key", "_name_len"], ascending=[True, False])
 
-    # Числовая метрика: попытаемся суммировать
-    metric_is_numeric = pd.api.types.is_numeric_dtype(df[metric_col]) if metric_col in df.columns else False
+    # Сортируем: внутри каждой группы — самое длинное имя первым
+    df = df.sort_values(["_dedup_key", "_name_len"], ascending=[True, False])
+
+    metric_is_numeric = (
+        pd.api.types.is_numeric_dtype(df[metric_col])
+        if metric_col in df.columns else False
+    )
 
     result_rows = []
-    for norm_key, group in df.groupby("_norm_key", sort=False):
-        # Лучшая строка — первая после сортировки (самое длинное имя)
+    for _key_val, group in df.groupby("_dedup_key", sort=False):
         best = group.iloc[0].to_dict()
-
         if len(group) > 1:
-            # Суммируем числовые колонки
             if metric_is_numeric:
                 best[metric_col] = int(group[metric_col].sum())
-            for num_col in ("Всего членов", "Уникальных городов",
-                            "Таких учеников", "Прямых учеников",
-                            "Диссертаций с оценками"):
+            for num_col in (
+                "Всего членов", "Уникальных городов",
+                "Таких учеников", "Прямых учеников",
+                "Диссертаций с оценками",
+            ):
                 if num_col in group.columns and num_col != metric_col:
                     best[num_col] = int(group[num_col].sum())
-
         result_rows.append(best)
 
-    result = pd.DataFrame(result_rows).drop(columns=["_norm_key", "_name_len"], errors="ignore")
-
-    # Перенумерация
+    result = pd.DataFrame(result_rows).drop(
+        columns=["_dedup_key", "_name_len"], errors="ignore"
+    )
     result = result.reset_index(drop=True)
     result["#"] = range(1, len(result) + 1)
     return result
@@ -185,12 +233,8 @@ def _unique_cities(subset: pd.DataFrame) -> int:
     if CITY_COLUMN not in subset.columns or subset.empty:
         return 0
     return int(
-        subset[CITY_COLUMN]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .pipe(lambda s: s[s != ""])
-        .nunique()
+        subset[CITY_COLUMN].dropna().astype(str).str.strip()
+        .pipe(lambda s: s[s != ""]).nunique()
     )
 
 
@@ -201,8 +245,8 @@ def _unique_cities(subset: pd.DataFrame) -> int:
 
 def get_all_roots(df: pd.DataFrame) -> List[str]:
     """
-    Возвращает отсортированный список всех уникальных научных руководителей
-    (все варианты написания сохраняются, дедубликация происходит на финальном этапе).
+    Возвращает все варианты написания руководителей.
+    Дедубликация происходит на финальном этапе (в _dedup_result_df).
     """
     roots: Set[str] = set()
     for col in SUPERVISOR_COLUMNS:
@@ -216,7 +260,7 @@ def get_all_roots(df: pd.DataFrame) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Сбор подмножества диссертаций школы
+# Сбор подмножества
 # ---------------------------------------------------------------------------
 
 
@@ -236,7 +280,7 @@ def collect_subset(
 
 
 # ---------------------------------------------------------------------------
-# Формирование строки итоговой таблицы
+# Формирование строки
 # ---------------------------------------------------------------------------
 
 
@@ -288,7 +332,7 @@ def _fuzzy_count(subset: pd.DataFrame, col: str, query: str) -> Tuple[int, List[
 
 
 # ---------------------------------------------------------------------------
-# ГРУППА 1: По размеру школы
+# ГРУППА 1
 # ---------------------------------------------------------------------------
 
 
@@ -308,7 +352,6 @@ def search_by_total_members(
         if count == 0:
             continue
         rows.append(build_result_row(0, root, count, subset, "Число членов"))
-    rows.sort(key=lambda r: r["Число членов"], reverse=True)
     result = pd.DataFrame(rows)
     result = _dedup_result_df(result, "Число членов")
     result = result.sort_values("Число членов", ascending=False).head(top_n).reset_index(drop=True)
@@ -447,7 +490,6 @@ def search_by_supervisor_rate(
         row["Прямых учеников"] = direct_count
         rows.append(row)
     result = pd.DataFrame(rows)
-    # Для долей (строковые значения) дедубликация не суммирует, а берёт максимальное
     result = _dedup_result_df(result, "Доля учеников-руководителей, %")
     result = result.sort_values(
         "Доля учеников-руководителей, %",
@@ -461,7 +503,7 @@ def search_by_supervisor_rate(
 
 
 # ---------------------------------------------------------------------------
-# ГРУППА 2: По географии
+# ГРУППА 2
 # ---------------------------------------------------------------------------
 
 
@@ -519,7 +561,7 @@ def search_by_geo_diversity(
 
 
 # ---------------------------------------------------------------------------
-# ГРУППА 3: По организациям
+# ГРУППА 3
 # ---------------------------------------------------------------------------
 
 
@@ -566,8 +608,7 @@ def search_by_institution_prepared(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
-        org_query=org_query,
-        org_column=INSTITUTION_PREPARED_COLUMN,
+        org_query=org_query, org_column=INSTITUTION_PREPARED_COLUMN,
         metric_label="Диссертаций (орг. выполнения)",
         scope=scope, top_n=top_n,
     )
@@ -584,8 +625,7 @@ def search_by_defense_location(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
-        org_query=org_query,
-        org_column=DEFENSE_LOCATION_COLUMN,
+        org_query=org_query, org_column=DEFENSE_LOCATION_COLUMN,
         metric_label="Диссертаций (место защиты)",
         scope=scope, top_n=top_n,
     )
@@ -602,15 +642,14 @@ def search_by_leading_organization(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
-        org_query=org_query,
-        org_column=LEADING_ORG_COLUMN,
+        org_query=org_query, org_column=LEADING_ORG_COLUMN,
         metric_label="Диссертаций (вед. организация)",
         scope=scope, top_n=top_n,
     )
 
 
 # ---------------------------------------------------------------------------
-# ГРУППА 4: По тематике
+# ГРУППА 4
 # ---------------------------------------------------------------------------
 
 
@@ -676,7 +715,6 @@ def search_by_classifier_score(
         row["Диссертаций с оценками"] = len(matched_scores)
         rows.append(row)
     result = pd.DataFrame(rows)
-    # Для classifier_score дедубликация берёт максимальный балл (не сумму)
     result = _dedup_result_df(result, metric_label)
     result = result.sort_values(metric_label, ascending=False).head(top_n).reset_index(drop=True)
     result["#"] = range(1, len(result) + 1)
@@ -684,7 +722,7 @@ def search_by_classifier_score(
 
 
 # ---------------------------------------------------------------------------
-# ГРУППА 5: По персонам
+# ГРУППА 5
 # ---------------------------------------------------------------------------
 
 
