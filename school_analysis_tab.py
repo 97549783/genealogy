@@ -60,6 +60,25 @@ def _get_all_supervisors(df: pd.DataFrame) -> List[str]:
     return sorted(all_supervisors)
 
 
+def _scores_folder_available(scores_folder: str) -> bool:
+    """
+    Проверяет наличие папки basic_scores с CSV-файлами.
+
+    Проверяет оба варианта расположения:
+    1. Текущая рабочая директория (CWD) — работает локально и на Streamlit Cloud.
+    2. Рядом с файлом самого модуля — запасной вариант.
+    """
+    # Вариант 1: относительный путь от CWD
+    p1 = Path(scores_folder)
+    if p1.exists() and any(p1.glob("*.csv")):
+        return True
+    # Вариант 2: рядом с файлом вкладки
+    p2 = Path(__file__).parent / scores_folder
+    if p2.exists() and any(p2.glob("*.csv")):
+        return True
+    return False
+
+
 def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figure:
     """Столбчатая диаграмма для защит по годам с разбивкой по степени."""
     fig, ax = plt.subplots(figsize=(max(8, len(df) * 0.45), 4))
@@ -84,6 +103,14 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
     return fig
 
 
+def _clear_school_cache(root: str, scope: str) -> None:
+    """FIX #4: Очищает кэш школы из session_state."""
+    for s in ("direct", "all"):
+        key = f"school_subset_{root}_{s}"
+        if key in st.session_state:
+            del st.session_state[key]
+
+
 # ==============================================================================
 # ОСНОВНАЯ ФУНКЦИЯ
 # ==============================================================================
@@ -105,7 +132,7 @@ def render_school_analysis_tab(
         idx             — индекс имён
         lineage_func    — функция построения дерева преемственности
         rows_for_func   — функция поиска строк по имени
-        classifier      — THEMATIC_CLASSIFIER из streamlit_app.py (пара (code, name, leaf))
+        classifier      — THEMATIC_CLASSIFIER из streamlit_app.py
         scores_folder   — путь к basic_scores
     """
     st.subheader("Анализ научной школы")
@@ -113,7 +140,7 @@ def render_school_analysis_tab(
     # =========================================================================
     # 0. Входные параметры
     # =========================================================================
-    st.markdown("### 👤 Выбор научной школы")
+    st.markdown("### \U0001f464 Выбор научной школы")
 
     all_supervisors = _get_all_supervisors(df)
     if not all_supervisors:
@@ -142,16 +169,40 @@ def render_school_analysis_tab(
 
     st.markdown("---")
 
-    if not st.button("Построить анализ", key="school_analysis_run", type="primary"):
-        return
+    # FIX #4: кнопки запуска и сброса кэша рядом
+    col_run, col_reset = st.columns([3, 1])
+    with col_run:
+        run_clicked = st.button("Построить анализ", key="school_analysis_run", type="primary")
+    with col_reset:
+        if st.button("Сбросить кэш", key="school_analysis_reset",
+                     help="Очистить сохранённые результаты и пересчитать"):
+            _clear_school_cache(root, scope)
+            st.rerun()
+
+    if not run_clicked:
+        # Показываем результат из кэша, если он уже есть
+        if f"school_subset_{root}_direct" not in st.session_state:
+            return
 
     # =========================================================================
-    # Сбор данных
+    # FIX #1: Сбор данных с кэшированием в session_state
     # =========================================================================
+    key_direct = f"school_subset_{root}_direct"
+    key_all = f"school_subset_{root}_all"
+
     with st.spinner("Сбор диссертаций школы..."):
-        subset = collect_school_subset(df, idx, root, scope, lineage_func, rows_for_func)
-        subset_direct = collect_school_subset(df, idx, root, "direct", lineage_func, rows_for_func)
-        subset_all = collect_school_subset(df, idx, root, "all", lineage_func, rows_for_func)
+        if key_direct not in st.session_state:
+            st.session_state[key_direct] = collect_school_subset(
+                df, idx, root, "direct", lineage_func, rows_for_func
+            )
+        if key_all not in st.session_state:
+            st.session_state[key_all] = collect_school_subset(
+                df, idx, root, "all", lineage_func, rows_for_func
+            )
+
+    subset_direct: pd.DataFrame = st.session_state[key_direct]
+    subset_all: pd.DataFrame = st.session_state[key_all]
+    subset: pd.DataFrame = subset_direct if scope == "direct" else subset_all
 
     if subset.empty:
         st.warning("Диссертаций для выбранной школы не найдено.")
@@ -261,10 +312,10 @@ def render_school_analysis_tab(
     institutional = compute_institutional_stats(subset)
 
     _INST_LABELS = {
-        "institution_prepared": "🏢 Организация выполнения",
-        "defense_location":     "🏛️ Место защиты",
-        "leading_organization": "🎓 Ведущая организация",
-        "specialties":          "🔬 Специальности",
+        "institution_prepared": "\U0001f3e2 Организация выполнения",
+        "defense_location":     "\U0001f3db️ Место защиты",
+        "leading_organization": "\U0001f393 Ведущая организация",
+        "specialties":          "\U0001f52c Специальности",
     }
 
     for key, label in _INST_LABELS.items():
@@ -298,8 +349,8 @@ def render_school_analysis_tab(
         "Средние баллы по всем диссертациям школы, для которых доступны оценки в basic_scores."
     )
 
-    scores_path = Path(scores_folder)
-    scores_available = scores_path.exists() and any(scores_path.glob("*.csv"))
+    # FIX #2: робастная проверка папки (CWD и рядом с модулем)
+    scores_available = _scores_folder_available(scores_folder)
 
     if not scores_available:
         st.info(
@@ -314,22 +365,22 @@ def render_school_analysis_tab(
         knowledge_df = pd.DataFrame()
     else:
         with st.spinner("Вычисление тематического профиля..."):
+            # FIX #3: убран устаревший параметр group_prefix_level
             education_df, knowledge_df = compute_thematic_profile(
                 subset=subset,
                 scores_folder=scores_folder,
                 classifier=classifier,
-                group_prefix_level="",
                 group_prefix_education="1.1.1",
                 group_prefix_knowledge="1.1.2",
             )
 
-        with st.expander("🎓 Уровень образования (1.1.1)", expanded=False):
+        with st.expander("\U0001f393 Уровень образования (1.1.1)", expanded=False):
             if education_df.empty:
                 st.info("Нет данных для группы 1.1.1.")
             else:
                 st.dataframe(education_df, use_container_width=True, hide_index=True)
 
-        with st.expander("🔬 Область знания (1.1.2)", expanded=False):
+        with st.expander("\U0001f52c Область знания (1.1.2)", expanded=False):
             if knowledge_df.empty:
                 st.info("Нет данных для группы 1.1.2.")
             else:
@@ -361,7 +412,7 @@ def render_school_analysis_tab(
     # =========================================================================
     # 9. Скачивание Excel-отчёта
     # =========================================================================
-    st.markdown("### 📥 Скачать полный отчёт")
+    st.markdown("### \U0001f4e5 Скачать полный отчёт")
 
     with st.spinner("Формируем Excel-файл..."):
         excel_bytes = build_excel_report(
@@ -378,7 +429,7 @@ def render_school_analysis_tab(
 
     safe_name = root.replace(" ", "_").replace("/", "-")[:60]
     st.download_button(
-        label="📥 Скачать полный отчёт (Excel)",
+        label="\U0001f4e5 Скачать полный отчёт (Excel)",
         data=excel_bytes,
         file_name=f"school_analysis_{safe_name}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
