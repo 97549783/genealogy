@@ -49,8 +49,8 @@ TOP_N_OPTIONS: List[int] = [5, 10, 20, 50]
 SEARCH_MODES: Dict[str, str] = {
     # Группа 1
     "total_members":      "📊 1.1 Общее число членов школы",
-    "members_in_period":  "📊 1.2 Число членов за период (год от / год до)",
-    "members_in_year":    "📊 1.3 Число членов в конкретный год",
+    "members_in_period":  "📊 1.2 Число защит за период (год от / год до)",
+    "members_in_year":    "📊 1.3 Число защит за конкретный год",
     "depth":              "🌳 1.4 Глубина дерева (число поколений)",
     "supervisor_rate":    "🎓 1.5 Доля учеников, ставших научными руководителями",
     # Группа 2
@@ -136,7 +136,6 @@ def _render_results(
 ) -> None:
     """
     Унифицированный рендеринг результатов:
-      - полоса progress (spinner передаётся снаружи)
       - bar chart
       - таблица с результатами
       - expander с вариантами написания
@@ -245,7 +244,6 @@ def render_school_search_tab(
             key="school_search_mode",
         )
 
-    # Пояснение: scope игнорируется для некоторых режимов
     if search_mode in _SCOPE_INDEPENDENT_MODES:
         st.caption(
             "ℹ️ Для этого режима параметр «Поколения» не имеет значения: всегда используется полное дерево."
@@ -318,7 +316,6 @@ def render_school_search_tab(
             st.warning("Классификатор не передан. Режим недоступен.")
             return
 
-        # Фильтруем: только узлы, которые можно выбрать (not disabled)
         selectable = [
             (code, title)
             for code, title, disabled in classifier
@@ -353,6 +350,7 @@ def render_school_search_tab(
         st.markdown("### 👤 Лицо")
         st.caption(
             "Поиск нечёткий: поддерживаются частичные совпадения и инициалы. "
+            "Пробел между инициалами не важен: «Е. А.» и «Е.А.» считаются одинаковыми. "
             f"Порог rapidfuzz: {FUZZY_THRESHOLD}%."
         )
         person_query = st.text_input(
@@ -371,7 +369,6 @@ def render_school_search_tab(
     if not run_btn:
         return
 
-    # Валидация ввода — если режим требует текстовый запрос, проверяем
     _text_modes = {"city", "org_prepared", "org_defense", "org_leading", "opponent", "member"}
     if search_mode in _text_modes:
         query_val = (
@@ -388,7 +385,6 @@ def render_school_search_tab(
     # ==========================================================================
     st.markdown("### 🏆 Результаты")
 
-    # Строка для кнопки скачивания и Excel-мета
     mode_label = SEARCH_MODES[search_mode]
     scope_label = SCOPE_LABELS[scope]
     params_for_excel = {"Режим": mode_label, "Поколения": scope_label, "Топ-N": top_n}
@@ -423,9 +419,9 @@ def render_school_search_tab(
                 scope=scope, top_n=top_n,
             )
         _render_results(
-            result_df, metric_col="Членов за период",
+            result_df, metric_col="Защит за период",
             chart_title=(
-                f"Топ-{top_n}: членов за {extra_params['year_from']}–{extra_params['year_to']}"
+                f"Топ-{top_n}: защит за {extra_params['year_from']}–{extra_params['year_to']}"
             ),
             matched_map=None, key_prefix="ss_period",
             search_mode=mode_label, search_params=params_for_excel,
@@ -440,8 +436,8 @@ def render_school_search_tab(
                 year=year_val, scope=scope, top_n=top_n,
             )
         _render_results(
-            result_df, metric_col=f"Членов в {year_val} г.",
-            chart_title=f"Топ-{top_n}: членов в {year_val} г.",
+            result_df, metric_col=f"Защит в {year_val} г.",
+            chart_title=f"Топ-{top_n}: защит в {year_val} г.",
             matched_map=None, key_prefix="ss_year",
             search_mode=mode_label, search_params=params_for_excel,
         )

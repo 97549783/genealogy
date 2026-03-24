@@ -5,8 +5,8 @@
 
 Группа 1 — По размеру школы:
     - search_by_total_members      — общее число членов
-    - search_by_members_in_period  — число членов за период (год от / год до)
-    - search_by_members_in_year    — число членов в конкретный год
+    - search_by_members_in_period  — число защит за период (год от / год до)
+    - search_by_members_in_year    — число защит за конкретный год
     - search_by_depth              — глубина дерева (число поколений)
     - search_by_supervisor_rate    — доля учеников, ставших научными руководителями
 
@@ -38,7 +38,8 @@
 from __future__ import annotations
 
 import io
-from collections import Counter, deque
+import re
+from collections import deque
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
@@ -70,6 +71,33 @@ FUZZY_THRESHOLD = 75
 
 # Строка результирующей таблицы поиска
 SearchRow = Dict
+
+# ---------------------------------------------------------------------------
+# Нормализация строк: пробелы между инициалами не значимы
+# ---------------------------------------------------------------------------
+
+# Регулярное выражение: одна заглавная (или строчная после нормализации регистра)
+# буква с точкой, за которой следует пробел и снова «буква с точкой».
+# Пример: «Е. А.» → «Е.А.», «E. A.» → «E.A."
+_INIT_SPACE_RE = re.compile(r'([А-ЯЁA-Z][а-яёa-z]?)\. ([А-ЯЁA-Z])')
+
+
+def _norm_initials(s: str) -> str:
+    """
+    Убирает пробел между инициалами вида «Е. А.» → «Е.А.».
+    Применяется многократно, чтобы покрыть три инициала подряд.
+    Также схлопывает все лишние пробелы и переводит в нижний регистр.
+    """
+    # Нижний регистр + collapse множественных пробелов
+    s = re.sub(r'\s+', ' ', s).strip().lower()
+    # Убираем пробел между однобуквенными инициалами с точкой
+    # Работаем в цикле, чтобы «А. Б. В.» → «А.Б.В.» (2 прохода)
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r'([а-яёa-z])\. ([а-яёa-z]\.)', r'\1.\2', s)
+    return s
+
 
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
@@ -199,23 +227,27 @@ def _fuzzy_match(series: pd.Series, query: str) -> pd.Series:
     Возвращает булеву маску: True для строк, содержащих query
     (сначала простой contains, затем rapidfuzz при его наличии).
 
+    Пробелы между инициалами нормализуются перед сравнением,
+    поэтому «Быстрова Е. А.» и «Быстрова Е.А.» считаются одинаковыми.
+
     Регистр игнорируется. Применяется к одному столбцу.
     """
-    query_lower = query.strip().lower()
+    query_norm = _norm_initials(query.strip())
+
+    # Нормализуем серию
+    norm_series = series.astype(str).map(_norm_initials)
 
     # Быстрый проход через str.contains
-    mask_contains = series.astype(str).str.lower().str.contains(
-        query_lower, na=False, regex=False
-    )
+    mask_contains = norm_series.str.contains(query_norm, na=False, regex=False)
 
     # Нечёткий проход через rapidfuzz (если доступен)
     try:
         from rapidfuzz import fuzz  # type: ignore
 
         def _ratio(val: str) -> bool:
-            return fuzz.partial_ratio(query_lower, str(val).lower()) >= FUZZY_THRESHOLD
+            return fuzz.partial_ratio(query_norm, val) >= FUZZY_THRESHOLD
 
-        mask_fuzzy = series.map(_ratio)
+        mask_fuzzy = norm_series.map(_ratio)
         return mask_contains | mask_fuzzy
     except ImportError:
         return mask_contains
@@ -224,19 +256,19 @@ def _fuzzy_match(series: pd.Series, query: str) -> pd.Series:
 def _fuzzy_count(subset: pd.DataFrame, col: str, query: str) -> Tuple[int, List[str]]:
     """
     Считает число строк в subset, где значение колонки col совпадает с query
-    (нечёткий поиск).
+    (нечёткий поиск с нормализацией инициалов).
 
     Возвращает:
         count   — число совпавших строк
-        matched — список уникальных найденных вариантов написания
+        matched — список уникальных найденных вариантов написания (оригинальных)
     """
     if col not in subset.columns or subset.empty:
         return 0, []
     col_series = subset[col].dropna().astype(str).str.strip()
     col_series = col_series[col_series != ""]
     mask = _fuzzy_match(col_series, query)
-    matched_vals = col_series[mask].unique().tolist()
-    # Считаем по исходному subset (не только non-null)
+    matched_vals = col_series[mask].unique().tolist()  # оригинальные варианты
+    # Считаем по исходному subset (включая строки где col был NaN → пустая строка)
     full_mask = _fuzzy_match(
         subset[col].fillna("").astype(str), query
     )
@@ -290,10 +322,10 @@ def search_by_members_in_period(
     top_n: int = 10,
 ) -> pd.DataFrame:
     """
-    Топ-N школ по числу членов, защитившихся в диапазоне [year_from, year_to].
+    Топ-N школ по числу защит в диапазоне [year_from, year_to].
 
     Возвращает DataFrame с колонками:
-        # | Руководитель | Членов за период | Всего членов | Годы активности | Уникальных городов
+        # | Руководитель | Защит за период | Всего членов | Годы активности | Уникальных городов
     """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
@@ -306,7 +338,6 @@ def search_by_members_in_period(
         if years.empty:
             count_in_period = 0
         else:
-            # Фильтруем индексы по году
             year_idx = subset[YEAR_COLUMN].dropna().map(_safe_year).dropna()
             count_in_period = int(
                 year_idx.between(year_from, year_to).sum()
@@ -314,10 +345,10 @@ def search_by_members_in_period(
         if count_in_period == 0:
             continue
         rows.append(
-            build_result_row(0, root, count_in_period, subset, "Членов за период")
+            build_result_row(0, root, count_in_period, subset, "Защит за период")
         )
 
-    rows.sort(key=lambda r: r["Членов за период"], reverse=True)
+    rows.sort(key=lambda r: r["Защит за период"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -334,10 +365,10 @@ def search_by_members_in_year(
     top_n: int = 10,
 ) -> pd.DataFrame:
     """
-    Топ-N школ по числу членов, защитившихся в конкретный год.
+    Топ-N школ по числу защит в конкретный год.
 
     Возвращает DataFrame с колонками:
-        # | Руководитель | Членов в году | Всего членов | Годы активности | Уникальных городов
+        # | Руководитель | Защит в [год] г. | Всего членов | Годы активности | Уникальных городов
     """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
@@ -353,10 +384,10 @@ def search_by_members_in_year(
         if count == 0:
             continue
         rows.append(
-            build_result_row(0, root, count, subset, f"Членов в {year} г.")
+            build_result_row(0, root, count, subset, f"Защит в {year} г.")
         )
 
-    rows.sort(key=lambda r: r[f"Членов в {year} г."], reverse=True)
+    rows.sort(key=lambda r: r[f"Защит в {year} г."], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -461,7 +492,6 @@ def search_by_supervisor_rate(
 
         rate = round(100.0 * supervisor_count / direct_count, 1)
 
-        # Для "Всего членов" берём scope-зависимую выборку
         subset_full = collect_subset(
             df, index, root, scope, lineage_func, rows_for_func
         )
@@ -558,7 +588,6 @@ def search_by_geo_diversity(
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
-    # Убираем дублирующую колонку (метрика совпадает с базовой)
     result = pd.DataFrame(rows[:top_n])
     return result
 
@@ -621,12 +650,6 @@ def search_by_institution_prepared(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной организацией выполнения.
-
-    Возвращает:
-        result_df   — DataFrame с колонками:
-                      # | Руководитель | Диссертаций (орг. выполнения) |
-                        Найденные варианты | Всего членов | Годы активности | Уникальных городов
-        matched_map — словарь {root: [варианты написания]}
     """
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
@@ -649,12 +672,6 @@ def search_by_defense_location(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанным местом (организацией) защиты.
-
-    Возвращает:
-        result_df   — DataFrame с колонками:
-                      # | Руководитель | Диссертаций (место защиты) |
-                        Найденные варианты | Всего членов | Годы активности | Уникальных городов
-        matched_map — словарь {root: [варианты написания]}
     """
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
@@ -677,12 +694,6 @@ def search_by_leading_organization(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной ведущей организацией.
-
-    Возвращает:
-        result_df   — DataFrame с колонками:
-                      # | Руководитель | Диссертаций (вед. организация) |
-                        Найденные варианты | Всего членов | Годы активности | Уникальных городов
-        matched_map — словарь {root: [варианты написания]}
     """
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
@@ -716,19 +727,7 @@ def search_by_classifier_score(
 ) -> pd.DataFrame:
     """
     Топ-N школ по среднему баллу по узлу классификатора.
-
-    Средний балл — среднее по всем диссертациям школы, у которых есть
-    оценки в basic_scores, по всем признакам-потомкам classifier_node.
-
-    Параметры:
-        classifier_node — код узла классификатора (например, "1.1.2.1.3" = Физика)
-        scores_folder   — путь к папке basic_scores
-
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Средний балл ([узел]) | Диссертаций с оценками |
-          Всего членов | Годы активности | Уникальных городов
     """
-    # Загружаем scores
     base = Path(scores_folder).expanduser().resolve()
     files = sorted(base.glob("*.csv"))
     if not files:
@@ -755,7 +754,6 @@ def search_by_classifier_score(
     feature_cols = [c for c in scores.columns if c != SCORES_CODE_COLUMN]
     scores[feature_cols] = scores[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
-    # Признаки, принадлежащие выбранному узлу
     node_features = [
         col for col in feature_cols
         if _is_child_of(col, classifier_node) or col == classifier_node
@@ -763,7 +761,6 @@ def search_by_classifier_score(
     if not node_features:
         return pd.DataFrame()
 
-    # Индекс scores по Code
     scores_indexed = scores.set_index(SCORES_CODE_COLUMN)
 
     metric_label = f"Средний балл ({classifier_node})"
@@ -820,13 +817,7 @@ def search_by_opponent(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в диссертациях которых указанное лицо выступает оппонентом
-    (нечёткий поиск по OPPONENT_COLUMNS).
-
-    Возвращает:
-        result_df   — DataFrame с колонками:
-                      # | Руководитель | Диссертаций с оппонентом |
-                        Найденные варианты | Всего членов | Годы активности | Уникальных городов
-        matched_map — словарь {root: [варианты написания имени]}
+    (нечёткий поиск с нормализацией инициалов по OPPONENT_COLUMNS).
     """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
@@ -845,9 +836,7 @@ def search_by_opponent(
             total_count += count
             all_matched.update(matched_vals)
 
-        # Убираем двойной счёт: считаем уникальные строки, где хоть в одном столбце совпало
         if total_count > 0:
-            # Пересчитываем как число строк (не сумму по столбцам)
             combined_mask = pd.Series(False, index=subset.index)
             for col in OPPONENT_COLUMNS:
                 if col in subset.columns:
@@ -880,13 +869,7 @@ def search_by_member(
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в которых указанное лицо является учеником (автором диссертации)
-    (нечёткий поиск по AUTHOR_COLUMN).
-
-    Возвращает:
-        result_df   — DataFrame с колонками:
-                      # | Руководитель | Диссертаций автора |
-                        Найденные варианты | Всего членов | Годы активности | Уникальных городов
-        matched_map — словарь {root: [варианты написания имени]}
+    (нечёткий поиск с нормализацией инициалов по AUTHOR_COLUMN).
     """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
@@ -935,15 +918,11 @@ def build_excel_search_results(
     """
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        # Лист с результатами
         if not result_df.empty:
             result_df.to_excel(writer, index=False, sheet_name="Результаты")
-
-        # Мета-лист с параметрами запроса
         meta_rows = [("Режим поиска", search_mode)]
         for k, v in search_params.items():
             meta_rows.append((str(k), str(v)))
         meta_df = pd.DataFrame(meta_rows, columns=["Параметр", "Значение"])
         meta_df.to_excel(writer, index=False, sheet_name="Параметры запроса")
-
     return buf.getvalue()
