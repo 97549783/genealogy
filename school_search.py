@@ -70,8 +70,8 @@ SearchRow = Dict
 
 def _norm_initials(s: str) -> str:
     """
-    Канонизирует строку для нечёткого поиска (не для дедубликации):
-      - нижний регистр, ё→е, схлопывание пробелов
+    Канонизирует строку для нечёткого поиска:
+      - нижний регистр, ё→е, схопывание пробелов
       - убирает пробел между однобуквенными инициалами: «Е. А.» → «е.а.»
     """
     s = s.lower().replace('ё', 'е')
@@ -85,46 +85,41 @@ def _norm_initials(s: str) -> str:
 
 def _person_key(name: str) -> Optional[Tuple[str, str, str]]:
     """
-    Извлекает ключ (фамилия, инициал_имени, инициал_отчества) для дедубликации.
+    Извлекает ключ (фамилия, инициал_имени, инициал_отчества).
 
     Поддерживает два формата:
-      - «Фамилия И.О.»   / «Фамилия И. О.»  — инициальный формат
-      - «Фамилия Имя Отчество»             — полный формат
+      - «Фамилия И.О.»  /  «Фамилия И. О.»  — инициальный
+      - «Фамилия Имя Отчество»        — полный
 
-    Возвращает None, если нельзя распознать структуру.
-    Все части приводятся к нижнему регистру, ё→е.
+    Возвращает None если нельзя распознать структуру.
 
     Примеры:
-      _person_key("Рожков М. И.")           → ("рожков", "м", "и")
-      _person_key("Рожков М.И.")            → ("рожков", "м", "и")
-      _person_key("Рожков Михаил Иосифович") → ("рожков", "м", "и")
-      _person_key("Третьяков Пётр Иванович")  → ("третьяков", "п", "и")
-      _person_key("Третьяков П. И.")          → ("третьяков", "п", "и")
+      "Рожков М. И."           → ("\u0440\u043e\u0436\u043a\u043e\u0432", "\u043c", "\u0438")
+      "Рожков М.И."            → ("\u0440\u043e\u0436\u043a\u043e\u0432", "\u043c", "\u0438")
+      "Рожков Михаил Иосифович" → ("\u0440\u043e\u0436\u043a\u043e\u0432", "\u043c", "\u0438")
+      "Третьяков Пётр Иванович"  → ("\u0442\u0440\u0435\u0442\u044c\u044f\u043a\u043e\u0432", "\u043f", "\u0438")
     """
     s = name.strip().lower().replace('ё', 'е')
-    # Убираем лишние пробелы
     s = re.sub(r'\s+', ' ', s).strip()
     parts = s.split()
     if len(parts) < 2:
         return None
 
     surname = parts[0]
-    rest = parts[1:]  # всё после фамилии
-
-    # Соединяем остаток и убираем все пробелы/точки чтобы получить чистые буквы
+    rest = parts[1:]
     rest_joined = ''.join(rest).replace('.', '')
 
-    if len(rest_joined) == 0:
+    if not rest_joined:
         return None
 
     if len(rest_joined) <= 2:
-        # Инициальный формат: "MИ" или "М" (только имя)
+        # Инициальный формат
         first_i = rest_joined[0]
         patr_i = rest_joined[1] if len(rest_joined) > 1 else ""
     else:
-        # Полный формат: берём первую букву каждого слова
-        words = [w for w in rest if re.sub(r'[^\u0430-яеa-z]', '', w)]
-        if len(words) == 0:
+        # Полный формат
+        words = [w for w in rest if re.sub(r'[^\u0430-\u044f\u0435a-z]', '', w)]
+        if not words:
             return None
         first_i = words[0][0] if words[0] else ""
         patr_i = words[1][0] if len(words) > 1 and words[1] else ""
@@ -142,61 +137,43 @@ def _person_key(name: str) -> Optional[Tuple[str, str, str]]:
 
 def _dedup_result_df(df: pd.DataFrame, metric_col: str) -> pd.DataFrame:
     """
-    Схлопывает строки результирующей таблицы, которые относятся к одному
-    руководителю (разные варианты написания).
+    Удаляет дубликаты из результирующей таблицы.
 
-    Ключ дедубликации = _person_key("Руководитель") = (фамилия, инициал_имени, инициал_отчества).
-    Например, "Рожков М. И.", "Рожков М.И.", "Рожков Михаил Иосифович" — все дают ("рожков", "м", "и").
-    Если ключ вычислить невозможно, фоллбэк — _norm_initials.
+    Две строки считаются дубликатом если выполняются ОБА условия:
+      1. _person_key("Руководитель") совпадает  (фамилия + инициалы)
+      2. Значение метрики (metric_col) совпадает
 
-    Для каждой группы:
-      - "Руководитель" → самое длинное имя (полное ФИО > инициалы)
-      - числовая метрика → сумма по группе
-      - "Всего членов" и др. числовые колонки → также сумма
-      - строковые колонки → из строки с самым длинным именем
+    Из группы дубликатов остаётся только строка с самым длинным названием
+    руководителя (полное ФИО > инициалы). Цифры не суммируются,
+    все остальные поля берутся из лучшей строки как есть.
+
+    Строки с разными значениями метрики (разные школы) не трогаются.
+    Нумерация # переписывается.
     """
-    if df.empty or "Руководитель" not in df.columns:
+    if df.empty or "Руководитель" not in df.columns or metric_col not in df.columns:
         return df
 
     df = df.copy()
-
-    # Вычисляем ключ дедубликации
-    def _key(name: str) -> str:
-        pk = _person_key(name)
-        if pk is not None:
-            return str(pk)  # e.g. "('\u0440\u043e\u0436\u043a\u043e\u0432', '\u043c', '\u0438')"
-        return _norm_initials(name)  # фоллбэк
-
-    df["_dedup_key"] = df["Руководитель"].astype(str).map(_key)
     df["_name_len"] = df["Руководитель"].str.len()
+
+    # Ключ дедубликации: (ключ_персоны, значение_метрики)
+    def _row_key(row) -> tuple:
+        pk = _person_key(str(row["Руководитель"]))
+        person_part = str(pk) if pk is not None else _norm_initials(str(row["Руководитель"]))
+        metric_part = str(row[metric_col])  # значение метрики должно совпадать
+        return (person_part, metric_part)
+
+    df["_dedup_key"] = df.apply(_row_key, axis=1)
 
     # Сортируем: внутри каждой группы — самое длинное имя первым
     df = df.sort_values(["_dedup_key", "_name_len"], ascending=[True, False])
 
-    metric_is_numeric = (
-        pd.api.types.is_numeric_dtype(df[metric_col])
-        if metric_col in df.columns else False
+    # Оставляем первую строку каждой группы (самое длинное имя + то же значение метрики)
+    result = (
+        df.drop_duplicates(subset=["_dedup_key"], keep="first")
+        .drop(columns=["_dedup_key", "_name_len"], errors="ignore")
+        .reset_index(drop=True)
     )
-
-    result_rows = []
-    for _key_val, group in df.groupby("_dedup_key", sort=False):
-        best = group.iloc[0].to_dict()
-        if len(group) > 1:
-            if metric_is_numeric:
-                best[metric_col] = int(group[metric_col].sum())
-            for num_col in (
-                "Всего членов", "Уникальных городов",
-                "Таких учеников", "Прямых учеников",
-                "Диссертаций с оценками",
-            ):
-                if num_col in group.columns and num_col != metric_col:
-                    best[num_col] = int(group[num_col].sum())
-        result_rows.append(best)
-
-    result = pd.DataFrame(result_rows).drop(
-        columns=["_dedup_key", "_name_len"], errors="ignore"
-    )
-    result = result.reset_index(drop=True)
     result["#"] = range(1, len(result) + 1)
     return result
 
