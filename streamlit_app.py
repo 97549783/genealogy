@@ -37,6 +37,7 @@ from sklearn.metrics import silhouette_samples, silhouette_score
 
 from profiles_tab import render_profiles_tab
 from opponents_intersection_tab import render_opponents_intersection_tab
+from school_search_tab import render_school_search_tab
 from school_analysis_tab import render_school_analysis_tab
 from school_comparison_tab import render_school_comparison_tab
 #from school_comparison_new_tab import render_school_comparison_new_tab
@@ -1279,11 +1280,12 @@ shared_roots = st.query_params.get_all("root")
 valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
 manual_prefill = "\n".join(r for r in shared_roots if r not in all_supervisor_names)
 
-tab_lineages, tab_dissertations, tab_profiles, tab_intersection, tab_school_analysis, tab_schoolcomparison, tab_articles_comparison = st.tabs(
+tab_lineages, tab_dissertations, tab_profiles, tab_school_search, tab_intersection, tab_school_analysis, tab_schoolcomparison, tab_articles_comparison = st.tabs(
     [
         "Построение деревьев",
         "Поиск информации о диссертациях",
         "Поиск по тематическим профилям",
+        "Поиск научных школ",
         "Пересечение научных школ",
         "Анализ научной школы", 
         "Сравнение научных школ",
@@ -1667,6 +1669,16 @@ with tab_profiles:
         thematic_classifier=THEMATIC_CLASSIFIER,
         scores_folder=BASIC_SCORES_DIR,
         specific_files=None
+    )
+
+with tab_school_search:
+    render_school_search_tab(
+        df=df,
+        idx=index,
+        lineage_func=lineage,
+        rows_for_func=rows_for,
+        classifier=THEMATIC_CLASSIFIER,
+        scores_folder=BASIC_SCORES_DIR,
     )
 
 with tab_intersection:
