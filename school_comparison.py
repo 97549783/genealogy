@@ -121,6 +121,15 @@ def get_selectable_nodes(columns: List[str], max_level: int = 3) -> List[str]:
     return sorted(result)
 
 
+def sort_codes_hierarchically(codes: List[str]) -> List[str]:
+    """Сортирует коды иерархически: родитель всегда перед своими потомками.
+
+    Внутри одного уровня коды сортируются лексикографически.
+    Пример: ["1", "1.1", "1.1.1", "1.2", "2", "2.1"]
+    """
+    return sorted(codes, key=lambda c: [part.zfill(6) for part in c.split(".")])
+
+
 # ==============================================================================
 # КОСОУГОЛЬНЫЙ БАЗИС
 # ==============================================================================
@@ -194,7 +203,6 @@ def load_scores_from_folder(
     if not base.is_absolute():
         resolved = base.resolve()
         if not resolved.exists():
-            # fallback: рядом с модулем
             resolved = Path(__file__).parent / folder_path
         base = resolved
     else:
@@ -241,8 +249,7 @@ def get_feature_columns(scores: pd.DataFrame) -> List[str]:
     """Возвращает список колонок-узлов классификатора.
 
     Узлы классификатора начинаются с цифры (1., 2., 3. и т.д.).
-    Прочие колонки (year, institution_prepared, supervisor, title и пр.)
-    исключаются явно, даже если попадут в CSV.
+    Прочие колонки исключаются явно, даже если попадут в CSV.
     """
     return [
         c for c in scores.columns
@@ -479,61 +486,80 @@ def create_node_scores_table(
     school_order: List[str],
     classifier_labels: Optional[Dict[str, str]] = None,
     selected_nodes: Optional[List[str]] = None,
-    level: int = 2,
 ) -> pd.DataFrame:
-    """Строит таблицу средних баллов по узлам классификатора.
+    """Строит таблицу средних баллов по всем узлам классификатора.
 
-    Строки — узлы классификатора указанного уровня (по умолчанию уровень 2).
+    Строки — все узлы классификатора всех уровней, отсортированные
+    иерархически (родитель перед потомками). Строки, где среднее
+    равно 0 для всех школ одновременно, исключаются.
+
     Столбцы — сравниваемые научные школы.
-    Значения — среднее значение признака по всем диссертациям школы,
-    агрегированное по всем потомкам узла (среднее потомков → среднее по школе).
+    Значения — среднее по потомкам узла, усреднённое по диссертациям школы.
 
     Args:
         datasets: словарь {название школы: DataFrame с профилями}
         feature_columns: список всех колонок-признаков классификатора
         school_order: порядок школ в таблице
         classifier_labels: словарь {код: название узла}
-        selected_nodes: если задан — ограничивает узлы этим списком
-        level: уровень иерархии для строк таблицы (1, 2 или 3)
+        selected_nodes: если задан — показываем только потомков этих узлов
     """
     if classifier_labels is None:
         classifier_labels = {}
 
-    # Определяем узлы нужного уровня
-    nodes_at_level = get_nodes_at_level(feature_columns, level)
+    # Все уникальные узлы из feature_columns плюс их предки,
+    # которые сами присутствуют в feature_columns
+    all_nodes = set(feature_columns)
 
-    # Если заданы selected_nodes — оставляем только пересечение
+    # Если задан фильтр — берём только узлы, являющиеся потомками selected_nodes
     if selected_nodes:
-        nodes_at_level = [
-            n for n in nodes_at_level
+        all_nodes = {
+            n for n in all_nodes
             if any(is_descendant_of(n, sn) or n == sn for sn in selected_nodes)
-        ]
+        }
 
-    if not nodes_at_level:
+    if not all_nodes:
         return pd.DataFrame()
 
+    # Иерархическая сортировка
+    sorted_nodes = sort_codes_hierarchically(list(all_nodes))
+
     rows = []
-    for node in nodes_at_level:
-        # Все потомки данного узла среди feature_columns
+    for node in sorted_nodes:
+        # Потомки узла среди feature_columns (включая сам узел, если он лист)
         descendant_cols = [c for c in feature_columns if is_descendant_of(c, node)]
         if not descendant_cols:
             continue
 
+        depth = get_code_depth(node)
         label = classifier_labels.get(node, "")
-        row: Dict = {"Код": node, "Раздел": label}
+        # Отступ для визуального представления иерархии
+        indent = "\u00a0" * 4 * (depth - 1)  # неразрывный пробел
+        row: Dict = {
+            "Код": node,
+            "Уровень": depth,
+            "Раздел": indent + label if label else indent + node,
+        }
 
+        school_values = []
         for school in school_order:
             dataset = datasets.get(school)
             if dataset is None or dataset.empty:
                 row[school] = None
+                school_values.append(0.0)
                 continue
             available = [c for c in descendant_cols if c in dataset.columns]
             if not available:
                 row[school] = None
+                school_values.append(0.0)
                 continue
-            # Среднее по потомкам для каждой диссертации, затем среднее по школе
             per_diss = dataset[available].fillna(0.0).mean(axis=1)
-            row[school] = round(per_diss.mean(), 2)
+            val = round(per_diss.mean(), 4)
+            row[school] = val
+            school_values.append(val if val is not None else 0.0)
+
+        # Пропускаем строку, если все школы дают 0
+        if all(v == 0.0 for v in school_values):
+            continue
 
         rows.append(row)
 
