@@ -69,7 +69,6 @@ FUZZY_THRESHOLD = 75
 # Вспомогательные типы
 # ---------------------------------------------------------------------------
 
-# Строка результирующей таблицы поиска
 SearchRow = Dict
 
 # ---------------------------------------------------------------------------
@@ -79,9 +78,9 @@ SearchRow = Dict
 
 def _norm_initials(s: str) -> str:
     """
-    Канонизирует строку с именем:
+    Канонизирует строку с именем для сравнения:
       - приводит к нижнему регистру;
-      - заменяет ё → е (чтобы «Пётр» == «Петр»);
+      - заменяет ё → е («Пётр» == «Петр»);
       - схлопывает лишние пробелы;
       - убирает пробел между однобуквенными инициалами с точкой:
         «Е. А.» → «е.а.», «А. Б. В.» → «а.б.в.»
@@ -89,7 +88,6 @@ def _norm_initials(s: str) -> str:
     s = s.lower()
     s = s.replace('ё', 'е')
     s = re.sub(r'\s+', ' ', s).strip()
-    # Итеративно убираем пробел между «х. у.» (однобуквенный инициал с точкой)
     prev = None
     while prev != s:
         prev = s
@@ -98,12 +96,69 @@ def _norm_initials(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Дедубликация результатов на финальном этапе
+# ---------------------------------------------------------------------------
+
+
+def _dedup_result_df(df: pd.DataFrame, metric_col: str) -> pd.DataFrame:
+    """
+    Схлопывает строки результирующей таблицы, которые относятся к одному
+    руководителю (разные варианты написания одного имени).
+
+    Определяет дубликаты через _norm_initials("Руководитель").
+    Для каждой группы:
+      - выбирает самое длинное имя в колонке "Руководитель";
+      - суммирует числовое значение metric_col (если оно числовое);
+      - выбирает максимальные значения для остальных колонок ("Всего членов" и др.);
+      - строковые колонки ("Годы активности", "Найденные варианты" и др.) берётся из первой строки группы.
+
+    Порядок строк сохраняется, нумерация # переписывается.
+    """
+    if df.empty or "Руководитель" not in df.columns:
+        return df
+
+    df = df.copy()
+    df["_norm_key"] = df["Руководитель"].astype(str).map(_norm_initials)
+
+    # Для каждого нормализованного ключа выбираем строку с самым длинным именем
+    df["_name_len"] = df["Руководитель"].str.len()
+    # Сортируем: сначала по ключу, затем по длине имени руководителя по убыванию
+    df = df.sort_values(["_norm_key", "_name_len"], ascending=[True, False])
+
+    # Числовая метрика: попытаемся суммировать
+    metric_is_numeric = pd.api.types.is_numeric_dtype(df[metric_col]) if metric_col in df.columns else False
+
+    result_rows = []
+    for norm_key, group in df.groupby("_norm_key", sort=False):
+        # Лучшая строка — первая после сортировки (самое длинное имя)
+        best = group.iloc[0].to_dict()
+
+        if len(group) > 1:
+            # Суммируем числовые колонки
+            if metric_is_numeric:
+                best[metric_col] = int(group[metric_col].sum())
+            for num_col in ("Всего членов", "Уникальных городов",
+                            "Таких учеников", "Прямых учеников",
+                            "Диссертаций с оценками"):
+                if num_col in group.columns and num_col != metric_col:
+                    best[num_col] = int(group[num_col].sum())
+
+        result_rows.append(best)
+
+    result = pd.DataFrame(result_rows).drop(columns=["_norm_key", "_name_len"], errors="ignore")
+
+    # Перенумерация
+    result = result.reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
 
 
 def _safe_year(val) -> Optional[int]:
-    """Конвертирует значение в целый год или None."""
     try:
         y = int(float(str(val).strip()))
         if 1900 < y < 2100:
@@ -114,7 +169,6 @@ def _safe_year(val) -> Optional[int]:
 
 
 def _years_series(subset: pd.DataFrame) -> pd.Series:
-    """Возвращает Series целых годов из subset, без NaN."""
     if YEAR_COLUMN not in subset.columns or subset.empty:
         return pd.Series(dtype=int)
     return subset[YEAR_COLUMN].dropna().map(_safe_year).dropna().astype(int)
@@ -141,48 +195,24 @@ def _unique_cities(subset: pd.DataFrame) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Получение списка всех корней (научных руководителей)
+# Получение списка всех корней
 # ---------------------------------------------------------------------------
 
 
 def get_all_roots(df: pd.DataFrame) -> List[str]:
     """
-    Возвращает дедублированный отсортированный список научных руководителей.
-
-    Разные варианты написания одного человека объединяются по нормализованному
-    ключу (_norm_initials). Из группы вариантов выбирается «лучший»:
-    сначала самое длинное имя (полное ФИО предпочтительнее инициалов),
-    при равной длине — лексикографически первое.
-
-    Примеры объединяемых вариантов:
-        «Рожков М. И.», «Рожков М.И.», «Рожков Михаил Иосифович»  → один корень
-        «Третьяков П.И.», «Третьяков Пётр Иванович»               → один корень
+    Возвращает отсортированный список всех уникальных научных руководителей
+    (все варианты написания сохраняются, дедубликация происходит на финальном этапе).
     """
-    # Собираем все сырые значения из колонок руководителей
-    raw_names: Set[str] = set()
+    roots: Set[str] = set()
     for col in SUPERVISOR_COLUMNS:
         if col in df.columns:
-            raw_names.update(
+            roots.update(
                 str(v).strip()
                 for v in df[col].dropna().unique()
                 if str(v).strip()
             )
-
-    # Группируем по нормализованному ключу, выбираем «лучший» вариант
-    groups: Dict[str, str] = {}  # norm_key → best raw name
-    for name in raw_names:
-        key = _norm_initials(name)
-        if key not in groups:
-            groups[key] = name
-        else:
-            current_best = groups[key]
-            # Предпочитаем более длинное имя (полное ФИО > инициалы)
-            if len(name) > len(current_best) or (
-                len(name) == len(current_best) and name < current_best
-            ):
-                groups[key] = name
-
-    return sorted(groups.values())
+    return sorted(roots)
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +228,6 @@ def collect_subset(
     lineage_func: Callable,
     rows_for_func: Callable,
 ) -> pd.DataFrame:
-    """
-    Возвращает DataFrame диссертаций научной школы.
-
-    scope='direct' — только прямые ученики руководителя;
-    scope='all'    — все поколения (полное дерево).
-    """
     if scope == "direct":
         return rows_for_func(df, index, root)
     else:
@@ -223,12 +247,6 @@ def build_result_row(
     subset: pd.DataFrame,
     metric_label: str,
 ) -> SearchRow:
-    """
-    Формирует словарь-строку для итоговой таблицы результатов поиска.
-
-    Общие столбцы:
-        # | Руководитель | [metric_label] | Всего членов | Годы активности | Уникальных городов
-    """
     return {
         "#": rank,
         "Руководитель": root,
@@ -240,34 +258,18 @@ def build_result_row(
 
 
 # ---------------------------------------------------------------------------
-# Нечёткий поиск по строке
+# Нечёткий поиск
 # ---------------------------------------------------------------------------
 
 
 def _fuzzy_match(series: pd.Series, query: str) -> pd.Series:
-    """
-    Возвращает булеву маску: True для строк, содержащих query
-    (сначала простой contains, затем rapidfuzz при его наличии).
-
-    Пробелы между инициалами нормализуются перед сравнением,
-    ё и е считаются одинаковыми.
-    Регистр игнорируется. Применяется к одному столбцу.
-    """
     query_norm = _norm_initials(query.strip())
-
-    # Нормализуем серию
     norm_series = series.astype(str).map(_norm_initials)
-
-    # Быстрый проход через str.contains
     mask_contains = norm_series.str.contains(query_norm, na=False, regex=False)
-
-    # Нечёткий проход через rapidfuzz (если доступен)
     try:
         from rapidfuzz import fuzz  # type: ignore
-
         def _ratio(val: str) -> bool:
             return fuzz.partial_ratio(query_norm, val) >= FUZZY_THRESHOLD
-
         mask_fuzzy = norm_series.map(_ratio)
         return mask_contains | mask_fuzzy
     except ImportError:
@@ -275,24 +277,13 @@ def _fuzzy_match(series: pd.Series, query: str) -> pd.Series:
 
 
 def _fuzzy_count(subset: pd.DataFrame, col: str, query: str) -> Tuple[int, List[str]]:
-    """
-    Считает число строк в subset, где значение колонки col совпадает с query
-    (нечёткий поиск с нормализацией инициалов и ё→е).
-
-    Возвращает:
-        count   — число совпавших строк
-        matched — список уникальных найденных вариантов написания (оригинальных)
-    """
     if col not in subset.columns or subset.empty:
         return 0, []
     col_series = subset[col].dropna().astype(str).str.strip()
     col_series = col_series[col_series != ""]
     mask = _fuzzy_match(col_series, query)
-    matched_vals = col_series[mask].unique().tolist()  # оригинальные варианты
-    # Считаем по исходному subset (включая строки где col был NaN → пустая строка)
-    full_mask = _fuzzy_match(
-        subset[col].fillna("").astype(str), query
-    )
+    matched_vals = col_series[mask].unique().tolist()
+    full_mask = _fuzzy_match(subset[col].fillna("").astype(str), query)
     return int(full_mask.sum()), matched_vals
 
 
@@ -309,27 +300,20 @@ def search_by_total_members(
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по общему числу членов.
-
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Число членов | Всего членов | Годы активности | Уникальных городов
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         count = len(subset)
         if count == 0:
             continue
         rows.append(build_result_row(0, root, count, subset, "Число членов"))
-
     rows.sort(key=lambda r: r["Число членов"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n])
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Число членов")
+    result = result.sort_values("Число членов", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
 
 
 def search_by_members_in_period(
@@ -342,15 +326,8 @@ def search_by_members_in_period(
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по числу защит в диапазоне [year_from, year_to].
-
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Защит за период | Всего членов | Годы активности | Уникальных городов
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         if subset.empty:
@@ -360,20 +337,15 @@ def search_by_members_in_period(
             count_in_period = 0
         else:
             year_idx = subset[YEAR_COLUMN].dropna().map(_safe_year).dropna()
-            count_in_period = int(
-                year_idx.between(year_from, year_to).sum()
-            )
+            count_in_period = int(year_idx.between(year_from, year_to).sum())
         if count_in_period == 0:
             continue
-        rows.append(
-            build_result_row(0, root, count_in_period, subset, "Защит за период")
-        )
-
-    rows.sort(key=lambda r: r["Защит за период"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n])
+        rows.append(build_result_row(0, root, count_in_period, subset, "Защит за период"))
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Защит за период")
+    result = result.sort_values("Защит за период", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
 
 
 def search_by_members_in_year(
@@ -385,34 +357,23 @@ def search_by_members_in_year(
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по числу защит в конкретный год.
-
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Защит в [год] г. | Всего членов | Годы активности | Уникальных городов
-    """
+    metric = f"Защит в {year} г."
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
-        if subset.empty:
-            continue
-        if YEAR_COLUMN not in subset.columns:
+        if subset.empty or YEAR_COLUMN not in subset.columns:
             continue
         year_vals = subset[YEAR_COLUMN].dropna().map(_safe_year).dropna()
         count = int((year_vals == year).sum())
         if count == 0:
             continue
-        rows.append(
-            build_result_row(0, root, count, subset, f"Защит в {year} г.")
-        )
-
-    rows.sort(key=lambda r: r[f"Защит в {year} г."], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n])
+        rows.append(build_result_row(0, root, count, subset, metric))
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, metric)
+    result = result.sort_values(metric, ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
 
 
 def search_by_depth(
@@ -422,31 +383,17 @@ def search_by_depth(
     rows_for_func: Callable,
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по глубине дерева (числу поколений).
-
-    Глубина вычисляется как максимальная длина пути от корня в BFS.
-    Всегда используется scope='all'.
-
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Поколений | Всего членов | Годы активности | Уникальных городов
-    """
     try:
         import networkx as nx
     except ImportError:
-        return pd.DataFrame(
-            columns=["#", "Руководитель", "Поколений", "Всего членов",
-                     "Годы активности", "Уникальных городов"]
-        )
-
+        return pd.DataFrame(columns=["#", "Руководитель", "Поколений", "Всего членов",
+                                      "Годы активности", "Уникальных городов"])
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         graph, subset = lineage_func(df, index, root)
         if graph.number_of_nodes() < 2:
             continue
-
         depth = 0
         if nx.is_directed_acyclic_graph(graph):
             q: deque = deque([(root, 0)])
@@ -459,17 +406,14 @@ def search_by_depth(
                     if child not in seen:
                         seen.add(child)
                         q.append((child, d + 1))
-
         if depth == 0:
             continue
-
         rows.append(build_result_row(0, root, depth, subset, "Поколений"))
-
-    rows.sort(key=lambda r: r["Поколений"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n])
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Поколений")
+    result = result.sort_values("Поколений", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
 
 
 def search_by_supervisor_rate(
@@ -480,57 +424,40 @@ def search_by_supervisor_rate(
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по доле учеников, ставших научными руководителями
-    (имеющих собственных учеников в базе).
-
-    Доля вычисляется относительно прямых учеников (1-е поколение).
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Доля учеников-руководителей, % | Таких учеников |
-          Прямых учеников | Всего членов | Годы активности | Уникальных городов
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         subset_direct = rows_for_func(df, index, root)
         if subset_direct.empty or AUTHOR_COLUMN not in subset_direct.columns:
             continue
-
         direct_count = len(subset_direct)
         supervisor_count = 0
-
         for name in subset_direct[AUTHOR_COLUMN].dropna().astype(str).unique():
             name = name.strip()
             if not name:
                 continue
-            pupils = rows_for_func(df, index, name)
-            if not pupils.empty:
+            if not rows_for_func(df, index, name).empty:
                 supervisor_count += 1
-
         if direct_count == 0:
             continue
-
         rate = round(100.0 * supervisor_count / direct_count, 1)
-
-        subset_full = collect_subset(
-            df, index, root, scope, lineage_func, rows_for_func
-        )
-
-        row = build_result_row(0, root, f"{rate}%", subset_full,
-                               "Доля учеников-руководителей, %")
+        subset_full = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
+        row = build_result_row(0, root, f"{rate}%", subset_full, "Доля учеников-руководителей, %")
         row["Таких учеников"] = supervisor_count
         row["Прямых учеников"] = direct_count
         rows.append(row)
-
-    rows.sort(
-        key=lambda r: float(str(r["Доля учеников-руководителей, %"]).replace("%", "")),
-        reverse=True,
-    )
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n])
+    result = pd.DataFrame(rows)
+    # Для долей (строковые значения) дедубликация не суммирует, а берёт максимальное
+    result = _dedup_result_df(result, "Доля учеников-руководителей, %")
+    result = result.sort_values(
+        "Доля учеников-руководителей, %",
+        key=lambda s: s.astype(str).str.replace("%", "", regex=False).apply(
+            lambda x: float(x) if x.replace(".", "", 1).isdigit() else 0.0
+        ),
+        ascending=False,
+    ).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -547,19 +474,9 @@ def search_by_city(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Топ-N школ по числу защит в указанном городе (нечёткий поиск).
-
-    Возвращает:
-        result_df   — DataFrame с колонками:
-                      # | Руководитель | Защит в городе | Найденные варианты |
-                        Всего членов | Годы активности | Уникальных городов
-        matched_map — словарь {root: [список найденных вариантов написания]}
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         if subset.empty:
@@ -571,12 +488,11 @@ def search_by_city(
         row = build_result_row(0, root, count, subset, "Защит в городе")
         row["Найденные варианты"] = "; ".join(matched_vals)
         rows.append(row)
-
-    rows.sort(key=lambda r: r["Защит в городе"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n]), matched_map
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Защит в городе")
+    result = result.sort_values("Защит в городе", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result, matched_map
 
 
 def search_by_geo_diversity(
@@ -587,29 +503,18 @@ def search_by_geo_diversity(
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по числу уникальных городов защит (географическое разнообразие).
-
-    Возвращает DataFrame с колонками:
-        # | Руководитель | Уникальных городов | Всего членов | Годы активности | Уникальных городов
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         n_cities = _unique_cities(subset)
         if n_cities == 0:
             continue
-        rows.append(
-            build_result_row(0, root, n_cities, subset, "Уникальных городов")
-        )
-
-    rows.sort(key=lambda r: r["Уникальных городов"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    result = pd.DataFrame(rows[:top_n])
+        rows.append(build_result_row(0, root, n_cities, subset, "Уникальных городов"))
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Уникальных городов")
+    result = result.sort_values("Уникальных городов", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
     return result
 
 
@@ -629,18 +534,9 @@ def _search_by_org_column(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Внутренняя функция: топ-N школ по числу диссертаций,
-    в которых в указанном org_column найдена строка org_query (нечёткий поиск).
-
-    Возвращает:
-        result_df   — DataFrame результатов
-        matched_map — словарь {root: [список найденных вариантов написания]}
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         if subset.empty:
@@ -652,12 +548,11 @@ def _search_by_org_column(
         row = build_result_row(0, root, count, subset, metric_label)
         row["Найденные варианты"] = "; ".join(matched_vals)
         rows.append(row)
-
-    rows.sort(key=lambda r: r[metric_label], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n]), matched_map
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, metric_label)
+    result = result.sort_values(metric_label, ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result, matched_map
 
 
 def search_by_institution_prepared(
@@ -669,16 +564,12 @@ def search_by_institution_prepared(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Топ-N школ по числу диссертаций с указанной организацией выполнения.
-    """
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
         org_query=org_query,
         org_column=INSTITUTION_PREPARED_COLUMN,
         metric_label="Диссертаций (орг. выполнения)",
-        scope=scope,
-        top_n=top_n,
+        scope=scope, top_n=top_n,
     )
 
 
@@ -691,16 +582,12 @@ def search_by_defense_location(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Топ-N школ по числу диссертаций с указанным местом (организацией) защиты.
-    """
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
         org_query=org_query,
         org_column=DEFENSE_LOCATION_COLUMN,
         metric_label="Диссертаций (место защиты)",
-        scope=scope,
-        top_n=top_n,
+        scope=scope, top_n=top_n,
     )
 
 
@@ -713,16 +600,12 @@ def search_by_leading_organization(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Топ-N школ по числу диссертаций с указанной ведущей организацией.
-    """
     return _search_by_org_column(
         df, index, lineage_func, rows_for_func,
         org_query=org_query,
         org_column=LEADING_ORG_COLUMN,
         metric_label="Диссертаций (вед. организация)",
-        scope=scope,
-        top_n=top_n,
+        scope=scope, top_n=top_n,
     )
 
 
@@ -732,7 +615,6 @@ def search_by_leading_organization(
 
 
 def _is_child_of(code: str, parent: str) -> bool:
-    """Проверяет, является ли code дочерним (или равным) узлу parent."""
     return code == parent or code.startswith(parent + ".")
 
 
@@ -746,14 +628,10 @@ def search_by_classifier_score(
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
-    """
-    Топ-N школ по среднему баллу по узлу классификатора.
-    """
     base = Path(scores_folder).expanduser().resolve()
     files = sorted(base.glob("*.csv"))
     if not files:
         return pd.DataFrame()
-
     frames = []
     for f in files:
         try:
@@ -762,64 +640,47 @@ def search_by_classifier_score(
                 frames.append(frame)
         except Exception:
             continue
-
     if not frames:
         return pd.DataFrame()
-
     scores = pd.concat(frames, ignore_index=True)
     scores = scores.dropna(subset=[SCORES_CODE_COLUMN])
     scores[SCORES_CODE_COLUMN] = scores[SCORES_CODE_COLUMN].astype(str).str.strip()
     scores = scores[scores[SCORES_CODE_COLUMN].str.len() > 0]
     scores = scores.drop_duplicates(subset=[SCORES_CODE_COLUMN], keep="first")
-
     feature_cols = [c for c in scores.columns if c != SCORES_CODE_COLUMN]
     scores[feature_cols] = scores[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-
-    node_features = [
-        col for col in feature_cols
-        if _is_child_of(col, classifier_node) or col == classifier_node
-    ]
+    node_features = [col for col in feature_cols if _is_child_of(col, classifier_node) or col == classifier_node]
     if not node_features:
         return pd.DataFrame()
-
     scores_indexed = scores.set_index(SCORES_CODE_COLUMN)
-
     metric_label = f"Средний балл ({classifier_node})"
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         if subset.empty or SCORES_CODE_COLUMN not in subset.columns:
             continue
-
         school_codes = (
-            subset[SCORES_CODE_COLUMN]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .pipe(lambda s: s[s != ""])
-            .unique()
+            subset[SCORES_CODE_COLUMN].dropna().astype(str).str.strip()
+            .pipe(lambda s: s[s != ""]).unique()
         )
         if len(school_codes) == 0:
             continue
-
         matched_scores = scores_indexed.loc[
             scores_indexed.index.intersection(school_codes), node_features
         ]
         if matched_scores.empty:
             continue
-
         avg = float(matched_scores.values.mean())
         row = build_result_row(0, root, round(avg, 3), subset, metric_label)
         row["Диссертаций с оценками"] = len(matched_scores)
         rows.append(row)
-
-    rows.sort(key=lambda r: r[metric_label], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n])
+    result = pd.DataFrame(rows)
+    # Для classifier_score дедубликация берёт максимальный балл (не сумму)
+    result = _dedup_result_df(result, metric_label)
+    result = result.sort_values(metric_label, ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -836,27 +697,19 @@ def search_by_opponent(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Топ-N школ, в диссертациях которых указанное лицо выступает оппонентом
-    (нечёткий поиск с нормализацией инициалов и ё→е по OPPONENT_COLUMNS).
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         if subset.empty:
             continue
-
         total_count = 0
         all_matched: Set[str] = set()
-
         for col in OPPONENT_COLUMNS:
             count, matched_vals = _fuzzy_count(subset, col, person_query)
             total_count += count
             all_matched.update(matched_vals)
-
         if total_count > 0:
             combined_mask = pd.Series(False, index=subset.index)
             for col in OPPONENT_COLUMNS:
@@ -871,12 +724,11 @@ def search_by_opponent(
             row = build_result_row(0, root, row_count, subset, "Диссертаций с оппонентом")
             row["Найденные варианты"] = "; ".join(sorted(all_matched))
             rows.append(row)
-
-    rows.sort(key=lambda r: r["Диссертаций с оппонентом"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n]), matched_map
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Диссертаций с оппонентом")
+    result = result.sort_values("Диссертаций с оппонентом", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result, matched_map
 
 
 def search_by_member(
@@ -888,37 +740,29 @@ def search_by_member(
     scope: str = "all",
     top_n: int = 10,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
-    """
-    Топ-N школ, в которых указанное лицо является учеником (автором диссертации)
-    (нечёткий поиск с нормализацией инициалов и ё→е по AUTHOR_COLUMN).
-    """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
-
     for root in roots:
         subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
         if subset.empty or AUTHOR_COLUMN not in subset.columns:
             continue
-
         count, matched_vals = _fuzzy_count(subset, AUTHOR_COLUMN, person_query)
         if count == 0:
             continue
-
         matched_map[root] = matched_vals
         row = build_result_row(0, root, count, subset, "Диссертаций автора")
         row["Найденные варианты"] = "; ".join(matched_vals)
         rows.append(row)
-
-    rows.sort(key=lambda r: r["Диссертаций автора"], reverse=True)
-    for i, row in enumerate(rows[:top_n], 1):
-        row["#"] = i
-
-    return pd.DataFrame(rows[:top_n]), matched_map
+    result = pd.DataFrame(rows)
+    result = _dedup_result_df(result, "Диссертаций автора")
+    result = result.sort_values("Диссертаций автора", ascending=False).head(top_n).reset_index(drop=True)
+    result["#"] = range(1, len(result) + 1)
+    return result, matched_map
 
 
 # ---------------------------------------------------------------------------
-# Excel-отчёт по результатам поиска
+# Excel-отчёт
 # ---------------------------------------------------------------------------
 
 
@@ -927,16 +771,6 @@ def build_excel_search_results(
     search_mode: str,
     search_params: Dict,
 ) -> bytes:
-    """
-    Формирует Excel-файл с результатами поиска школ.
-
-    Параметры:
-        result_df    — итоговая таблица (результат одной из функций search_by_*)
-        search_mode  — название режима поиска (строка, для мета-листа)
-        search_params — словарь параметров запроса (для мета-листа)
-
-    Возвращает bytes для передачи в st.download_button.
-    """
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         if not result_df.empty:
