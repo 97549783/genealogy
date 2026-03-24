@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import io
+import re
 from collections import Counter, deque
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
@@ -67,6 +68,18 @@ def _safe_year(val) -> Optional[int]:
     except (ValueError, TypeError):
         pass
     return None
+
+
+def _norm_name(s: str) -> str:
+    """
+    Нормализует ФИО для сравнения:
+    - приводит к нижнему регистру
+    - заменяет «ё» → «е»
+    - заменяет точки пробелами (для инициалов вида «И.И.»)
+    - сжимает множественные пробелы
+    """
+    s = s.lower().replace("ё", "е").replace(".", " ")
+    return re.sub(r"\s+", " ", s).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -126,10 +139,17 @@ def compute_overview(
             elif d == DEGREE_DOCTOR:
                 doctors += 1
 
+    # FIX #1: явное приведение к int, чтобы избежать случайной подмены типа
     cities: int = 0
     if not subset.empty and CITY_COLUMN in subset.columns:
-        cities = subset[CITY_COLUMN].dropna().astype(str).str.strip()
-        cities = cities[cities != ""].nunique()
+        cities = int(
+            subset[CITY_COLUMN]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .pipe(lambda s: s[s != ""])
+            .nunique()
+        )
 
     year_min: Optional[int] = None
     year_max: Optional[int] = None
@@ -317,6 +337,8 @@ def compute_yearly_stats(subset: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["Год", "Всего", "Кандидатских", "Докторских"])
 
     tmp = pd.DataFrame(rows)
+
+    # FIX #2: include_groups=False предотвращает DeprecationWarning в pandas >= 2.2
     grouped = (
         tmp.groupby("year")
         .apply(
@@ -326,7 +348,8 @@ def compute_yearly_stats(subset: pd.DataFrame) -> pd.DataFrame:
                     "Кандидатских": (g["degree"] == DEGREE_CANDIDATE).sum(),
                     "Докторских": (g["degree"] == DEGREE_DOCTOR).sum(),
                 }
-            )
+            ),
+            include_groups=False,
         )
         .reset_index()
         .rename(columns={"year": "Год"})
@@ -398,10 +421,7 @@ def compute_institutional_stats(subset: pd.DataFrame) -> Dict[str, pd.DataFrame]
 
     if specialties_series:
         combined = pd.concat(specialties_series, ignore_index=True)
-        spec_counts = (
-            combined.value_counts()
-            .reset_index()
-        )
+        spec_counts = combined.value_counts().reset_index()
         spec_counts.columns = ["Специальность", "Число"]
     else:
         spec_counts = pd.DataFrame(columns=["Специальность", "Число"])
@@ -428,20 +448,38 @@ def compute_institutional_stats(subset: pd.DataFrame) -> Dict[str, pd.DataFrame]
 def compute_top_opponents(subset: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
     """
     Возвращает таблицу топ-N оппонентов: Оппонент | Число появлений.
-    """
-    counter: Counter = Counter()
-    for col in OPPONENT_COLUMNS:
-        if col in subset.columns:
-            for val in subset[col].dropna().astype(str):
-                name = val.strip()
-                if name:
-                    counter[name] += 1
 
-    if not counter:
+    Имена нормализуются через _norm_name() перед подсчётом, чтобы
+    «Иванов И.И.» и «Иванов Иван Иванович» не считались разными людьми
+    при незначительных вариациях написания.
+    Для отображения используется наиболее часто встречающаяся форма имени.
+    """
+    # norm_key → список оригинальных написаний
+    norm_to_originals: Dict[str, List[str]] = {}
+    for col in OPPONENT_COLUMNS:
+        if col not in subset.columns:
+            continue
+        for val in subset[col].dropna().astype(str):
+            raw = val.strip()
+            if not raw:
+                continue
+            key = _norm_name(raw)
+            norm_to_originals.setdefault(key, []).append(raw)
+
+    if not norm_to_originals:
         return pd.DataFrame(columns=["Оппонент", "Число появлений"])
 
-    top = counter.most_common(top_n)
-    return pd.DataFrame(top, columns=["Оппонент", "Число появлений"])
+    # Подсчёт по нормализованному ключу
+    counter: Counter = Counter({k: len(v) for k, v in norm_to_originals.items()})
+
+    # Для отображения берём самую частую оригинальную форму
+    rows = []
+    for key, count in counter.most_common(top_n):
+        originals = norm_to_originals[key]
+        display_name = Counter(originals).most_common(1)[0][0]
+        rows.append({"Оппонент": display_name, "Число появлений": count})
+
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +496,7 @@ def compute_thematic_profile(
     subset: pd.DataFrame,
     scores_folder: str,
     classifier: List[Tuple[str, str, bool]],
-    group_prefix_level: str,
+    group_prefix_level: str = "",
     group_prefix_education: str = "1.1.1",
     group_prefix_knowledge: str = "1.1.2",
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -521,9 +559,7 @@ def compute_thematic_profile(
         return empty, empty
 
     # Среднее по всем диссертациям школы для каждого признака
-    means: Dict[str, float] = {}
-    for col in feature_cols:
-        means[col] = float(school_scores[col].mean())
+    means: Dict[str, float] = {col: float(school_scores[col].mean()) for col in feature_cols}
 
     # Словарь: код → название
     code_to_name = {code: title for code, title, _ in classifier}
@@ -532,8 +568,6 @@ def compute_thematic_profile(
         rows: List[Dict] = []
         for col, avg in means.items():
             if _is_child_of(col, prefix) and col != prefix:
-                # Берём только «листовые» или непосредственных детей —
-                # все коды из feature_cols уже являются оценочными единицами
                 name = code_to_name.get(col, col)
                 rows.append(
                     {"Название": name, "Код": col, "Средний балл": round(avg, 2)}
@@ -563,6 +597,9 @@ def compute_continuity(
     """
     Возвращает таблицу: Ученик | Число его учеников в базе.
     Только строки с числом учеников > 0, отсортированные по убыванию.
+
+    Считает уникальных учеников (по AUTHOR_COLUMN), а не число диссертаций,
+    чтобы не завышать результат для лиц с несколькими защитами.
     """
     if subset_direct.empty or AUTHOR_COLUMN not in subset_direct.columns:
         return pd.DataFrame(columns=["Ученик", "Число учеников в базе"])
@@ -573,7 +610,14 @@ def compute_continuity(
         if not name:
             continue
         pupils = rows_for_func(df_full, index, name)
-        count = len(pupils)
+        # FIX #3: считаем уникальных учеников, а не строки (диссертации)
+        if not pupils.empty and AUTHOR_COLUMN in pupils.columns:
+            count = int(
+                pupils[AUTHOR_COLUMN].dropna().astype(str).str.strip()
+                .pipe(lambda s: s[s != ""]).nunique()
+            )
+        else:
+            count = 0
         if count > 0:
             rows.append({"Ученик": name, "Число учеников в базе": count})
 
