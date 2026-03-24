@@ -76,7 +76,7 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
         ax.bar(xs, df[y_col], color="#4C9BE8")
 
     ax.set_xlabel(x_col, fontsize=10)
-    ax.set_ylabel(Число защит", fontsize=10)
+    ax.set_ylabel("Число защит", fontsize=10)
     ax.set_title(title, fontsize=12, fontweight="bold")
     plt.xticks(rotation=45, ha="right", fontsize=8)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
