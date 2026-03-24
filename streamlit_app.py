@@ -1674,7 +1674,7 @@ with tab_profiles:
 with tab_school_search:
     render_school_search_tab(
         df=df,
-        idx=index,
+        idx=idx,
         lineage_func=lineage,
         rows_for_func=rows_for,
         classifier=THEMATIC_CLASSIFIER,
