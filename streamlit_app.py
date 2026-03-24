@@ -37,6 +37,7 @@ from sklearn.metrics import silhouette_samples, silhouette_score
 
 from profiles_tab import render_profiles_tab
 from opponents_intersection_tab import render_opponents_intersection_tab
+from school_analysis_tab import render_school_analysis_tab
 from school_comparison_tab import render_school_comparison_tab
 #from school_comparison_new_tab import render_school_comparison_new_tab
 from articles_comparison_tab import render_articles_comparison_tab
@@ -1278,12 +1279,13 @@ shared_roots = st.query_params.get_all("root")
 valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
 manual_prefill = "\n".join(r for r in shared_roots if r not in all_supervisor_names)
 
-tab_lineages, tab_dissertations, tab_profiles, tab_intersection, tab_schoolcomparison, tab_articles_comparison = st.tabs(
+tab_lineages, tab_dissertations, tab_profiles, tab_intersection, tab_school_analysis, tab_schoolcomparison, tab_articles_comparison = st.tabs(
     [
         "Построение деревьев",
         "Поиск информации о диссертациях",
         "Поиск по тематическим профилям",
         "Пересечение научных школ",
+        "Анализ научной школы", 
         "Сравнение научных школ",
         #Сравнение научных школ. Вариант 2"
         "Сравнение по статьям"
@@ -1675,6 +1677,16 @@ with tab_intersection:
         rows_for_func=rows_for
     )
     
+with tab_school_analysis:
+    render_school_analysis_tab(
+        df=df,
+        idx=idx,
+        lineage_func=build_lineage_tree,
+        rows_for_func=rows_for,
+        classifier=THEMATIC_CLASSIFIER,   # если есть в streamlit_app.py
+        scores_folder="basic_scores",
+    )
+
 with tab_schoolcomparison:
     # Словарь {код: название} из THEMATIC_CLASSIFIER
     classifier_labels = {code: title for code, title, _ in THEMATIC_CLASSIFIER}
