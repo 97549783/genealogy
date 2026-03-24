@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Optional, Tuple, Set
+from typing import Callable, Dict, List, Literal, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -41,15 +40,15 @@ SCOPE_LABELS: Dict[ComparisonScope, str] = {
     "all": "Все поколения диссертантов",
 }
 
-# Яркая цветовая палитра для графика силуэта (оранжево-жёлто-коралловая гамма)
+# Яркая цветовая палитра для графика силуэта
 SILHOUETTE_COLORS = [
     "#FF8C42",  # Яркий оранжевый
     "#FFD166",  # Жёлтый
     "#F77F00",  # Тёмно-оранжевый
     "#FCBF49",  # Золотисто-жёлтый
     "#EF476F",  # Коралловый/розовый
-    "#06D6A0",  # Бирюзовый (для контраста)
-    "#118AB2",  # Синий (для контраста)
+    "#06D6A0",  # Бирюзовый
+    "#118AB2",  # Синий
     "#073B4C",  # Тёмно-синий
     "#E07A5F",  # Терракотовый
     "#81B29A",  # Шалфейный зелёный
@@ -186,8 +185,20 @@ def load_scores_from_folder(
     folder_path: str = "basic_scores",
     specific_files: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Загружает данные тематических профилей из CSV файлов."""
-    base = Path(folder_path).expanduser().resolve()
+    """Загружает данные тематических профилей из CSV файлов.
+
+    Сначала ищет папку относительно CWD, при неудаче — относительно
+    директории данного модуля (актуально для Streamlit Cloud).
+    """
+    base = Path(folder_path).expanduser()
+    if not base.is_absolute():
+        resolved = base.resolve()
+        if not resolved.exists():
+            # fallback: рядом с модулем
+            resolved = Path(__file__).parent / folder_path
+        base = resolved
+    else:
+        base = base.resolve()
 
     if specific_files:
         files = [base / f for f in specific_files if (base / f).exists()]
@@ -217,7 +228,7 @@ def load_scores_from_folder(
     scores = scores[scores["Code"].str.len() > 0]
     scores = scores.drop_duplicates(subset=["Code"], keep="first")
 
-    feature_columns = [c for c in scores.columns if c != "Code"]
+    feature_columns = get_feature_columns(scores)
     scores[feature_columns] = scores[feature_columns].apply(
         pd.to_numeric, errors="coerce"
     )
@@ -227,8 +238,16 @@ def load_scores_from_folder(
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:
-    """Возвращает список колонок с признаками."""
-    return [c for c in scores.columns if c != "Code"]
+    """Возвращает список колонок-узлов классификатора.
+
+    Узлы классификатора начинаются с цифры (1., 2., 3. и т.д.).
+    Прочие колонки (year, institution_prepared, supervisor, title и пр.)
+    исключаются явно, даже если попадут в CSV.
+    """
+    return [
+        c for c in scores.columns
+        if c != "Code" and len(c) > 0 and c[0].isdigit()
+    ]
 
 
 # ==============================================================================
@@ -243,7 +262,7 @@ def gather_school_dataset(
     scope: ComparisonScope,
     lineage_func: Callable,
     rows_for_func: Callable,
-    author_column: str = "candidate.name",
+    author_column: str = "candidate_name",
 ) -> Tuple[pd.DataFrame, pd.DataFrame, int]:
     """Собирает данные тематических профилей для научной школы."""
     if scope == "direct":
@@ -367,7 +386,7 @@ def compute_silhouette_analysis(
 
 
 # ==============================================================================
-# ВИЗУАЛИЗАЦИЯ
+# ВИЗУАЛИЗАЦИЯ — ГРАФИК СИЛУЭТА
 # ==============================================================================
 
 def create_silhouette_plot(
@@ -377,15 +396,17 @@ def create_silhouette_plot(
     overall_score: float,
     metric_label: str,
 ) -> plt.Figure:
-    """Создаёт график силуэта для научных школ с яркой цветовой палитрой."""
+    """Создаёт график силуэта для научных школ."""
     n_schools = len(school_order)
     fig, ax = plt.subplots(figsize=(10, max(6, n_schools * 1.5)))
 
     y_lower = 10
 
-    # Используем яркую палитру
-    colors = SILHOUETTE_COLORS[:n_schools] if n_schools <= len(SILHOUETTE_COLORS) else \
-             (SILHOUETTE_COLORS * ((n_schools // len(SILHOUETTE_COLORS)) + 1))[:n_schools]
+    colors = (
+        SILHOUETTE_COLORS[:n_schools]
+        if n_schools <= len(SILHOUETTE_COLORS)
+        else (SILHOUETTE_COLORS * ((n_schools // len(SILHOUETTE_COLORS)) + 1))[:n_schools]
+    )
 
     for idx, school in enumerate(school_order):
         mask = labels == idx
@@ -419,7 +440,6 @@ def create_silhouette_plot(
 
         y_lower = y_upper + 10
 
-    # Линия среднего значения
     ax.axvline(
         x=overall_score,
         color="#2D3436",
@@ -440,7 +460,6 @@ def create_silhouette_plot(
     ax.legend(loc="lower right", fontsize=10)
     ax.grid(axis="x", linestyle="--", alpha=0.3)
 
-    # Фоновые зоны интерпретации (более мягкие цвета)
     ax.axvspan(-1, -0.25, alpha=0.08, color="#e74c3c")
     ax.axvspan(-0.25, 0.25, alpha=0.08, color="#f39c12")
     ax.axvspan(0.25, 0.5, alpha=0.08, color="#27ae60")
@@ -450,12 +469,87 @@ def create_silhouette_plot(
     return fig
 
 
+# ==============================================================================
+# ТАБЛИЦА СРЕДНИХ БАЛЛОВ ПО УЗЛАМ КЛАССИФИКАТОРА
+# ==============================================================================
+
+def create_node_scores_table(
+    datasets: Dict[str, pd.DataFrame],
+    feature_columns: List[str],
+    school_order: List[str],
+    classifier_labels: Optional[Dict[str, str]] = None,
+    selected_nodes: Optional[List[str]] = None,
+    level: int = 2,
+) -> pd.DataFrame:
+    """Строит таблицу средних баллов по узлам классификатора.
+
+    Строки — узлы классификатора указанного уровня (по умолчанию уровень 2).
+    Столбцы — сравниваемые научные школы.
+    Значения — среднее значение признака по всем диссертациям школы,
+    агрегированное по всем потомкам узла (среднее потомков → среднее по школе).
+
+    Args:
+        datasets: словарь {название школы: DataFrame с профилями}
+        feature_columns: список всех колонок-признаков классификатора
+        school_order: порядок школ в таблице
+        classifier_labels: словарь {код: название узла}
+        selected_nodes: если задан — ограничивает узлы этим списком
+        level: уровень иерархии для строк таблицы (1, 2 или 3)
+    """
+    if classifier_labels is None:
+        classifier_labels = {}
+
+    # Определяем узлы нужного уровня
+    nodes_at_level = get_nodes_at_level(feature_columns, level)
+
+    # Если заданы selected_nodes — оставляем только пересечение
+    if selected_nodes:
+        nodes_at_level = [
+            n for n in nodes_at_level
+            if any(is_descendant_of(n, sn) or n == sn for sn in selected_nodes)
+        ]
+
+    if not nodes_at_level:
+        return pd.DataFrame()
+
+    rows = []
+    for node in nodes_at_level:
+        # Все потомки данного узла среди feature_columns
+        descendant_cols = [c for c in feature_columns if is_descendant_of(c, node)]
+        if not descendant_cols:
+            continue
+
+        label = classifier_labels.get(node, "")
+        row: Dict = {"Код": node, "Раздел": label}
+
+        for school in school_order:
+            dataset = datasets.get(school)
+            if dataset is None or dataset.empty:
+                row[school] = None
+                continue
+            available = [c for c in descendant_cols if c in dataset.columns]
+            if not available:
+                row[school] = None
+                continue
+            # Среднее по потомкам для каждой диссертации, затем среднее по школе
+            per_diss = dataset[available].fillna(0.0).mean(axis=1)
+            row[school] = round(per_diss.mean(), 2)
+
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+# ==============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ==============================================================================
+
 def create_comparison_summary(
     datasets: Dict[str, pd.DataFrame],
     feature_columns: List[str],
     school_order: List[str],
 ) -> pd.DataFrame:
-    """Создаёт сводную таблицу сравнения школ."""
+    """Создаёт сводную таблицу общей статистики по школам."""
     summary_data = []
 
     for school in school_order:
@@ -468,14 +562,17 @@ def create_comparison_summary(
 
         available_cols = [c for c in feature_columns if c in data.columns]
         numeric_data = data[available_cols].fillna(0.0)
+        row_sums = numeric_data.sum(axis=1)
 
         summary_data.append({
             "Научная школа": school,
             "Количество диссертаций": len(data),
-            "Средняя сумма профиля": numeric_data.sum(axis=1).mean(),
-            "Медиана суммы профиля": numeric_data.sum(axis=1).median(),
-            "Стд. отклонение": numeric_data.sum(axis=1).std(),
-            "Ненулевых признаков (среднее)": (numeric_data > 0).sum(axis=1).mean(),
+            "Средняя сумма профиля": round(row_sums.mean(), 2),
+            "Медиана суммы профиля": round(row_sums.median(), 2),
+            "Стд. отклонение": round(row_sums.std(), 2),
+            "Ненулевых признаков (среднее)": round(
+                (numeric_data > 0).sum(axis=1).mean(), 1
+            ),
         })
 
     return pd.DataFrame(summary_data)
@@ -493,175 +590,3 @@ def interpret_silhouette_score(score: float) -> str:
         return "🟠 Слабое разделение: школы имеют схожие тематические профили"
     else:
         return "🔴 Плохое разделение: тематические профили перемешаны"
-
-
-def get_minimal_parent_nodes(feature_columns: List[str]) -> List[str]:
-    """
-    Returns nodes that are parents of leaf nodes (minimal parent nodes).
-    These are internal nodes with at least one child that has no children itself.
-    """
-    all_codes = set(feature_columns)
-    minimal_parents = set()
-    
-    for code in feature_columns:
-        parent = get_parent_code(code)
-        if parent and parent in all_codes:
-            # Check if parent has any children
-            children = [c for c in feature_columns if get_parent_code(c) == parent]
-            # Check if any children are leaves (have no descendants)
-            has_leaf_child = any(
-                not any(cc.startswith(c + ".") for cc in feature_columns if cc != c)
-                for c in children
-            )
-            if has_leaf_child:
-                minimal_parents.add(parent)
-    
-    return sorted(minimal_parents)
-
-
-def compute_node_distances(
-    datasets: Dict[str, pd.DataFrame],
-    feature_columns: List[str],
-    metric: DistanceMetric,
-    decay_factor: float = 0.5,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Computes distances between schools for each minimal parent node.
-    
-    Returns:
-        - DataFrame with distances (rows=nodes, columns=school pairs)
-        - List of minimal parent nodes
-    """
-    minimal_parents = get_minimal_parent_nodes(feature_columns)
-    school_names = list(datasets.keys())
-    
-    results = []
-    
-    for node in minimal_parents:
-        # Get all descendant features
-        descendant_cols = [c for c in feature_columns if is_descendant_of(c, node)]
-        
-        if not descendant_cols:
-            continue
-        
-        # Compute mean vectors for each school under this node
-        school_vectors = {}
-        for school_name, dataset in datasets.items():
-            if dataset.empty:
-                continue
-            available = [c for c in descendant_cols if c in dataset.columns]
-            if available:
-                vector = dataset[available].fillna(0.0).mean(axis=0).values
-                school_vectors[school_name] = vector
-        
-        # Compute pairwise distances
-        row_data = {"node": node}
-        for i, school1 in enumerate(school_names):
-            for j, school2 in enumerate(school_names):
-                if j <= i:
-                    continue
-                if school1 in school_vectors and school2 in school_vectors:
-                    v1 = school_vectors[school1]
-                    v2 = school_vectors[school2]
-                    
-                    if "euclidean" in metric:
-                        dist = np.linalg.norm(v1 - v2)
-                    else:  # cosine
-                        norm1 = np.linalg.norm(v1)
-                        norm2 = np.linalg.norm(v2)
-                        if norm1 > 1e-10 and norm2 > 1e-10:
-                            dist = 1 - np.dot(v1, v2) / (norm1 * norm2)
-                        else:
-                            dist = 0.0
-                    
-                    row_data[f"{school1} vs {school2}"] = dist
-        
-        if len(row_data) > 1:  # Has at least one comparison
-            results.append(row_data)
-    
-    return pd.DataFrame(results), minimal_parents
-
-
-def create_node_distance_heatmap(
-    distance_df: pd.DataFrame,
-    classifier_labels: Dict[str, str],
-    metric_label: str,
-) -> plt.Figure:
-    """
-    Creates a heatmap showing distances between schools for each minimal parent node.
-    """
-    try:
-        import seaborn as sns
-    except ImportError:
-        # Fallback to matplotlib if seaborn not available
-        sns = None
-    
-    # Prepare data
-    nodes = distance_df["node"].tolist()
-    comparison_cols = [c for c in distance_df.columns if " vs " in c]
-    
-    if not comparison_cols or not nodes:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.text(0.5, 0.5, "No data to display", ha="center", va="center")
-        ax.axis("off")
-        return fig
-    
-    matrix = distance_df[comparison_cols].values
-    
-    # Create labels with both code and description
-    node_labels = []
-    for node in nodes:
-        label_text = classifier_labels.get(node, "")
-        if label_text and len(label_text) > 40:
-            label_text = label_text[:37] + "..."
-        node_labels.append(f"{node} {label_text}" if label_text else node)
-    
-    # Create figure
-    fig_height = max(8, len(nodes) * 0.6)
-    fig_width = max(10, len(comparison_cols) * 2)
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    
-    if sns is not None:
-        sns.heatmap(
-            matrix,
-            annot=True,
-            fmt=".3f",
-            cmap="YlOrRd",
-            yticklabels=node_labels,
-            xticklabels=comparison_cols,
-            cbar_kws={'label': 'Distance'},
-            ax=ax,
-            linewidths=0.5,
-            linecolor='gray'
-        )
-    else:
-        # Fallback matplotlib implementation
-        im = ax.imshow(matrix, cmap="YlOrRd", aspect="auto")
-        ax.set_xticks(np.arange(len(comparison_cols)))
-        ax.set_yticks(np.arange(len(node_labels)))
-        ax.set_xticklabels(comparison_cols)
-        ax.set_yticklabels(node_labels)
-        
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label('Distance', rotation=270, labelpad=20)
-        
-        # Add annotations
-        for i in range(len(nodes)):
-            for j in range(len(comparison_cols)):
-                text = ax.text(j, i, f"{matrix[i, j]:.3f}",
-                             ha="center", va="center", color="black", fontsize=9)
-    
-    ax.set_title(
-        f"Тематические различия между школами по разделам классификатора\n{metric_label}",
-        fontsize=14,
-        fontweight="bold",
-        pad=20
-    )
-    
-    plt.xticks(rotation=45, ha='right')
-    plt.yticks(rotation=0, fontsize=9)
-    fig.tight_layout()
-    
-    return fig
-
