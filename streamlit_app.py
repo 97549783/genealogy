@@ -1681,7 +1681,7 @@ with tab_school_analysis:
     render_school_analysis_tab(
         df=df,
         idx=idx,
-        lineage_func=build_lineage_tree,
+        lineage_func=lineage,
         rows_for_func=rows_for,
         classifier=THEMATIC_CLASSIFIER,   # если есть в streamlit_app.py
         scores_folder="basic_scores",
