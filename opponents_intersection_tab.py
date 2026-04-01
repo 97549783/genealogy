@@ -1,5 +1,5 @@
 """
-Вкладка Streamlit: Пересечение научных школ через оппонентов.
+Вкладка Streamlit: Взаимосвязи научных школ (через институт оппонентов).
 
 Математическая модель
 =====================
@@ -8,23 +8,22 @@
 вместо одного множества авторов на журнал вводятся **два** множества
 на каждую научную школу:
 
-    M_i  — множество **членов** школы i  (все узлы дерева научного
+    M_i  – множество **членов** школы i  (все узлы дерева научного
            руководства: корень, его ученики, ученики учеников и т.д.);
-    O_i  — множество **оппонентов** школы i  (все лица, указанные как
+    O_i  – множество **оппонентов** школы i  (все лица, указанные как
            оппоненты на защитах диссертаций внутри школы).
 
-Дуга  s_i → s_j  в ориентированном графе означает, что хотя бы один
-член школы i выступал оппонентом на защите в школе j, т.е.:
+Связь s_i → s_j означает, что хотя бы один член школы i выступал
+оппонентом на защите в школе j, т.е.:
 
     M_i ∩ O_j ≠ ∅    (стандартная операция пересечения множеств).
 
 Поскольку в общем случае  M_i ∩ O_j ≠ M_j ∩ O_i  (пересекаются
-**разные** пары множеств), граф является **направленным** — в отличие
-от ненаправленного графа журнального пересечения Печникова.
+**разные** пары множеств), связь является **направленной**.
 
-Матрично:  если  M ∈ {0,1}^{n×|P|}  — матрица членства (школа × персона),
-           а  O ∈ {0,1}^{n×|P|}  — матрица оппонентства,
-           то  A = M · O^T,  где  A_{ij} = |M_i ∩ O_j|  — вес дуги i→j.
+Матрично:  если  M ∈ {0,1}^{n×|P|}  – матрица членства (школа × персона),
+           а  O ∈ {0,1}^{n×|P|}  – матрица оппонентства,
+           то  A = M · O^T,  где  A_{ij} = |M_i ∩ O_j|  – вес связи i→j.
            Матрица A несимметрична, поскольку M ≠ O.
 
 Показатели
@@ -66,7 +65,6 @@ import io
 import re
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-import networkx as nx
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -80,8 +78,8 @@ SUPERVISOR_COLUMNS = [f"supervisors_{i}.name" for i in (1, 2)]
 OPPONENT_COLUMNS = [f"opponents_{i}.name" for i in (1, 2, 3)]
 
 SCOPE_LABELS = {
-    "direct": "Только первое поколение (прямые ученики)",
-    "all": "Все поколения (полное дерево)",
+    "direct": "Только прямые ученики руководителя",
+    "all": "Все поколения – ученики, ученики учеников и т.д.",
 }
 
 # ---------------------------------------------------------------------------
@@ -148,8 +146,8 @@ def _collect_members(
 ) -> Tuple[Set[str], pd.DataFrame]:
     """
     Возвращает (множество нормализованных имён членов, подмножество df).
-    scope='direct' — только прямые ученики;
-    scope='all'    — полное дерево.
+    scope='direct' – только прямые ученики;
+    scope='all'    – полное дерево.
     """
     if scope == "direct":
         subset = rows_for_func(df, index, root)
@@ -193,7 +191,7 @@ def compute_intersection_analysis(
       - member_share:   |M_i ∩ O_j| / |M_i|
       - opponent_share: |M_i ∩ O_j| / |O_j|
       - node_stats:     сводная таблица (in-/out-degree, размеры множеств и др.)
-      - persons_detail: подробно — кто именно пересёкся
+      - persons_detail: подробно – кто именно пересёкся
     """
     names = sorted(school_data.keys())
     n = len(names)
@@ -223,9 +221,9 @@ def compute_intersection_analysis(
             if card_inter > 0:
                 for person in sorted(intersection):
                     persons_rows.append({
-                        "Школа-источник (член)": si,
-                        "Школа-приёмник (оппонент)": sj,
-                        "Персона": person,
+                        "Школа, к которой принадлежит человек": si,
+                        "Школа, где он выступал оппонентом": sj,
+                        "Имя": person,
                     })
 
     raw_df = pd.DataFrame(raw, index=names, columns=names)
@@ -242,40 +240,20 @@ def compute_intersection_analysis(
         in_weight  = int(np.sum(raw[:, i]))
         stats_rows.append({
             "Научная школа": name,
-            "|M| (члены)": len(Mi),
-            "|O| (оппоненты)": len(Oi),
-            "Кол-во школ, привлекших членов этой школы в качестве оппонентов": out_degree,
-            "Суммарное исходящее пересечение": out_weight,
-            "Кол-во школ, привлечённых этой школой в качестве оппонентов": in_degree,
-            "Суммарное входящее пересечение": in_weight,
+            "Членов в школе": len(Mi),
+            "Оппонентов привлечено": len(Oi),
+            "В скольких других школах оппонировали члены этой школы": out_degree,
+            "Всего случаев участия как оппонент (в других школах)": out_weight,
+            "Из скольких других школ эта школа приглашала оппонентов": in_degree,
+            "Всего приглашённых оппонентов из других школ": in_weight,
         })
     stats_df = pd.DataFrame(stats_rows)
 
     persons_df = pd.DataFrame(persons_rows) if persons_rows else pd.DataFrame(
-        columns=["Школа-источник (член)", "Школа-приёмник (оппонент)", "Персона"]
+        columns=["Школа, к которой принадлежит человек", "Школа, где он выступал оппонентом", "Имя"]
     )
 
     return raw_df, jaccard_df, m_share_df, o_share_df, stats_df, persons_df
-
-# ---------------------------------------------------------------------------
-#  Построение и визуализация орграфа
-# ---------------------------------------------------------------------------
-
-def build_opponents_intersection_graph(
-    raw_matrix: pd.DataFrame,
-    min_weight: int = 1,
-) -> nx.DiGraph:
-    """Создаёт направленный граф из матрицы пересечений."""
-    G = nx.DiGraph()
-    names = list(raw_matrix.index)
-    for name in names:
-        G.add_node(name)
-    for i, si in enumerate(names):
-        for j, sj in enumerate(names):
-            w = int(raw_matrix.iloc[i, j])
-            if w >= min_weight and i != j:
-                G.add_edge(si, sj, weight=w)
-    return G
 
 # ---------------------------------------------------------------------------
 #  Основная функция вкладки Streamlit
@@ -287,17 +265,30 @@ def render_opponents_intersection_tab(
     lineage_func: Callable,
     rows_for_func: Callable,
 ) -> None:
-    """Отображает вкладку «Граф пересечения научных школ»."""
+    """Отображает вкладку «Взаимосвязи научных школ (через институт оппонентов)»."""
 
-    st.subheader("Граф пересечения научных школ")
+    st.subheader("Взаимосвязи научных школ (через институт оппонентов)")
     st.markdown(
         """
-Анализ строится на **двух множествах** для каждой научной школы:
-**M** — члены школы (дерево научного руководства) и **O** — оппоненты
-на защитах школы.  Дуга *школа₁ → школа₂* означает, что хотя бы один
-**член** школы₁ выступал **оппонентом** в школе₂ (*M₁ ∩ O₂ ≠ ∅*).
+Если учёные из одной научной школы выступают официальными оппонентами на защитах диссертаций
+представителей другой школы, то это проявление взаимосвязей между школами. Предлагаемый
+инструмент показывает, насколько часто такие взаимодействия происходят и в каком направлении.
         """
     )
+
+    with st.expander("Как это работает подробнее"):
+        st.markdown(
+            """
+**Две группы для каждой школы:**
+
+- **Члены школы** – научный руководитель и все его ученики (а также их ученики, если выбрать полное дерево)
+- **Оппоненты школы** – все учёные, которые выступали в качестве официальных оппонентов на защитах диссертаций этой школы
+
+**Связь между школами** фиксируется, когда член одной школы оказался оппонентом в другой.
+Это говорит о том, что учёного из школы A пригласили оценивать работу в школе B –
+значит, между ними есть научный диалог.
+            """
+        )
 
     # --- Выбор научных руководителей ---
     st.markdown("---")
@@ -326,49 +317,34 @@ def render_opponents_intersection_tab(
         options=all_supervisors_sorted,
         default=[],
         key="opponents_intersection_schools",
-        help="Каждый руководитель — корень дерева научной школы.",
+        help="Каждый руководитель – корень своей научной школы. Все его ученики и их ученики входят в эту школу.",
     )
 
     if len(selected_schools) < 2:
-        st.info("Выберите не менее двух научных школ для анализа.")
+        st.info("Выберите не менее двух школ, чтобы увидеть связи между ними.")
         return
 
     # --- Параметры ---
     st.markdown("---")
     st.markdown("### 2. Параметры анализа")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        scope_options = list(SCOPE_LABELS.keys())
-        scope_labels_list = [SCOPE_LABELS[s] for s in scope_options]
-        scope_idx = st.radio(
-            "Глубина дерева",
-            options=range(len(scope_options)),
-            format_func=lambda i: scope_labels_list[i],
-            key="opponents_intersection_scope",
-            help="«Первое поколение» — только прямые ученики руководителя.  "
-                 "«Все поколения» — полное рекурсивное дерево.",
-        )
-        selected_scope = scope_options[scope_idx]
-
-    with col2:
-        min_weight = st.number_input(
-            "Минимальный вес дуги (порог)",
-            min_value=1,
-            max_value=50,
-            value=1,
-            step=1,
-            key="opponents_intersection_min_weight",
-            help="Дуги с весом меньше порога не отображаются в графе.",
-        )
+    scope_options = list(SCOPE_LABELS.keys())
+    scope_labels_list = [SCOPE_LABELS[s] for s in scope_options]
+    scope_idx = st.radio(
+        "Кого считать членами школы?",
+        options=range(len(scope_options)),
+        format_func=lambda i: scope_labels_list[i],
+        key="opponents_intersection_scope",
+        help="Влияет на то, кто войдёт в состав школы. Больше поколений – шире охват, но анализ занимает дольше.",
+    )
+    selected_scope = scope_options[scope_idx]
 
     # --- Кнопки запуска и сброса ---
     st.markdown("---")
 
-    # FIX #3: кнопка сброса кэша рядом с кнопкой запуска
     col_run, col_reset = st.columns([3, 1])
     with col_run:
-        run_clicked = st.button("Построить граф", key="opponents_intersection_run", type="primary")
+        run_clicked = st.button("Запустить анализ", key="opponents_intersection_run", type="primary")
     with col_reset:
         if st.button("Сбросить кэш",
                      key="opponents_intersection_reset",
@@ -378,12 +354,11 @@ def render_opponents_intersection_tab(
                 del st.session_state[cache_key]
             st.rerun()
 
-    # FIX #2: показываем результат из кэша даже без нажатия кнопки
     cache_key = _cache_key(selected_schools, selected_scope)
     if not run_clicked and cache_key not in st.session_state:
         return
 
-    # --- FIX #2: Сбор данных с кэшированием ---
+    # --- Сбор данных с кэшированием ---
     if run_clicked or cache_key not in st.session_state:
         with st.spinner("Собираем множества членов и оппонентов..."):
             school_data: Dict[str, Tuple[Set[str], Set[str]]] = {}
@@ -398,9 +373,9 @@ def render_opponents_intersection_tab(
                 school_data[school_name] = (members, opponents)
                 info_rows.append({
                     "Научная школа": school_name,
-                    "Диссертаций": len(subset),
-                    "|M| (члены)": len(members),
-                    "|O| (оппоненты)": len(opponents),
+                    "Диссертаций в школе": len(subset),
+                    "Члены школы": len(members),
+                    "Официальные оппоненты на защитах диссертаций школы": len(opponents),
                 })
                 progress.progress((i + 1) / len(selected_schools))
             progress.empty()
@@ -409,8 +384,12 @@ def render_opponents_intersection_tab(
     school_data, info_rows = st.session_state[cache_key]
 
     # Краткая сводка по школам
-    st.markdown("### Сводка по школам")
+    st.markdown("### Что входит в каждую школу")
     st.dataframe(pd.DataFrame(info_rows), use_container_width=True, hide_index=True)
+    st.caption(
+        "Члены школы – это сам основатель и все его ученики (диссертанты). "
+        "Оппоненты – официальные оппоненты на защитах диссертаций членов этой школы."
+    )
 
     # --- Вычисление ---
     with st.spinner("Вычисляем пересечения..."):
@@ -421,21 +400,29 @@ def render_opponents_intersection_tab(
     st.markdown("---")
     st.markdown("### 3. Матрицы пересечений")
     st.markdown(
-        "Строки — школа-источник (*члены* M_i), столбцы — школа-приёмник (*оппоненты* O_j).  "
-        "Значение ячейки (i, j) описывает дугу i → j."
+        "Таблицы ниже показывают связи между школами. "
+        "Строка – школа, к которой принадлежит сам оппонент (т.е. в которой оппонент защищал диссертацию). "
+        "Столбец – школа, на защите диссертаций которой этот же учёный выступал в качестве официального оппонента."
     )
 
     tab_raw, tab_jaccard, tab_mshare, tab_oshare = st.tabs([
-        "Пересечение членов и оппонентов |M_i ∩ O_j|",
-        "Жаккар-подобная нормировка",
+        "Число пересечений",
+        "Относительная схожесть (Жаккар-подобная нормировка)",
         "Доля от общего кол-ва членов",
         "Доля от общего кол-ва оппонентов",
     ])
     with tab_raw:
-        st.caption("w(i→j) = |M_i ∩ O_j|")
+        st.caption(
+            "Сколько учёных из школы (строка) выступали оппонентами в другой школе (столбец). "
+            "Чем больше число – тем теснее связь."
+        )
         st.dataframe(raw_df, use_container_width=True)
     with tab_jaccard:
-        st.caption("k(i→j) = |M_i ∩ O_j| / |M_i ∪ O_j|")
+        st.caption(
+            "Доля учёных, которые, являясь членами одной школы, выступили в качестве оппонентов "
+            "другой школы, относительно общего числа членов обеих школ. "
+            "Значение от 0 до 1: 0 – нет связи, 1 – полное совпадение."
+        )
         st.dataframe(jaccard_df, use_container_width=True)
     with tab_mshare:
         st.caption("d_M(i→j) = |M_i ∩ O_j| / |M_i|")
@@ -444,114 +431,47 @@ def render_opponents_intersection_tab(
         st.caption("d_O(i→j) = |M_i ∩ O_j| / |O_j|")
         st.dataframe(o_share_df, use_container_width=True)
 
-    # --- Сводка по вершинам ---
+    # --- Сводка по школам ---
     st.markdown("---")
-    st.markdown("### 4. Характеристики вершин графа")
+    st.markdown("### 4. Активность каждой школы")
+    st.info(
+        "Высокий показатель «В скольких других школах оппонировали» означает, что учёные этой школы "
+        "востребованы как эксперты в широком круге. "
+        "Высокий «Из скольких школ приглашали» – что школа активно привлекает внешних экспертов."
+    )
     st.dataframe(stats_df, use_container_width=True, hide_index=True)
-
-    # --- Граф ---
-    st.markdown("---")
-    st.markdown("### 5. Ориентированный граф пересечений научных школ")
-
-    G = build_opponents_intersection_graph(raw_df, min_weight=int(min_weight))
-
-    if G.number_of_edges() == 0:
-        st.warning("При выбранном пороге дуг в графе нет. Попробуйте уменьшить порог.")
-    else:
-        st.caption(
-            f"Вершин: {G.number_of_nodes()}, дуг: {G.number_of_edges()}"
-            f" (порог веса ≥ {min_weight})"
-        )
-
-        try:
-            from pyvis.network import Network as PyvisNetwork
-            import json as _json
-
-            net = PyvisNetwork(
-                height="700px", width="100%", directed=True, bgcolor="#ffffff"
-            )
-            net.toggle_physics(True)
-            for node in G.nodes():
-                net.add_node(str(node), label=str(node), title=str(node),
-                             shape="box", color="#ADD8E6")
-            for u, v, data in G.edges(data=True):
-                w = data.get("weight", 1)
-                net.add_edge(str(u), str(v), value=w,
-                             title=f"{u} → {v}: {w}", arrows="to")
-            vis_opts = {
-                "nodes": {"font": {"size": 11}},
-                "edges": {
-                    "arrows": {"to": {"enabled": True, "scaleFactor": 0.8}},
-                    "smooth": {"type": "curvedCW", "roundness": 0.15},
-                },
-                "physics": {
-                    "forceAtlas2Based": {
-                        "gravitationalConstant": -80,
-                        "centralGravity": 0.01,
-                        "springLength": 200,
-                    },
-                    "solver": "forceAtlas2Based",
-                    "stabilization": {"iterations": 200},
-                },
-            }
-            net.set_options(_json.dumps(vis_opts))
-            try:
-                html = net.generate_html()
-            except AttributeError:
-                from pathlib import Path as _Path
-                tmp = _Path("_tmp_graph.html")
-                net.save_graph(str(tmp))
-                html = tmp.read_text(encoding="utf-8")
-                try:
-                    tmp.unlink()
-                except Exception:
-                    pass
-            st.components.v1.html(html, height=720, scrolling=True)
-
-        except ImportError:
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(figsize=(max(8, len(G) * 0.6), 6))
-            pos = nx.spring_layout(G, k=2.5, seed=42)
-            weights = [G[u][v]["weight"] for u, v in G.edges()]
-            max_w = max(weights) if weights else 1
-            widths = [1 + 4 * w / max_w for w in weights]
-            nx.draw(G, pos, with_labels=True, node_color="#ADD8E6",
-                    node_size=2500, font_size=8, arrows=True, width=widths, ax=ax)
-            edge_labels = {(u, v): d["weight"] for u, v, d in G.edges(data=True)}
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
-                                         font_size=7, ax=ax)
-            ax.set_title("Граф экспертного присутствия научных школ", fontsize=12)
-            fig.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
 
     # --- Детализация: кто именно пересёкся ---
     st.markdown("---")
-    st.markdown("### 6. Детализация пересечений (персоны)")
+    st.markdown("### 5. Кто именно связывает школы")
+    st.markdown(
+        "Список учёных, которые являются членами одной школы и одновременно выступали оппонентами в другой."
+    )
     if persons_df.empty:
         st.info("Пересечений не обнаружено.")
     else:
         st.caption(f"Всего записей: {len(persons_df)}")
         filter_source = st.selectbox(
-            "Фильтр по школе-источнику",
-            options=["Все"] + sorted(persons_df["Школа-источник (член)"].unique()),
+            "Показать людей из школы",
+            options=["Все"] + sorted(persons_df["Школа, к которой принадлежит человек"].unique()),
             key="opponents_intersection_filter_source",
         )
         display_df = persons_df
         if filter_source != "Все":
-            display_df = display_df[display_df["Школа-источник (член)"] == filter_source]
+            display_df = display_df[display_df["Школа, к которой принадлежит человек"] == filter_source]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # --- Скачивание ---
     st.markdown("---")
+    st.markdown("### Скачать результаты")
     col_dl1, col_dl2 = st.columns(2)
     with col_dl1:
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            raw_df.to_excel(writer, sheet_name="Пересечение (абс)")
-            jaccard_df.to_excel(writer, sheet_name="Жаккар")
-            m_share_df.to_excel(writer, sheet_name="Доля от членов")
-            o_share_df.to_excel(writer, sheet_name="Доля от оппонентов")
+            raw_df.to_excel(writer, sheet_name="Число пересечений")
+            jaccard_df.to_excel(writer, sheet_name="Относит схожесть (Жаккар)")
+            m_share_df.to_excel(writer, sheet_name="Доля от членов школы")
+            o_share_df.to_excel(writer, sheet_name="Доля от оппонентов школы")
             stats_df.to_excel(writer, index=False, sheet_name="Сводка вершин")
             if not persons_df.empty:
                 persons_df.to_excel(writer, index=False, sheet_name="Персоны")
@@ -574,5 +494,5 @@ def render_opponents_intersection_tab(
 
 
 def _cache_key(selected_schools: List[str], scope: str) -> str:
-    """FIX #2: Уникальный ключ кэша для данного набора школ и глубины."""
+    """Уникальный ключ кэша для данного набора школ и глубины."""
     return "opp_intersection_" + "|".join(sorted(selected_schools)) + "_" + scope
