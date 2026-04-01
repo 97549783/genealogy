@@ -20,6 +20,19 @@ DEFAULT_SCORES_FOLDER = "basic_scores"
 DEFAULT_MIN_SCORE = 4.0
 SELECTION_LIMIT = 5
 
+ABSTRACT_URL_TEMPLATE = (
+    "https://rusneb.ru/local/tools/exalead/getFiles.php"
+    "?book_id={code}&name={author}&doc_type=pdf"
+)
+
+
+def _build_abstract_url(code: str, author: str) -> str:
+    """Формирует URL автореферата по коду диссертации и ФИО автора."""
+    return ABSTRACT_URL_TEMPLATE.format(
+        code=str(code).strip(),
+        author=str(author).strip(),
+    )
+
 
 # ==============================================================================
 # ЗАГРУЗКА ДАННЫХ
@@ -200,6 +213,20 @@ def format_results_for_display(
     """
     Форматирует результаты для отображения в UI.
 
+    Порядок колонок в итоговой таблице:
+        1. Автор
+        2. Название
+        3. Год
+        4. Степень
+        5. Отрасль науки
+        6. Организация
+        7. Научные руководители
+        8. Специальность 1
+        9. Специальность 2
+        10. Сумма баллов
+        11. Баллы по выбранным темам
+        (колонка «Скачать автореферат» добавляется отдельно при экспорте)
+
     Args:
         results: DataFrame с результатами поиска и метаданными
         selected_codes: Список выбранных кодов классификатора
@@ -223,7 +250,10 @@ def format_results_for_display(
             results[label] = results[code].round(2)
 
     # Объединяем имена научных руководителей
-    supervisor_cols = [col for col in ["supervisors_1.name", "supervisors_2.name"] if col in results.columns]
+    supervisor_cols = [
+        col for col in ["supervisors_1.name", "supervisors_2.name"]
+        if col in results.columns
+    ]
 
     if supervisor_cols:
         def join_names(row: pd.Series) -> str:
@@ -243,7 +273,6 @@ def format_results_for_display(
 
     # Словарь для переименования колонок
     rename_map = {
-        "Code": "Код диссертации",
         "candidate.name": "Автор",
         "title": "Название",
         "year": "Год",
@@ -255,9 +284,8 @@ def format_results_for_display(
         "profile_total": "Сумма баллов",
     }
 
-    # Определяем порядок колонок для отображения
+    # Порядок колонок для отображения в UI (без Code и без ссылки)
     column_order = [
-        "Code",
         "candidate.name",
         "title",
         "year",
@@ -274,6 +302,54 @@ def format_results_for_display(
     display_df = results[display_columns].rename(columns=rename_map)
 
     return display_df, rename_map
+
+
+def build_export_df(
+    results: pd.DataFrame,
+    display_df: pd.DataFrame,
+    for_excel: bool = False,
+) -> pd.DataFrame:
+    """
+    Формирует DataFrame для экспорта в CSV или XLSX.
+
+    В CSV-версии: все колонки из display_df плюс столбец «Ссылка на автореферат»
+    с сырым URL.
+    В XLSX-версии: столбец «Скачать автореферат» с гиперссылкой-формулой Excel
+    вместо столбца «Ссылка на автореферат».
+
+    Колонка с автором/ссылкой идёт первой.
+
+    Args:
+        results: исходный DataFrame (до rename_map, содержит Code и candidate.name)
+        display_df: уже переименованный DataFrame для UI
+        for_excel: если True — готовим XLSX-версию с Excel-формулой гиперссылки
+
+    Returns:
+        DataFrame готовый для экспорта
+    """
+    export_df = display_df.copy()
+
+    # Вычисляем URL, если есть нужные колонки
+    if "Code" in results.columns and "candidate.name" in results.columns:
+        urls = results.apply(
+            lambda row: _build_abstract_url(
+                row["Code"], row.get("candidate.name", "")
+            ),
+            axis=1,
+        ).values
+
+        if for_excel:
+            # Excel HYPERLINK-формула: =HYPERLINK(url, "Автореферат")
+            export_df.insert(
+                0,
+                "Скачать автореферат",
+                [f'=HYPERLINK("{u}","Автореферат")' for u in urls],
+            )
+        else:
+            # CSV: сырой URL
+            export_df.insert(0, "Ссылка на автореферат", urls)
+
+    return export_df
 
 
 # ==============================================================================
