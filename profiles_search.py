@@ -238,6 +238,12 @@ def format_results_for_display(
     if classifier_labels is None:
         classifier_labels = {}
 
+    # Фильтруем строки, где название (title) равно None/NaN или пустой строке
+    if "title" in results.columns:
+        results = results[results["title"].notna()]
+        results = results[results["title"].astype(str).str.strip() != ""]
+        results = results[results["title"].astype(str).str.lower() != "none"]
+
     # Создаем подписи для баллов по кодам
     score_labels = {}
     for code in selected_codes:
@@ -285,6 +291,7 @@ def format_results_for_display(
     }
 
     # Порядок колонок для отображения в UI (без Code и без ссылки)
+    # candidate.name (Автор) явно включён первым, перед title (Название)
     column_order = [
         "candidate.name",
         "title",
