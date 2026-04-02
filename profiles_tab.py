@@ -22,6 +22,7 @@ try:
         search_by_codes,
         merge_with_dissertation_info,
         format_results_for_display,
+        build_export_df,
         validate_code_selection,
         classifier_label,
         SELECTION_LIMIT,
@@ -37,6 +38,7 @@ except ImportError:
         search_by_codes,
         merge_with_dissertation_info,
         format_results_for_display,
+        build_export_df,
         validate_code_selection,
         classifier_label,
         SELECTION_LIMIT,
@@ -160,7 +162,7 @@ def classifier_format(
         return "— выберите пункт —"
 
     code, title, disabled = option
-    indent = " " * classifier_depth(code)  # em space для отступов
+    indent = " " * classifier_depth(code)  # em space для отступов
     label = f"{code} {title}"
 
     if disabled:
@@ -394,6 +396,7 @@ def render_search_by_topics(
 
         # Показываем результаты
         display_df = st.session_state.get("profile_results")
+        results_full = st.session_state.get("profile_results_full")
 
         if display_df is not None and not display_df.empty:
 
@@ -422,8 +425,11 @@ def render_search_by_topics(
                     axis=1
                 )
                 filtered_df = display_df[mask]
+                # Фильтруем и results_full синхронно по индексу
+                filtered_full = results_full.loc[filtered_df.index] if results_full is not None else None
             else:
                 filtered_df = display_df
+                filtered_full = results_full
 
             if len(filtered_df) != len(display_df):
                 st.success(
@@ -443,8 +449,16 @@ def render_search_by_topics(
             col_dl1, col_dl2 = st.columns(2)
 
             with col_dl1:
-                # CSV
-                csv_data = filtered_df.to_csv(index=False, encoding="utf-8-sig")
+                # CSV — сырой URL без гиперссылки
+                try:
+                    csv_export = build_export_df(
+                        results=filtered_full,
+                        display_df=filtered_df,
+                        for_excel=False,
+                    )
+                except Exception:
+                    csv_export = filtered_df
+                csv_data = csv_export.to_csv(index=False, encoding="utf-8-sig")
                 st.download_button(
                     label="📄 Скачать CSV",
                     data=csv_data.encode("utf-8-sig"),
@@ -455,11 +469,16 @@ def render_search_by_topics(
                 )
 
             with col_dl2:
-                # Excel
+                # Excel — гиперссылка + лист «Результаты»
                 try:
+                    xlsx_export = build_export_df(
+                        results=filtered_full,
+                        display_df=filtered_df,
+                        for_excel=True,
+                    )
                     buf_xlsx = io.BytesIO()
                     with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
-                        filtered_df.to_excel(writer, index=False, sheet_name="Results")
+                        xlsx_export.to_excel(writer, index=False, sheet_name="Результаты")
                     data_xlsx = buf_xlsx.getvalue()
 
                     st.download_button(
