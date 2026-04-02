@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import io
 import re
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 import streamlit as st
 
+from utils.graph import lineage
 from articles_comparison import (
     DistanceMetric,
     DISTANCE_METRIC_LABELS,
@@ -374,7 +375,6 @@ def _build_articles_dataset(
     options_meta: Dict[str, str],
     df_lineage: pd.DataFrame,
     idx_lineage: Dict[str, Set[int]],
-    lineage_func: Callable,
     df_articles: pd.DataFrame,
     scope: str,
 ) -> pd.DataFrame:
@@ -404,9 +404,9 @@ def _build_articles_dataset(
             root_full = opt
             if scope == "direct" or scope == "all":
                 try:
-                    G, _ = lineage_func(df_lineage, idx_lineage, root_full)
+                    G, _ = lineage(df_lineage, idx_lineage, root_full)
                 except TypeError:
-                    G, _ = lineage_func(df_lineage, idx_lineage, root_full)
+                    G, _ = lineage(df_lineage, idx_lineage, root_full)
                 if G is not None and getattr(G, "has_node", lambda _: False)(root_full):
                     if scope == "direct":
                         names = set(getattr(G, "successors")(root_full))
@@ -463,7 +463,6 @@ def _build_articles_dataset(
 def render_articles_comparison_tab(
     df_lineage: pd.DataFrame,
     idx_lineage: Dict[str, Set[int]],
-    lineage_func: Callable,
     selected_roots: Optional[List[str]] = None,
     classifier_labels: Optional[Dict[str, str]] = None,
 ) -> None:
@@ -644,7 +643,6 @@ def render_articles_comparison_tab(
                 options_meta=options_meta,
                 df_lineage=df_lineage,
                 idx_lineage=idx_lineage,
-                lineage_func=lineage_func,
                 df_articles=df_articles,
                 scope=scope,
             )
