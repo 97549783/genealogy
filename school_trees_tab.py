@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import io
 import zipfile
-from typing import Callable, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
 
 from school_trees import build_pyvis_html, draw_matplotlib
-from utils.graph import TREE_OPTIONS, lineage
+from utils.graph import TREE_OPTIONS, lineage, slug
 from utils.ui import download_data_dialog, show_instruction
 from utils.urls import share_button
 
@@ -29,184 +29,193 @@ def render_school_trees_tab(
     all_supervisor_names: List[str],
     shared_roots: Optional[List[str]] = None,
 ) -> None:
-    """
-    Отрисовывает вкладку «Построение деревьев».
+    """Отрисовывает вкладку «Построение деревьев»."""
+    if st.button("📖 Инструкция", key="instruction_lineages"):
+        show_instruction("lineages")
 
-    Аргументы:
-        df                   — основной DataFrame с диссертациями
-        idx                  — индекс имён (build_index)
-        all_supervisor_names — список всех научных руководителей для виджета выбора
-        shared_roots         — имена, переданные через URL (?root=...), или None
-    """
-    # ── Заголовок и инструкция ────────────────────────────────────────────────
-    col_title, col_help = st.columns([0.85, 0.15])
-    with col_title:
-        st.subheader("Построение деревьев научного руководства")
-    with col_help:
-        if st.button("📖 Инструкция", key="lineages_help_btn"):
-            show_instruction("lineages")
+    st.subheader("Выбор научных руководителей для построения деревьев")
+    shared_roots = shared_roots or []
+    valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
+    manual_prefill = "\n".join(r for r in shared_roots if r not in all_supervisor_names)
 
-    # ── Выбор руководителей ───────────────────────────────────────────────────
-    default_roots = shared_roots or []
-    selected_roots: List[str] = st.multiselect(
+    roots = st.multiselect(
         "Выберите имена из базы",
-        options=all_supervisor_names,
-        default=[r for r in default_roots if r in all_supervisor_names],
-        placeholder="Начните вводить фамилию…",
+        options=sorted(all_supervisor_names),
+        default=valid_shared_roots,
+        help="Список формируется из столбцов с руководителями",
         key="lineages_selected_roots",
     )
+    manual = st.text_area(
+        "Или добавьте имена вручную в формате: Фамилия Имя Отчество (по одному на строку)",
+        height=120,
+        value=manual_prefill,
+        key="lineages_manual_roots",
+    )
+    manual_list = [r.strip() for r in manual.splitlines() if r.strip()]
+    roots = list(dict.fromkeys([*roots, *manual_list]))
 
-    # ── Опции ─────────────────────────────────────────────────────────────────
-    col_opts_l, col_opts_r = st.columns([0.6, 0.4])
-    with col_opts_l:
-        tree_option_labels = [label for label, _, _ in TREE_OPTIONS]
-        tree_choice = st.radio(
-            "Тип дерева",
-            options=range(len(TREE_OPTIONS)),
-            format_func=lambda i: tree_option_labels[i],
-            horizontal=True,
-            key="lineages_tree_type",
-        )
-    with col_opts_r:
-        save_md = st.checkbox(
-            "Также сохранить оглавление (.md)",
-            value=False,
-            key="lineages_save_md",
-        )
+    build_clicked = st.button("Построить деревья", type="primary", key="build_trees")
+    if build_clicked or shared_roots:
+        st.session_state["lineages_built"] = True
+    build = st.session_state.get("lineages_built", False)
 
-    _, tree_slug, first_level_filter = TREE_OPTIONS[tree_choice]
+    tree_option_labels = [label for label, _, _ in TREE_OPTIONS]
+    selected_tree_labels = st.multiselect(
+        "Типы деревьев для построения",
+        options=tree_option_labels,
+        default=[tree_option_labels[0]],
+        help="Фильтрация по степени применяется только к первому уровню относительно выбранного руководителя.",
+        key="lineages_tree_types",
+    )
+    selected_tree_labels = selected_tree_labels or [tree_option_labels[0]]
+    selected_tree_configs = [opt for opt in TREE_OPTIONS if opt[0] in selected_tree_labels]
+    export_md_outline = st.checkbox(
+        "Также сохранить оглавление (.md)",
+        value=False,
+        key="lineages_save_md",
+    )
 
-    # ── Кнопка запуска ────────────────────────────────────────────────────────
-    run = st.button("Построить деревья", type="primary", key="lineages_run")
-    if not run:
+    if not build:
         return
-    if not selected_roots:
-        st.warning("Выберите хотя бы одного научного руководителя.")
+
+    if not roots:
+        st.warning("Пожалуйста, выберите или введите хотя бы одно имя руководителя.")
         return
 
-    # ── Построение деревьев ───────────────────────────────────────────────────
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for root_name in selected_roots:
-            st.markdown(f"---\n### 🌳 {root_name}")
+    all_zip_buf = io.BytesIO()
+    with zipfile.ZipFile(all_zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for root in roots:
+            st.markdown("---")
+            st.subheader(f"▶ {root}")
 
-            G, subset = lineage(df, idx, root_name, first_level_filter)
-
-            if G.number_of_nodes() == 0:
-                st.info(f"Потомки для «{root_name}» не найдены.")
-                continue
-
-            node_count = G.number_of_nodes()
-            edge_count = G.number_of_edges()
-            st.caption(
-                f"Узлов: {node_count} · Связей: {edge_count} · "
-                f"Диссертаций в таблице: {len(subset)}"
-            )
-
-            # ── Статичный PNG ────────────────────────────────────────────────
-            with st.spinner("Рисую PNG…"):
-                fig = draw_matplotlib(G, root_name)
-            st.pyplot(fig)
-
-            # PNG → в ZIP
-            png_buf = io.BytesIO()
-            fig.savefig(png_buf, format="png", bbox_inches="tight", dpi=150)
-            import matplotlib.pyplot as plt
-            plt.close(fig)
-            root_slug = _slugify(root_name)
-            zf.writestr(f"{root_slug}_{tree_slug}.png", png_buf.getvalue())
-
-            # Кнопка скачивания PNG
-            st.download_button(
-                label="⬇ Скачать PNG",
-                data=png_buf.getvalue(),
-                file_name=f"{root_slug}_{tree_slug}.png",
-                mime="image/png",
-                key=f"dl_png_{root_slug}_{tree_slug}",
-            )
-
-            # ── Интерактивный граф ───────────────────────────────────────────
-            with st.spinner("Генерирую интерактивный граф…"):
-                html_content = build_pyvis_html(G, root_name)
-            st.components.v1.html(html_content, height=1050, scrolling=False)
-
-            # HTML → в ZIP
-            html_bytes = html_content.encode("utf-8")
-            zf.writestr(f"{root_slug}_{tree_slug}.html", html_bytes)
-
-            # Кнопка скачивания HTML
-            st.download_button(
-                label="⬇ Скачать HTML",
-                data=html_bytes,
-                file_name=f"{root_slug}_{tree_slug}.html",
-                mime="text/html",
-                key=f"dl_html_{root_slug}_{tree_slug}",
-            )
-
-            # ── Таблица данных ───────────────────────────────────────────────
-            if not subset.empty:
-                with st.expander(f"📋 Таблица данных ({len(subset)} строк)", expanded=False):
-                    st.dataframe(subset, use_container_width=True, hide_index=True)
-                    download_data_dialog(
-                        subset,
-                        file_base=f"{root_slug}_{tree_slug}_data",
-                        key_prefix=f"dl_data_{root_slug}_{tree_slug}",
-                    )
-
-            # ── Оглавление Markdown ──────────────────────────────────────────
-            if save_md:
-                md_text = _build_md_toc(G, root_name)
-                md_bytes = md_text.encode("utf-8")
-                zf.writestr(f"{root_slug}_{tree_slug}_toc.md", md_bytes)
-                st.download_button(
-                    label="⬇ Скачать оглавление (.md)",
-                    data=md_bytes,
-                    file_name=f"{root_slug}_{tree_slug}_toc.md",
-                    mime="text/markdown",
-                    key=f"dl_md_{root_slug}_{tree_slug}",
+            tree_results = []
+            for label, suffix, first_level_filter in selected_tree_configs:
+                G, subset = lineage(df, idx, root, first_level_filter=first_level_filter)
+                tree_results.append(
+                    {
+                        "label": label,
+                        "suffix": suffix,
+                        "graph": G,
+                        "subset": subset,
+                    }
                 )
 
-    # ── Кнопка «Скачать всё ZIP» (если несколько деревьев) ───────────────────
-    if len(selected_roots) > 1:
+            root_slug = slug(root)
+            person_entries: List[tuple[str, bytes]] = []
+            has_content = False
+
+            for tree in tree_results:
+                label = tree["label"]
+                suffix = tree["suffix"]
+                G = tree["graph"]
+                subset = tree["subset"]
+
+                if G.number_of_edges() == 0:
+                    st.info(f"{label}: потомки не найдены для выбранного типа дерева.")
+                    continue
+
+                has_content = True
+                st.markdown(f"#### 🌳 {label}")
+
+                fig = draw_matplotlib(G, root)
+                png_buf = io.BytesIO()
+                fig.savefig(png_buf, format="png", dpi=300, bbox_inches="tight")
+                png_bytes = png_buf.getvalue()
+
+                st.image(png_bytes, caption="Миниатюра PNG", width=220)
+
+                html = build_pyvis_html(G, root)
+                st.components.v1.html(html, height=800, width=2000, scrolling=True)
+                html_bytes = html.encode("utf-8")
+
+                md_bytes = None
+                if export_md_outline:
+                    out_lines: List[str] = []
+
+                    def walk(n: str, d: int = 0) -> None:
+                        out_lines.append(f"{'  ' * d}- {n}")
+                        for c in G.successors(n):
+                            walk(c, d + 1)
+
+                    walk(root)
+                    md_bytes = ("\n".join(out_lines)).encode("utf-8")
+
+                file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
+
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    st.download_button(
+                        "Скачать PNG",
+                        data=png_bytes,
+                        file_name=f"{file_prefix}.png",
+                        mime="image/png",
+                        key=f"png_{file_prefix}",
+                    )
+                with c2:
+                    st.download_button(
+                        "Скачать HTML",
+                        data=html_bytes,
+                        file_name=f"{file_prefix}.html",
+                        mime="text/html",
+                        key=f"html_{file_prefix}",
+                    )
+                with c3:
+                    if st.button("📥 Таблица данных", key=f"data_{file_prefix}"):
+                        download_data_dialog(
+                            subset,
+                            f"{file_prefix}.sampling",
+                            f"tree_{file_prefix}",
+                        )
+                with c4:
+                    if md_bytes is not None:
+                        st.download_button(
+                            "Скачать оглавление .md",
+                            data=md_bytes,
+                            file_name=f"{file_prefix}.xmind.md",
+                            mime="text/markdown",
+                            key=f"md_{file_prefix}",
+                        )
+                    else:
+                        st.empty()
+
+                person_entries.append((f"{file_prefix}.png", png_bytes))
+                person_entries.append((f"{file_prefix}.html", html_bytes))
+                csv_bytes = subset.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+                person_entries.append((f"{file_prefix}.sampling.csv", csv_bytes))
+                try:
+                    buf_xlsx = io.BytesIO()
+                    with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
+                        subset.to_excel(writer, index=False)
+                    person_entries.append((f"{file_prefix}.sampling.xlsx", buf_xlsx.getvalue()))
+                except Exception:
+                    pass
+                if md_bytes is not None:
+                    person_entries.append((f"{file_prefix}.xmind.md", md_bytes))
+
+            if has_content and len(person_entries) > 1:
+                person_zip_buf = io.BytesIO()
+                with zipfile.ZipFile(person_zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED) as person_zip:
+                    for fname, content in person_entries:
+                        person_zip.writestr(fname, content)
+                        zf.writestr(f"{root_slug}/{fname}", content)
+
+                st.download_button(
+                    "⬇ Скачать всё для этого руководителя (ZIP)",
+                    data=person_zip_buf.getvalue(),
+                    file_name=f"{root_slug}.zip",
+                    mime="application/zip",
+                    key=f"zip_{root_slug}",
+                )
+
+    if len(roots) > 1:
         st.markdown("---")
         st.download_button(
             label="⬇ Скачать всё (ZIP)",
-            data=zip_buf.getvalue(),
-            file_name=f"trees_{tree_slug}.zip",
+            data=all_zip_buf.getvalue(),
+            file_name="trees_bundle.zip",
             mime="application/zip",
-            key=f"dl_zip_{tree_slug}",
+            key="dl_zip_all_trees",
         )
 
-    # ── Кнопка «Поделиться» ───────────────────────────────────────────────────
     st.markdown("---")
-    share_button(selected_roots, key="lineages_share")
-
-
-# ── Вспомогательные ───────────────────────────────────────────────────────────
-
-def _slugify(s: str) -> str:
-    """Безопасное имя файла из произвольной строки."""
-    import re
-    return re.sub(r"[^A-Za-zА-Яа-я0-9]+", "_", s).strip("_") or "tree"
-
-
-def _build_md_toc(G, root: str, indent: str = "  ") -> str:
-    """
-    Строит текстовое оглавление дерева в формате Markdown.
-    Использует BFS, сохраняя порядок по уровням.
-    """
-    from collections import deque
-
-    lines: list[str] = [f"# {root}\n"]
-    q: deque = deque([(root, 0)])
-    seen: set = set()
-    while q:
-        node, depth = q.popleft()
-        if node in seen:
-            continue
-        seen.add(node)
-        if node != root:
-            lines.append(f"{indent * depth}- {node}")
-        for child in G.successors(node):
-            q.append((child, depth + 1))
-    return "\n".join(lines)
+    share_button(roots, key="lineages_share")
