@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from utils.graph import lineage, rows_for
+
 # Безопасные импорты с fallback
 try:
     from profiles_search import (
@@ -378,12 +380,6 @@ def render_search_by_topics(
                 )
 
                 # Форматирование для отображения
-                # format_results_for_display возвращает тройку:
-                # display_df — для UI (с reset_index и rename)
-                # rename_map — словарь переименований
-                # results_full — исходный DataFrame с согласованным индексом
-                #                (после reset_index и фильтрации по title),
-                #                пригодный для build_export_df
                 display_df, rename_map, results_full = format_results_for_display(
                     results=results,
                     selected_codes=selected_codes,
@@ -431,7 +427,6 @@ def render_search_by_topics(
                     axis=1
                 )
                 filtered_df = display_df[mask]
-                # Фильтруем и results_full синхронно по индексу
                 filtered_full = results_full.loc[filtered_df.index] if results_full is not None else None
             else:
                 filtered_df = display_df
@@ -444,7 +439,7 @@ def render_search_by_topics(
             else:
                 st.success(f"Показано {len(display_df)} диссертаций.")
 
-            # Конфигурация колонок: «Скачать» отображается как кликабельная ссылка
+            # Конфигурация колонок
             column_config = {}
             if "Скачать" in filtered_df.columns:
                 column_config["Скачать"] = st.column_config.LinkColumn(
@@ -467,7 +462,6 @@ def render_search_by_topics(
             col_dl1, col_dl2 = st.columns(2)
 
             with col_dl1:
-                # CSV — сырой URL без гиперссылки
                 try:
                     csv_export = build_export_df(
                         results=filtered_full,
@@ -487,7 +481,6 @@ def render_search_by_topics(
                 )
 
             with col_dl2:
-                # Excel — гиперссылка + лист «Результаты»
                 try:
                     xlsx_export = build_export_df(
                         results=filtered_full,
@@ -518,8 +511,6 @@ def render_search_by_topics(
 def render_profiles_tab(
     df: pd.DataFrame,
     idx: Dict[str, set],
-    lineage_func,
-    rows_for_func,
     thematic_classifier: List[Tuple[str, str, bool]],
     scores_folder: str = DEFAULT_SCORES_FOLDER,
     specific_files: Optional[List[str]] = None,
@@ -531,8 +522,6 @@ def render_profiles_tab(
     Args:
         df: Основной DataFrame с диссертациями
         idx: Индекс для поиска по именам
-        lineage_func: Функция построения дерева
-        rows_for_func: Функция поиска строк по имени
         thematic_classifier: Список элементов классификатора (код, название, disabled)
         scores_folder: Папка с CSV-профилями
         specific_files: Список конкретных CSV-файлов (None = все из папки)
@@ -609,8 +598,6 @@ def render_profiles_tab(
         render_entropy_specificity_tab(
             df=df,
             idx=idx,
-            lineage_func=lineage_func,
-            rows_for_func=rows_for_func,
             scores_folder=scores_folder,
             specific_files=specific_files,
             classifier_labels=classifier_dict,

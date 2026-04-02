@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from utils.graph import lineage, rows_for
 from school_search import (
     FUZZY_THRESHOLD,
     build_excel_search_results,
@@ -54,7 +55,7 @@ SEARCH_MODES: Dict[str, str] = {
     "depth":              "🌳 1.4 Глубина дерева (число поколений)",
     "supervisor_rate":    "🎓 1.5 Доля учеников, ставших научными руководителями",
     # Группа 2
-    "city":               "🌆 2.1 Число защит в указанном городе",
+    "city":               "🏙️ 2.1 Число защит в указанном городе",
     "geo_diversity":      "🗺️ 2.2 Географическое разнообразие (число уникальных городов)",
     # Группа 3
     "org_prepared":       "🏢 3.1 По организации выполнения",
@@ -83,7 +84,7 @@ def _bar_chart(
     title: str,
     color: str = "#4C9BE8",
 ) -> plt.Figure:
-    """Horizontal bar chart — наглядная диаграмма результатов."""
+    """Горизонтальная бар-чарт — наглядная диаграмма результатов."""
     fig, ax = plt.subplots(figsize=(8, max(3, len(df) * 0.45)))
     xs = df[x_col].astype(str)
     ax.barh(xs[::-1], df[y_col][::-1], color=color)
@@ -192,8 +193,6 @@ def _render_results(
 def render_school_search_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    lineage_func: Callable,
-    rows_for_func: Callable,
     classifier: Optional[List[Tuple[str, str, bool]]] = None,
     scores_folder: str = "basic_scores",
 ) -> None:
@@ -201,12 +200,10 @@ def render_school_search_tab(
     Отрисовывает вкладку «Поиск научных школ».
 
     Аргументы:
-        df              — основной DataFrame с диссертациями
-        idx             — индекс имён
-        lineage_func    — функция построения дерева преемственности
-        rows_for_func   — функция поиска строк по имени
-        classifier      — THEMATIC_CLASSIFIER из streamlit_app.py
-        scores_folder   — путь к basic_scores
+        df            — основной DataFrame с диссертациями
+        idx           — индекс имён
+        classifier    — THEMATIC_CLASSIFIER из streamlit_app.py
+        scores_folder — путь к basic_scores
     """
     st.subheader("Поиск научных школ")
 
@@ -283,7 +280,7 @@ def render_school_search_tab(
         extra_params = {"year": year}
 
     elif search_mode == "city":
-        st.markdown("### 🌆 Город")
+        st.markdown("### 🏙️ Город")
         city_query = st.text_input(
             "Введите название города (полностью или частично)",
             placeholder="например, Москва",
@@ -399,7 +396,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_total_members(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
             )
         _render_results(
@@ -413,7 +410,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_members_in_period(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 year_from=extra_params["year_from"],
                 year_to=extra_params["year_to"],
                 scope=scope, top_n=top_n,
@@ -432,7 +429,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_members_in_year(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 year=year_val, scope=scope, top_n=top_n,
             )
         _render_results(
@@ -446,7 +443,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_depth(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 top_n=top_n,
             )
         _render_results(
@@ -460,7 +457,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_supervisor_rate(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
             )
         _render_results(
@@ -477,7 +474,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_city(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 city_query=extra_params["city_query"],
                 scope=scope, top_n=top_n,
             )
@@ -492,7 +489,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_geo_diversity(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
             )
         _render_results(
@@ -509,7 +506,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_institution_prepared(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
             )
@@ -524,7 +521,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_defense_location(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
             )
@@ -539,7 +536,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_leading_organization(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
             )
@@ -558,7 +555,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df = search_by_classifier_score(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 classifier_node=classifier_node,
                 scores_folder=scores_folder,
                 scope=scope, top_n=top_n,
@@ -580,7 +577,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_opponent(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 person_query=extra_params["person_query"],
                 scope=scope, top_n=top_n,
             )
@@ -597,7 +594,7 @@ def render_school_search_tab(
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_member(
                 df=df, index=idx,
-                lineage_func=lineage_func, rows_for_func=rows_for_func,
+                lineage_func=lineage, rows_for_func=rows_for,
                 person_query=extra_params["person_query"],
                 scope=scope, top_n=top_n,
             )
