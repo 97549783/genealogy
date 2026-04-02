@@ -228,7 +228,7 @@ def format_results_for_display(
     Форматирует результаты для отображения в UI.
 
     Порядок колонок в итоговой таблице:
-        1. ФИО автора
+        1. Автор
         2. Название
         3. Год
         4. Степень
@@ -304,7 +304,7 @@ def format_results_for_display(
 
     # Словарь для переименования колонок
     rename_map = {
-        "candidate.name": "ФИО автора",
+        "candidate.name": "Автор",
         "title": "Название",
         "year": "Год",
         "degree.degree_level": "Степень",
