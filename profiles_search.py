@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import urllib.parse
 import pandas as pd
 
 
@@ -27,10 +28,15 @@ ABSTRACT_URL_TEMPLATE = (
 
 
 def _build_abstract_url(code: str, author: str) -> str:
-    """Формирует URL автореферата по коду диссертации и ФИО автора."""
+    """Формирует URL автореферата по коду диссертации и ФИО автора.
+
+    ФИО автора URL-энкодируется, чтобы пробелы и спецсимволы
+    не нарушали корректность ссылки.
+    """
+    encoded_author = urllib.parse.quote(str(author).strip(), safe="")
     return ABSTRACT_URL_TEMPLATE.format(
         code=str(code).strip(),
-        author=str(author).strip(),
+        author=encoded_author,
     )
 
 
@@ -228,12 +234,13 @@ def format_results_for_display(
     Форматирует результаты для отображения в UI.
 
     Порядок колонок в итоговой таблице:
+        0. Скачать (ссылка на автореферат)
         1. Автор
         2. Название
         3. Год
         4. Степень
         5. Отрасль науки
-        6. Организация
+        6. Организация выполнения
         7. Научный руководитель
         8. Специальность 1
         9. Специальность 2
@@ -302,6 +309,19 @@ def format_results_for_display(
             .apply(join_names, axis=1)
         )
 
+    # Добавляем колонку «Скачать» с URL автореферата для отображения в UI
+    if "Code" in results.columns and "candidate.name" in results.columns:
+        results["Скачать"] = results.apply(
+            lambda row: _build_abstract_url(
+                row["Code"], row.get("candidate.name", "")
+            ),
+            axis=1,
+        )
+    elif "Code" in results.columns:
+        results["Скачать"] = results["Code"].apply(
+            lambda code: _build_abstract_url(code, "")
+        )
+
     # Словарь для переименования колонок
     rename_map = {
         "candidate.name": "Автор",
@@ -309,7 +329,7 @@ def format_results_for_display(
         "year": "Год",
         "degree.degree_level": "Степень",
         "degree.science_field": "Отрасль науки",
-        "institution_prepared": "Организация",
+        "institution_prepared": "Организация выполнения",
         "specialties_1.name": "Специальность 1",
         "specialties_2.name": "Специальность 2",
         "profile_total": "Сумма баллов",
@@ -317,6 +337,7 @@ def format_results_for_display(
 
     # Порядок колонок для отображения в UI
     column_order = [
+        "Скачать",
         "candidate.name",
         "title",
         "year",
@@ -348,7 +369,7 @@ def build_export_df(
     В XLSX-версии: столбец «Скачать автореферат» с гиперссылкой-формулой Excel
     вместо столбца «Ссылка на автореферат».
 
-    Колонка с автором/ссылкой идёт первой.
+    Колонка со ссылкой идёт первой.
 
     Args:
         results: исходный DataFrame (до rename_map, содержит Code и candidate.name).
@@ -360,7 +381,9 @@ def build_export_df(
     Returns:
         DataFrame готовый для экспорта
     """
-    export_df = display_df.copy()
+    # Убираем колонку «Скачать» из display_df, если она попала туда
+    # (в экспорте она будет заменена на версию со ссылкой/формулой)
+    export_df = display_df.drop(columns=["Скачать"], errors="ignore").copy()
 
     # Вычисляем URL, если есть нужные колонки
     if "Code" in results.columns and "candidate.name" in results.columns:
