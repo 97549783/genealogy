@@ -223,12 +223,12 @@ def format_results_for_display(
     results: pd.DataFrame,
     selected_codes: List[str],
     classifier_labels: Optional[Dict[str, str]] = None
-) -> Tuple[pd.DataFrame, Dict[str, str]]:
+) -> Tuple[pd.DataFrame, Dict[str, str], pd.DataFrame]:
     """
     Форматирует результаты для отображения в UI.
 
     Порядок колонок в итоговой таблице:
-        1. Автор
+        1. ФИО автора
         2. Название
         3. Год
         4. Степень
@@ -246,7 +246,11 @@ def format_results_for_display(
         classifier_labels: Словарь {код: название} для красивых названий
 
     Returns:
-        Tuple из (отформатированный DataFrame, словарь переименований колонок)
+        Tuple из:
+          - отформатированный DataFrame для UI (display_df)
+          - словарь переименований колонок (rename_map)
+          - отфильтрованный исходный DataFrame с согласованным индексом
+            (filtered_results), пригодный для передачи в build_export_df
     """
     if classifier_labels is None:
         classifier_labels = {}
@@ -257,9 +261,13 @@ def format_results_for_display(
         results = results[results["title"].astype(str).str.strip() != ""]
         results = results[results["title"].astype(str).str.lower() != "none"]
 
-    # Сбрасываем индекс после фильтрации, чтобы build_export_df работал с
-    # согласованным индексом (loc по display_df.index не вызывает ошибку)
+    # Сбрасываем индекс после фильтрации — это гарантирует, что
+    # display_df и filtered_results имеют одинаковый индекс 0..N-1,
+    # поэтому build_export_df не получает несогласованные длины.
     results = results.reset_index(drop=True)
+
+    # Сохраняем отфильтрованный исходный DataFrame для экспорта
+    filtered_results = results.copy()
 
     # Создаем подписи для баллов по кодам
     score_labels = {}
@@ -296,7 +304,7 @@ def format_results_for_display(
 
     # Словарь для переименования колонок
     rename_map = {
-        "candidate.name": "Автор",
+        "candidate.name": "ФИО автора",
         "title": "Название",
         "year": "Год",
         "degree.degree_level": "Степень",
@@ -324,7 +332,7 @@ def format_results_for_display(
     display_columns = [col for col in column_order if col in results.columns]
     display_df = results[display_columns].rename(columns=rename_map)
 
-    return display_df, rename_map
+    return display_df, rename_map, filtered_results
 
 
 def build_export_df(
@@ -356,7 +364,7 @@ def build_export_df(
 
     # Вычисляем URL, если есть нужные колонки
     if "Code" in results.columns and "candidate.name" in results.columns:
-        # results уже имеет согласованный индекс (0..N-1) благодаря reset_index’у
+        # results уже имеет согласованный индекс (0..N-1) благодаря reset_index'у
         # в format_results_for_display, поэтому прямой .values достаточно
         urls = results.apply(
             lambda row: _build_abstract_url(
