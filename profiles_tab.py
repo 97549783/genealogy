@@ -378,7 +378,13 @@ def render_search_by_topics(
                 )
 
                 # Форматирование для отображения
-                display_df, rename_map = format_results_for_display(
+                # format_results_for_display возвращает тройку:
+                # display_df — для UI (с reset_index и rename)
+                # rename_map — словарь переименований
+                # results_full — исходный DataFrame с согласованным индексом
+                #                (после reset_index и фильтрации по title),
+                #                пригодный для build_export_df
+                display_df, rename_map, results_full = format_results_for_display(
                     results=results,
                     selected_codes=selected_codes,
                     classifier_labels=classifier_dict
@@ -386,7 +392,7 @@ def render_search_by_topics(
 
                 # Сохраняем в session state
                 st.session_state["profile_results"] = display_df
-                st.session_state["profile_results_full"] = results
+                st.session_state["profile_results_full"] = results_full
 
             except Exception as exc:
                 st.error(f"❌ Ошибка при поиске: {exc}")
