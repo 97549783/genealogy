@@ -444,8 +444,6 @@ with tab_profiles:
     render_profiles_tab(
         df=df,
         idx=idx,
-        lineage_func=None,          # profiles_tab использует свой импорт
-        rows_for_func=None,
         thematic_classifier=THEMATIC_CLASSIFIER,
         scores_folder="basic_scores",
         specific_files=None,
@@ -456,8 +454,6 @@ with tab_school_search:
     render_school_search_tab(
         df=df,
         idx=idx,
-        lineage_func=None,
-        rows_for_func=None,
         classifier=THEMATIC_CLASSIFIER,
         scores_folder="basic_scores",
     )
@@ -467,8 +463,6 @@ with tab_intersection:
     render_opponents_intersection_tab(
         df=df,
         idx=idx,
-        lineage_func=None,
-        rows_for_func=None,
     )
 
 # ---------- Вкладка: Анализ научной школы --------------------------------
@@ -476,8 +470,6 @@ with tab_school_analysis:
     render_school_analysis_tab(
         df=df,
         idx=idx,
-        lineage_func=None,
-        rows_for_func=None,
         classifier=THEMATIC_CLASSIFIER,
         scores_folder="basic_scores",
     )
@@ -488,8 +480,6 @@ with tab_schoolcomparison:
     render_school_comparison_tab(
         df=df,
         idx=idx,
-        lineage_func=None,
-        rows_for_func=None,
         scores_folder="basic_scores",
         specific_files=None,
         classifier_labels=classifier_labels,
@@ -500,15 +490,12 @@ with tab_articles_comparison:
     render_articles_comparison_tab(
         df_lineage=df,
         idx_lineage=idx,
-        lineage_func=None,
-        selected_roots=[],
     )
 
 # ---------- Закомментированные вкладки -----------------------------------
 # with tab_schoolcomparison_new:
 #     render_school_comparison_new_tab(
 #         df=df, idx=idx,
-#         lineage_func=None, rows_for_func=None,
 #         scores_folder="basic_scores",
 #         specific_files=None,
 #         classifier_labels={code: title for code, title, _ in THEMATIC_CLASSIFIER},
