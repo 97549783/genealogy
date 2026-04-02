@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import io
-from typing import Callable, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from utils.graph import lineage, rows_for
 from school_comparison import (
     DistanceMetric,
     ComparisonScope,
@@ -129,8 +130,6 @@ def show_instruction_dialog() -> None:
 def render_school_comparison_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    lineage_func: Callable,
-    rows_for_func: Callable,
     scores_folder: str = DEFAULT_SCORES_FOLDER,
     specific_files: Optional[List[str]] = None,
     classifier_labels: Optional[Dict[str, str]] = None,
@@ -141,8 +140,6 @@ def render_school_comparison_tab(
     Args:
         df: Основной DataFrame с диссертациями
         idx: Индекс для поиска по именам
-        lineage_func: Функция построения генеалогии
-        rows_for_func: Функция поиска строк
         scores_folder: Папка с CSV-профилями
         specific_files: Список конкретных CSV-файлов (None = все из папки)
         classifier_labels: Словарь {код: название} для подписей узлов
@@ -357,8 +354,8 @@ def render_school_comparison_tab(
                         root=school_name,
                         scores=scores_df,
                         scope=selected_scope,
-                        lineage_func=lineage_func,
-                        rows_for_func=rows_for_func,
+                        lineage_func=lineage,
+                        rows_for_func=rows_for,
                         author_column=AUTHOR_COLUMN,
                     )
                     datasets[school_name] = dataset
