@@ -25,6 +25,9 @@ ABSTRACT_URL_TEMPLATE = (
     "?book_id={code}&name={author}&doc_type=pdf"
 )
 
+# Возможные названия колонки с ИМЕНЕМ автора (с точкой или с подчёркиванием)
+_AUTHOR_COL_CANDIDATES = ["candidate.name", "candidate_name"]
+
 
 def _build_abstract_url(code: str, author: str) -> str:
     """Формирует URL автореферата по коду диссертации и ФИО автора."""
@@ -32,6 +35,19 @@ def _build_abstract_url(code: str, author: str) -> str:
         code=str(code).strip(),
         author=str(author).strip(),
     )
+
+
+def _resolve_author_col(df: pd.DataFrame) -> Optional[str]:
+    """
+    Возвращает фактическое название колонки автора в df.
+
+    Проверяет в порядке: "candidate.name" -> "candidate_name".
+    Если ни одно не найдено, возвращает None.
+    """
+    for col in _AUTHOR_COL_CANDIDATES:
+        if col in df.columns:
+            return col
+    return None
 
 
 # ==============================================================================
@@ -158,6 +174,11 @@ def merge_with_dissertation_info(
     """
     Объединяет результаты поиска с метаданными диссертаций.
 
+    Автоматически определяет название колонки автора: проверяет "candidate.name",
+    затем "candidate_name".
+    В результирующем DataFrame колонка всегда представлена под унифицированным
+    названием "candidate.name".
+
     Args:
         search_results: Результаты поиска (Code + баллы + profile_total)
         dissertations_df: Основной DataFrame с информацией о диссертациях
@@ -170,6 +191,7 @@ def merge_with_dissertation_info(
     info_columns = [
         "Code",
         "candidate.name",
+        "candidate_name",
         "title",
         "year",
         "degree.degree_level",
@@ -191,6 +213,11 @@ def merge_with_dissertation_info(
         )
     else:
         info_df = pd.DataFrame(columns=["Code"])
+
+    # Если колонка называется "candidate_name" (без точки), переименуем её
+    # в "candidate.name" для единообразного дальнейшего обращения
+    if "candidate.name" not in info_df.columns and "candidate_name" in info_df.columns:
+        info_df = info_df.rename(columns={"candidate_name": "candidate.name"})
 
     # Объединяем результаты с информацией
     results = search_results.merge(info_df, on="Code", how="left")
@@ -214,7 +241,7 @@ def format_results_for_display(
     Форматирует результаты для отображения в UI.
 
     Порядок колонок в итоговой таблице:
-        1. Автор
+        1. ФИО автора
         2. Название
         3. Год
         4. Степень
@@ -279,7 +306,7 @@ def format_results_for_display(
 
     # Словарь для переименования колонок
     rename_map = {
-        "candidate.name": "Автор",
+        "candidate.name": "ФИО автора",
         "title": "Название",
         "year": "Год",
         "degree.degree_level": "Степень",
@@ -290,8 +317,7 @@ def format_results_for_display(
         "profile_total": "Сумма баллов",
     }
 
-    # Порядок колонок для отображения в UI (без Code и без ссылки)
-    # candidate.name (Автор) явно включён первым, перед title (Название)
+    # Порядок колонок: "candidate.name" (ФИО автора) первым, затем "title" (Название)
     column_order = [
         "candidate.name",
         "title",
@@ -324,8 +350,6 @@ def build_export_df(
     В XLSX-версии: столбец «Скачать автореферат» с гиперссылкой-формулой Excel
     вместо столбца «Ссылка на автореферат».
 
-    Колонка с автором/ссылкой идёт первой.
-
     Args:
         results: исходный DataFrame (до rename_map, содержит Code и candidate.name)
         display_df: уже переименованный DataFrame для UI
@@ -337,23 +361,22 @@ def build_export_df(
     export_df = display_df.copy()
 
     # Вычисляем URL, если есть нужные колонки
-    if "Code" in results.columns and "candidate.name" in results.columns:
+    author_col = _resolve_author_col(results)
+    if "Code" in results.columns and author_col is not None:
         urls = results.apply(
             lambda row: _build_abstract_url(
-                row["Code"], row.get("candidate.name", "")
+                row["Code"], row.get(author_col, "")
             ),
             axis=1,
         ).values
 
         if for_excel:
-            # Excel HYPERLINK-формула: =HYPERLINK(url, "Автореферат")
             export_df.insert(
                 0,
                 "Скачать автореферат",
                 [f'=HYPERLINK("{u}","Автореферат")' for u in urls],
             )
         else:
-            # CSV: сырой URL
             export_df.insert(0, "Ссылка на автореферат", urls)
 
     return export_df
