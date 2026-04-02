@@ -444,8 +444,20 @@ def render_search_by_topics(
             else:
                 st.success(f"Показано {len(display_df)} диссертаций.")
 
+            # Конфигурация колонок: «Скачать» отображается как кликабельная ссылка
+            column_config = {}
+            if "Скачать" in filtered_df.columns:
+                column_config["Скачать"] = st.column_config.LinkColumn(
+                    label="Скачать",
+                    display_text="Автореферат",
+                )
+
             # Отображаем таблицу
-            st.dataframe(filtered_df, use_container_width=True)
+            st.dataframe(
+                filtered_df,
+                use_container_width=True,
+                column_config=column_config,
+            )
 
             # Скачивание результатов
             st.markdown("### 📥 Скачать результаты")
