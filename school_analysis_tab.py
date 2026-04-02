@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from utils.graph import lineage, rows_for
 from school_analysis import (
     collect_school_subset,
     compute_overview,
@@ -68,11 +69,9 @@ def _scores_folder_available(scores_folder: str) -> bool:
     1. Текущая рабочая директория (CWD) — работает локально и на Streamlit Cloud.
     2. Рядом с файлом самого модуля — запасной вариант.
     """
-    # Вариант 1: относительный путь от CWD
     p1 = Path(scores_folder)
     if p1.exists() and any(p1.glob("*.csv")):
         return True
-    # Вариант 2: рядом с файлом вкладки
     p2 = Path(__file__).parent / scores_folder
     if p2.exists() and any(p2.glob("*.csv")):
         return True
@@ -104,7 +103,7 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
 
 
 def _clear_school_cache(root: str, scope: str) -> None:
-    """FIX #4: Очищает кэш школы из session_state."""
+    """Очищает кэш школы из session_state."""
     for s in ("direct", "all"):
         key = f"school_subset_{root}_{s}"
         if key in st.session_state:
@@ -119,8 +118,6 @@ def _clear_school_cache(root: str, scope: str) -> None:
 def render_school_analysis_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    lineage_func: Callable,
-    rows_for_func: Callable,
     classifier: Optional[List[Tuple[str, str, bool]]] = None,
     scores_folder: str = DEFAULT_SCORES_FOLDER,
 ) -> None:
@@ -130,8 +127,6 @@ def render_school_analysis_tab(
     Аргументы:
         df              — основной DataFrame с диссертациями
         idx             — индекс имён
-        lineage_func    — функция построения дерева преемственности
-        rows_for_func   — функция поиска строк по имени
         classifier      — THEMATIC_CLASSIFIER из streamlit_app.py
         scores_folder   — путь к basic_scores
     """
@@ -169,7 +164,6 @@ def render_school_analysis_tab(
 
     st.markdown("---")
 
-    # FIX #4: кнопки запуска и сброса кэша рядом
     col_run, col_reset = st.columns([3, 1])
     with col_run:
         run_clicked = st.button("Построить анализ", key="school_analysis_run", type="primary")
@@ -180,12 +174,11 @@ def render_school_analysis_tab(
             st.rerun()
 
     if not run_clicked:
-        # Показываем результат из кэша, если он уже есть
         if f"school_subset_{root}_direct" not in st.session_state:
             return
 
     # =========================================================================
-    # FIX #1: Сбор данных с кэшированием в session_state
+    # Сбор данных с кэшированием в session_state
     # =========================================================================
     key_direct = f"school_subset_{root}_direct"
     key_all = f"school_subset_{root}_all"
@@ -193,11 +186,11 @@ def render_school_analysis_tab(
     with st.spinner("Сбор диссертаций школы..."):
         if key_direct not in st.session_state:
             st.session_state[key_direct] = collect_school_subset(
-                df, idx, root, "direct", lineage_func, rows_for_func
+                df, idx, root, "direct", lineage, rows_for
             )
         if key_all not in st.session_state:
             st.session_state[key_all] = collect_school_subset(
-                df, idx, root, "all", lineage_func, rows_for_func
+                df, idx, root, "all", lineage, rows_for
             )
 
     subset_direct: pd.DataFrame = st.session_state[key_direct]
@@ -217,7 +210,7 @@ def render_school_analysis_tab(
         subset=subset,
         root=root,
         index=idx,
-        lineage_func=lineage_func,
+        lineage_func=lineage,
         df_full=df,
         scope=scope,
     )
@@ -252,8 +245,8 @@ def render_school_analysis_tab(
             df_full=df,
             index=idx,
             root=root,
-            lineage_func=lineage_func,
-            rows_for_func=rows_for_func,
+            lineage_func=lineage,
+            rows_for_func=rows_for,
             subset_direct=subset_direct,
             subset_all=subset_all,
         )
@@ -349,7 +342,6 @@ def render_school_analysis_tab(
         "Средние баллы по всем диссертациям школы, для которых доступны оценки в basic_scores."
     )
 
-    # FIX #2: робастная проверка папки (CWD и рядом с модулем)
     scores_available = _scores_folder_available(scores_folder)
 
     if not scores_available:
@@ -365,7 +357,6 @@ def render_school_analysis_tab(
         knowledge_df = pd.DataFrame()
     else:
         with st.spinner("Вычисление тематического профиля..."):
-            # FIX #3: убран устаревший параметр group_prefix_level
             education_df, knowledge_df = compute_thematic_profile(
                 subset=subset,
                 scores_folder=scores_folder,
@@ -399,7 +390,7 @@ def render_school_analysis_tab(
             df_full=df,
             index=idx,
             subset_direct=subset_direct,
-            rows_for_func=rows_for_func,
+            rows_for_func=rows_for,
         )
 
     if continuity_df.empty:
