@@ -62,12 +62,14 @@
 from __future__ import annotations
 
 import io
-import re
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+from utils.graph import lineage, rows_for
+from utils.names import norm as _norm
 
 # ---------------------------------------------------------------------------
 #  Константы
@@ -83,56 +85,6 @@ SCOPE_LABELS = {
 }
 
 # ---------------------------------------------------------------------------
-#  Вспомогательные функции (нормализация, поиск по индексу)
-# ---------------------------------------------------------------------------
-
-def _norm(s: str) -> str:
-    """
-    FIX #1: Нормализация ФИО совместима с streamlit_app.py:
-    - заменяет точки пробелами (инициалы «И.И.» → «и и»)
-    - заменяет «ё» → «е»
-    - приводит к нижнему регистру
-    - сжимает множественные пробелы
-    """
-    return re.sub(r"\s+", " ", s.replace(".", " ").replace("ё", "е")).strip().lower()
-
-
-def _split_full(full: str) -> Tuple[str, str, str]:
-    p = full.split()
-    p += ["", "", ""]
-    return p[0], p[1] if len(p) > 1 else "", p[2] if len(p) > 2 else ""
-
-
-def _variants(full: str) -> Set[str]:
-    last, first, mid = _split_full(full.strip())
-    fi, mi = first[:1], mid[:1]
-    init = fi + mi
-    initdots = ".".join(init) + "." if init else ""
-    return {
-        v.strip()
-        for v in [
-            full,
-            f"{last} {first} {mid}".strip(),
-            f"{last} {init}",
-            f"{last} {initdots}",
-            f"{init} {last}",
-            f"{initdots} {last}",
-        ]
-        if v
-    }
-
-
-def _rows_for(
-    df: pd.DataFrame,
-    index: Dict[str, Set[int]],
-    name: str,
-) -> pd.DataFrame:
-    hits: Set[int] = set()
-    for v in _variants(name):
-        hits.update(index.get(_norm(v), set()))
-    return df.loc[list(hits)] if hits else df.iloc[0:0]
-
-# ---------------------------------------------------------------------------
 #  Сбор множеств M_i (члены) и O_i (оппоненты) для школы
 # ---------------------------------------------------------------------------
 
@@ -141,8 +93,6 @@ def _collect_members(
     index: Dict[str, Set[int]],
     root: str,
     scope: str,
-    lineage_func: Callable,
-    rows_for_func: Callable,
 ) -> Tuple[Set[str], pd.DataFrame]:
     """
     Возвращает (множество нормализованных имён членов, подмножество df).
@@ -150,9 +100,9 @@ def _collect_members(
     scope='all'    – полное дерево.
     """
     if scope == "direct":
-        subset = rows_for_func(df, index, root)
+        subset = rows_for(df, index, root)
     else:  # 'all'
-        _G, subset = lineage_func(df, index, root)
+        _G, subset = lineage(df, index, root)
 
     members: Set[str] = set()
     members.add(_norm(root))
@@ -262,8 +212,6 @@ def compute_intersection_analysis(
 def render_opponents_intersection_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    lineage_func: Callable,
-    rows_for_func: Callable,
 ) -> None:
     """Отображает вкладку «Взаимосвязи научных школ (через институт оппонентов)»."""
 
@@ -367,7 +315,6 @@ def render_opponents_intersection_tab(
             for i, school_name in enumerate(selected_schools):
                 members, subset = _collect_members(
                     df, idx, school_name, selected_scope,
-                    lineage_func, rows_for_func,
                 )
                 opponents = _collect_opponents(subset)
                 school_data[school_name] = (members, opponents)
