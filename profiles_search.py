@@ -25,9 +25,6 @@ ABSTRACT_URL_TEMPLATE = (
     "?book_id={code}&name={author}&doc_type=pdf"
 )
 
-# Возможные названия колонки с ИМЕНЕМ автора (с точкой или с подчёркиванием)
-_AUTHOR_COL_CANDIDATES = ["candidate.name", "candidate_name"]
-
 
 def _build_abstract_url(code: str, author: str) -> str:
     """Формирует URL автореферата по коду диссертации и ФИО автора."""
@@ -35,19 +32,6 @@ def _build_abstract_url(code: str, author: str) -> str:
         code=str(code).strip(),
         author=str(author).strip(),
     )
-
-
-def _resolve_author_col(df: pd.DataFrame) -> Optional[str]:
-    """
-    Возвращает фактическое название колонки автора в df.
-
-    Проверяет в порядке: "candidate.name" -> "candidate_name".
-    Если ни одно не найдено, возвращает None.
-    """
-    for col in _AUTHOR_COL_CANDIDATES:
-        if col in df.columns:
-            return col
-    return None
 
 
 # ==============================================================================
@@ -174,11 +158,6 @@ def merge_with_dissertation_info(
     """
     Объединяет результаты поиска с метаданными диссертаций.
 
-    Автоматически определяет название колонки автора: проверяет "candidate.name",
-    затем "candidate_name".
-    В результирующем DataFrame колонка всегда представлена под унифицированным
-    названием "candidate.name".
-
     Args:
         search_results: Результаты поиска (Code + баллы + profile_total)
         dissertations_df: Основной DataFrame с информацией о диссертациях
@@ -187,11 +166,16 @@ def merge_with_dissertation_info(
     Returns:
         DataFrame с полной информацией о найденных диссертациях
     """
-    # Определяем доступные информационные колонки
+    # Определяем имя колонки автора: поддерживаем оба варианта
+    # (candidate.name с точкой и candidate_name с подчёркиванием)
+    author_col = None
+    for candidate in ("candidate.name", "candidate_name"):
+        if candidate in dissertations_df.columns:
+            author_col = candidate
+            break
+
     info_columns = [
         "Code",
-        "candidate.name",
-        "candidate_name",
         "title",
         "year",
         "degree.degree_level",
@@ -202,6 +186,9 @@ def merge_with_dissertation_info(
         "specialties_1.name",
         "specialties_2.name",
     ]
+
+    if author_col is not None:
+        info_columns.insert(1, author_col)
 
     available_info_columns = [col for col in info_columns if col in dissertations_df.columns]
 
@@ -214,9 +201,9 @@ def merge_with_dissertation_info(
     else:
         info_df = pd.DataFrame(columns=["Code"])
 
-    # Если колонка называется "candidate_name" (без точки), переименуем её
-    # в "candidate.name" для единообразного дальнейшего обращения
-    if "candidate.name" not in info_df.columns and "candidate_name" in info_df.columns:
+    # Если автор называется candidate_name — переименуем в candidate.name,
+    # чтобы остальной код работал единообразно
+    if author_col == "candidate_name" and "candidate_name" in info_df.columns:
         info_df = info_df.rename(columns={"candidate_name": "candidate.name"})
 
     # Объединяем результаты с информацией
@@ -241,18 +228,17 @@ def format_results_for_display(
     Форматирует результаты для отображения в UI.
 
     Порядок колонок в итоговой таблице:
-        1. ФИО автора
+        1. Автор
         2. Название
         3. Год
         4. Степень
         5. Отрасль науки
         6. Организация
-        7. Научные руководители
+        7. Научный руководитель
         8. Специальность 1
         9. Специальность 2
         10. Сумма баллов
         11. Баллы по выбранным темам
-        (колонка «Скачать автореферат» добавляется отдельно при экспорте)
 
     Args:
         results: DataFrame с результатами поиска и метаданными
@@ -270,6 +256,10 @@ def format_results_for_display(
         results = results[results["title"].notna()]
         results = results[results["title"].astype(str).str.strip() != ""]
         results = results[results["title"].astype(str).str.lower() != "none"]
+
+    # Сбрасываем индекс после фильтрации, чтобы build_export_df работал с
+    # согласованным индексом (loc по display_df.index не вызывает ошибку)
+    results = results.reset_index(drop=True)
 
     # Создаем подписи для баллов по кодам
     score_labels = {}
@@ -298,7 +288,7 @@ def format_results_for_display(
                         names.append(clean)
             return ", ".join(names)
 
-        results["Научные руководители"] = (
+        results["Научный руководитель"] = (
             results[supervisor_cols]
             .replace(pd.NA, "")
             .apply(join_names, axis=1)
@@ -306,7 +296,7 @@ def format_results_for_display(
 
     # Словарь для переименования колонок
     rename_map = {
-        "candidate.name": "ФИО автора",
+        "candidate.name": "Автор",
         "title": "Название",
         "year": "Год",
         "degree.degree_level": "Степень",
@@ -317,7 +307,7 @@ def format_results_for_display(
         "profile_total": "Сумма баллов",
     }
 
-    # Порядок колонок: "candidate.name" (ФИО автора) первым, затем "title" (Название)
+    # Порядок колонок для отображения в UI
     column_order = [
         "candidate.name",
         "title",
@@ -325,7 +315,7 @@ def format_results_for_display(
         "degree.degree_level",
         "degree.science_field",
         "institution_prepared",
-        "Научные руководители",
+        "Научный руководитель",
         "specialties_1.name",
         "specialties_2.name",
         "profile_total",
@@ -350,8 +340,12 @@ def build_export_df(
     В XLSX-версии: столбец «Скачать автореферат» с гиперссылкой-формулой Excel
     вместо столбца «Ссылка на автореферат».
 
+    Колонка с автором/ссылкой идёт первой.
+
     Args:
-        results: исходный DataFrame (до rename_map, содержит Code и candidate.name)
+        results: исходный DataFrame (до rename_map, содержит Code и candidate.name).
+                 Должен иметь согласованный индекс с display_df (обеспечивается
+                 через reset_index в format_results_for_display).
         display_df: уже переименованный DataFrame для UI
         for_excel: если True — готовим XLSX-версию с Excel-формулой гиперссылки
 
@@ -361,11 +355,12 @@ def build_export_df(
     export_df = display_df.copy()
 
     # Вычисляем URL, если есть нужные колонки
-    author_col = _resolve_author_col(results)
-    if "Code" in results.columns and author_col is not None:
+    if "Code" in results.columns and "candidate.name" in results.columns:
+        # results уже имеет согласованный индекс (0..N-1) благодаря reset_index’у
+        # в format_results_for_display, поэтому прямой .values достаточно
         urls = results.apply(
             lambda row: _build_abstract_url(
-                row["Code"], row.get(author_col, "")
+                row["Code"], row.get("candidate.name", "")
             ),
             axis=1,
         ).values
