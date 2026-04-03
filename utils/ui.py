@@ -198,6 +198,10 @@ def show_instruction(tab_key: str) -> None:
 # Скачивание данных
 # ---------------------------------------------------------------------------
 
+# Служебные колонки, которые не нужны в экспортируемых файлах
+_EXPORT_DROP_COLUMNS = ("Код", "Уровень")
+
+
 def download_data_dialog(
     df: pd.DataFrame,
     file_base: str,
@@ -206,17 +210,22 @@ def download_data_dialog(
     """
     Рендерит кнопки скачивания данных (XLSX и CSV) прямо в основной поток страницы.
 
+    Колонки «Код» и «Уровень» автоматически исключаются из экспорта, если присутствуют.
+
     Примечание: st.download_button не работает корректно внутри @st.dialog —
     нажатие закрывает диалог и вызывает rerun без скачивания файла.
     Поэтому кнопки рендерятся inline, без обёртки в диалог.
     """
+    export_cols = [c for c in df.columns if c not in _EXPORT_DROP_COLUMNS]
+    df_export = df[export_cols]
+
     col1, col2 = st.columns(2)
 
     with col1:
         try:
             buf_xlsx = io.BytesIO()
             with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
-                df.to_excel(writer, index=False)
+                df_export.to_excel(writer, index=False)
             st.download_button(
                 label="📊 Скачать Excel (.xlsx)",
                 data=buf_xlsx.getvalue(),
@@ -232,7 +241,7 @@ def download_data_dialog(
             st.error(f"Ошибка формирования Excel: {e}")
 
     with col2:
-        data_csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+        data_csv = df_export.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button(
             label="📄 Скачать CSV (.csv)",
             data=data_csv,
