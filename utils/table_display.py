@@ -20,14 +20,14 @@ utils/table_display.py — утилиты для отображения табл
         Формирует DataFrame для рендера HTML-таблицы:
         добавляет колонку «abstract_html» с HTML-ссылками.
     build_tree_st_dataframe_df(subset) -> tuple[pd.DataFrame, dict]
-        Формирует DataFrame с pd.MultiIndex-заголовками для st.dataframe:
-        - колонки «Читать» и «Скачать» объединены под верхним уровнем «Автореферат»
-        - возвращает также column_config для LinkColumn
+        Формирует DataFrame с плоскими колонками для st.dataframe:
+        - колонки «Читать» и «Скачать» объединены под группой «Автореферат»
+          через column_config.Column(group=...)
+        - возвращает также column_config со строковыми ключами
     build_tree_export_df(subset) -> tuple[pd.DataFrame, pd.DataFrame]
         Формирует два DataFrame для экспорта:
         - xlsx_df: для Excel (колонка «Автореферат» = формула HYPERLINK)
-        - csv_df:  для CSV (колонка «Автореферат» = URL для viewer,
-                  если код числовой; иначе NLR viewer-ссылка)
+        - csv_df:  для CSV (колонка «Автореферат» = URL для viewer)
 """
 
 from __future__ import annotations
@@ -158,6 +158,10 @@ TREE_TABLE_COLUMNS: list[str] = [
 # Колонки данных (без abstract_html) — используются в build_tree_st_dataframe_df
 _DATA_COLUMNS: list[str] = [c for c in TREE_TABLE_COLUMNS if c != "abstract_html"]
 
+# Внутренние имена плоских колонок для ссылок в st.dataframe
+_COL_READ = "Читать"
+_COL_DOWNLOAD = "Скачать"
+
 
 # ---------------------------------------------------------------------------
 # Логика формирования ссылок автореферата
@@ -176,8 +180,6 @@ def make_abstract_read_url(code: str) -> str:
     Возвращает URL для онлайн-просмотра автореферата (viewer.rusneb.ru)
     для числовых кодов (только цифры и '_') и NLR-кодов.
     В остальных случаях — пустая строка.
-
-    Используется в экспорте (CSV/xlsx) в колонке «Автореферат».
 
     Args:
         code: Код диссертации.
@@ -240,12 +242,6 @@ def make_abstract_links_html(code: str, name: str) -> str:
 
     Returns:
         HTML-строка с тегами <a> или ''.
-
-    Examples:
-        >>> make_abstract_links_html("000199_000009_003279301", "Иванов И.И.")
-        '<a href="https://viewer.rusneb.ru/ru/000199_000009_003279301?page=1" target="_blank">Читать</a> <a href="https://rusneb.ru/local/tools/exalead/getFiles.php?book_id=000199_000009_003279301&name=...&doc_type=pdf" target="_blank">Скачать</a>'
-        >>> make_abstract_links_html("000200_000018_RU_NLR_bibl_574554", "Петров П.")
-        '<a href="https://viewer.rusneb.ru/ru/000200_000018_RU_NLR_bibl_574554?page=1" target="_blank">Читать</a>'
     """
     code = str(code).strip()
     if not code:
@@ -334,14 +330,6 @@ def build_tree_display_df(subset: pd.DataFrame) -> pd.DataFrame:
     Формирует DataFrame для рендера HTML-таблицы на вкладке
     «Построение деревьев».
 
-    Колонка «abstract_html» содержит HTML-фрагменты со ссылками:
-    - Числовой код → «Читать» + «Скачать» (через пробел)
-    - NLR-код      → только «Читать»
-    - Иначе        → пустая строка
-
-    Используется совместно с render_dissertation_html_table() в
-    school_trees_tab.py, которая рендерит DataFrame через st.html.
-
     Args:
         subset: DataFrame с исходными колонками (из lineage в graph.py).
 
@@ -363,45 +351,57 @@ def build_tree_st_dataframe_df(
     subset: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict]:
     """
-    Формирует DataFrame с pd.MultiIndex-заголовками для отображения через
-    st.dataframe с LinkColumn.
+    Формирует DataFrame с плоскими строковыми колонками для отображения через
+    st.dataframe с LinkColumn и группировкой через column_config.
 
-    Структура заголовков (2 уровня):
-    - Верхний уровень «Автореферат» объединяет подколонки «Читать» и «Скачать».
-    - Для остальных колонок верхний уровень — пустая строка, нижний —
-      русское название колонки.
+    ВАЖНО: используются плоские строковые имена колонок (НЕ pd.MultiIndex),
+    потому что Streamlit сериализует column_config через json.dumps —
+    а tuple-ключи не являются валидными JSON-ключами.
+
+    Колонки «Читать» и «Скачать» объединены под группой «Автореферат»
+    через параметр group= в st.column_config.LinkColumn.
 
     Правила заполнения ссылок:
     - Числовой код (только цифры и '_'):
-        Читать → https://viewer.rusneb.ru/ru/{code}?page=1
+        Читать  → https://viewer.rusneb.ru/ru/{code}?page=1
         Скачать → https://rusneb.ru/local/tools/exalead/getFiles.php?...
     - NLR-код:
-        Читать → https://viewer.rusneb.ru/ru/{code}?page=1
-        Скачать → None (пустая строка)
+        Читать  → https://viewer.rusneb.ru/ru/{code}?page=1
+        Скачать → '' (пустая строка)
     - Иначе:
-        Читать → None, Скачать → None
+        Читать  → '', Скачать → ''
 
     Args:
         subset: DataFrame с исходными колонками (из lineage в graph.py).
 
     Returns:
-        Кортеж (df_multiindex, column_config):
-        - df_multiindex: DataFrame с pd.MultiIndex в колонках.
-        - column_config: dict для параметра column_config в st.dataframe.
+        Кортеж (df_flat, column_config):
+        - df_flat: DataFrame с плоскими строковыми именами колонок.
+        - column_config: dict со строковыми ключами для st.dataframe.
     """
     import streamlit as st  # импорт здесь, чтобы не тянуть в тестах
 
+    empty_cfg: dict = {
+        _COL_READ: st.column_config.LinkColumn(
+            "Читать",
+            display_text="Читать",
+            help="Открыть автореферат в онлайн-просмотрщике",
+            group="Автореферат",
+        ),
+        _COL_DOWNLOAD: st.column_config.LinkColumn(
+            "Скачать",
+            display_text="Скачать",
+            help="Скачать PDF автореферата",
+            group="Автореферат",
+        ),
+    }
+
     if subset.empty:
-        # Возвращаем пустой DataFrame с правильной структурой заголовков
-        tuples: list[tuple[str, str]] = [
-            ("Автореферат", "Читать"),
-            ("Автореферат", "Скачать"),
-        ]
+        cols = [_COL_READ, _COL_DOWNLOAD]
         for col in _DATA_COLUMNS:
             ru = COLUMN_LABELS.get(col, col)
-            tuples.append(("", ru))
-        mi = pd.MultiIndex.from_tuples(tuples)
-        return pd.DataFrame(columns=mi), {}
+            cols.append(ru)
+        return pd.DataFrame(columns=cols), empty_cfg
 
     df = subset.copy().reset_index(drop=True)
     code_col = "Code" if "Code" in df.columns else None
@@ -420,45 +420,45 @@ def build_tree_st_dataframe_df(
         return make_abstract_download_url_numeric(code, name)
 
     if code_col and name_col:
-        read_urls = df.apply(
-            lambda r: _read_url(r.get(code_col, "")), axis=1
-        )
+        read_urls = df.apply(lambda r: _read_url(str(r.get(code_col, ""))), axis=1)
         dl_urls = df.apply(
-            lambda r: _dl_url(r.get(code_col, ""), r.get(name_col, "")), axis=1
+            lambda r: _dl_url(str(r.get(code_col, "")), str(r.get(name_col, ""))),
+            axis=1,
         )
     else:
         read_urls = pd.Series([""] * len(df))
         dl_urls = pd.Series([""] * len(df))
 
-    # --- Собираем данные колонок в порядке MultiIndex ---
-    col_data: dict[tuple[str, str], list] = {}
-    col_data[("Автореферат", "Читать")] = read_urls.tolist()
-    col_data[("Автореферат", "Скачать")] = dl_urls.tolist()
-
+    # --- Собираем плоский DataFrame ---
+    out: dict[str, list] = {
+        _COL_READ: read_urls.tolist(),
+        _COL_DOWNLOAD: dl_urls.tolist(),
+    }
     for col in _DATA_COLUMNS:
         if col not in df.columns:
             continue
         ru = COLUMN_LABELS.get(col, col)
-        col_data[("", ru)] = df[col].fillna("").astype(str).tolist()
+        out[ru] = df[col].fillna("").astype(str).tolist()
 
-    df_out = pd.DataFrame(col_data)
-    df_out.columns = pd.MultiIndex.from_tuples(list(col_data.keys()))
+    df_flat = pd.DataFrame(out)
 
-    # --- Строим column_config ---
+    # --- column_config со строковыми ключами ---
     column_config: dict = {
-        ("Автореферат", "Читать"): st.column_config.LinkColumn(
+        _COL_READ: st.column_config.LinkColumn(
             "Читать",
             display_text="Читать",
             help="Открыть автореферат в онлайн-просмотрщике",
+            group="Автореферат",
         ),
-        ("Автореферат", "Скачать"): st.column_config.LinkColumn(
+        _COL_DOWNLOAD: st.column_config.LinkColumn(
             "Скачать",
             display_text="Скачать",
             help="Скачать PDF автореферата",
+            group="Автореферат",
         ),
     }
 
-    return df_out, column_config
+    return df_flat, column_config
 
 
 def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -469,11 +469,6 @@ def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     - xlsx_df: формула Excel =HYPERLINK("url","Читать") — viewer-ссылка
                для числовых кодов и NLR-кодов. Если нет ни одной — пусто.
     - csv_df:  плоская viewer-ссылка для числовых кодов и NLR-кодов.
-               Если нет ни одной — пусто.
-
-    Изменение vs предыдущей версии:
-        Ранее CSV для числовых кодов содержал ссылку на скачивание PDF.
-        Теперь — ссылку на viewer (Читать), что удобнее для копирования.
 
     Args:
         subset: DataFrame с исходными колонками (из lineage в graph.py).
@@ -503,7 +498,6 @@ def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
         csv_row: dict = {}
         for col in ordered_cols:
             if col == "abstract_html":
-                # Получаем code напрямую из исходного df
                 code = str(row.get("Code", "")).strip()
                 read_url = make_abstract_read_url(code)
                 if read_url:
