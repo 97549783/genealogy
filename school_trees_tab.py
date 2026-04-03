@@ -45,7 +45,6 @@ def _inject_table_font_size(px: int) -> None:
         f"""
         <style>
         [data-testid="stDataFrame"] iframe {{
-            /* увеличиваем высоту фрейма, чтобы таблица не обрезалась */
             min-height: {max(300, px * 20)}px;
         }}
         [data-testid="stDataFrame"] [role="gridcell"],
@@ -67,15 +66,20 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     Отрисовывает скрытый по умолчанию expander «Список диссертаций в дереве»
     со следующими элементами:
 
-    1. Слайдер размера шрифта (8–22 пк, по умолчанию 13).
+    1. Слайдер размера шрифта (8–22 пк, по умолчанию 13) — внутри expander.
     2. Таблица с русскими названиями колонок.
-    3. Колонка «Автореферат» отображается через LinkColumn: текст берётся
-       из служебной колонки «_abstract_label» («Скачать»/«Читать»/«»).
-       Служебная колонка скрита (визуально).
-    4. Кнопки «Скачать Excel» / «Скачать CSV».
+    3. Колонка «Скачать» — LinkColumn, заполняется только для PDF-ссылок
+       (коды из цифр/подчёркиваний). Пустые ячейки Streamlit не отображает
+       как ссылки.
+    4. Колонка «Читать» — LinkColumn, заполняется только для NLR-ссылок.
+    5. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте обе ссылки
+       объединены в одну колонку «Автореферат».
 
-    Колонка «Автореферат» в xlsx: формула =HYPERLINK(«..», «Скачать»/«Читать»).
-    Колонка «Автореферат» в csv: плоская строка URL.
+    Почему две колонки вместо одной:
+        Streamlit LinkColumn.display_text принимает regex-паттерн для URL,
+        а не имя другой колонки DataFrame. Разделение на «Скачать» и «Читать»
+        — надёжное решение без хаков: каждая колонка всегда показывает
+        правильный текст ссылки.
 
     Args:
         subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
@@ -88,7 +92,7 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             st.info("Данные отсутствуют.")
             return
 
-        # --- Слайдер шрифта ---
+        # --- Слайдер шрифта (внутри expander) ---
         font_px = st.slider(
             "Размер шрифта в таблице",
             min_value=8,
@@ -101,25 +105,25 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
         _inject_table_font_size(font_px)
 
         # --- Настройка LinkColumn ---
-        # build_tree_display_df добавляет служебную колонку «_abstract_label»
-        # с значениями 'Скачать'/'Читать'/''. Именно эта колонка
-        # используется как display_text для LinkColumn.
-        # Сама колонка «_abstract_label» скрывается.
-        abstract_col = "Автореферат"
+        # Две отдельные LinkColumn вместо одной:
+        # «Скачать» — ссылка на PDF (rusneb.ru)
+        # «Читать»   — ссылка на онлайн-просмотр (viewer.rusneb.ru)
+        # Пустые ячейки (где нет ссылки) Streamlit не отображает как ссылки,
+        # поэтому разделение работает корректно без дополнительных хаков.
         column_config: dict = {}
-        if abstract_col in display_df.columns:
-            column_config[abstract_col] = st.column_config.LinkColumn(
-                label=abstract_col,
-                display_text="_abstract_label",
-                help="Скачать PDF или читать онлайн на rusneb.ru.",
+        download_col = "Скачать"
+        read_col = "Читать"
+        if download_col in display_df.columns:
+            column_config[download_col] = st.column_config.LinkColumn(
+                label=download_col,
+                display_text="Скачать",
+                help="Скачать PDF-автореферат с rusneb.ru.",
             )
-        if "_abstract_label" in display_df.columns:
-            column_config["_abstract_label"] = st.column_config.Column(
-                label="_abstract_label",
-                disabled=True,
-                # Streamlit не поддерживает hidden= напрямую,
-                # но колонка останется узкой и неприметной — её
-                # можно скрыть, сдвинув в право.
+        if read_col in display_df.columns:
+            column_config[read_col] = st.column_config.LinkColumn(
+                label=read_col,
+                display_text="Читать",
+                help="Читать автореферат онлайн на viewer.rusneb.ru.",
             )
 
         st.dataframe(
@@ -129,7 +133,7 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             key=f"df_{key}",
         )
 
-        # --- Кнопки экспорта ---
+        # --- Кнопки экспорта (внутри expander, под таблицей) ---
         xlsx_df, csv_df = build_tree_export_df(subset)
 
         col_xlsx, col_csv = st.columns(2)
@@ -280,7 +284,7 @@ def render_school_trees_tab(
 
                 file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
 
-                # Кнопки скачивания дерева (не данных таблицы — они теперь в expander)
+                # Кнопки скачивания дерева (PNG / HTML / MD)
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     st.download_button(
@@ -317,7 +321,7 @@ def render_school_trees_tab(
 
                 person_entries.append((f"{file_prefix}.png", png_bytes))
                 person_entries.append((f"{file_prefix}.html", html_bytes))
-                # Для ZIP по-прежнему кладём исходный CSV/xlsx
+                # Для ZIP кладём xlsx/csv
                 try:
                     xlsx_df_zip, csv_df_zip = build_tree_export_df(subset)
                     buf_xlsx = io.BytesIO()
