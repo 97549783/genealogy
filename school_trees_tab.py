@@ -10,6 +10,7 @@ school_trees_tab.py — интерфейс вкладки «Построение
 
 from __future__ import annotations
 
+import html as _html
 import io
 import zipfile
 from typing import Dict, List, Optional, Set
@@ -28,33 +29,102 @@ from utils.urls import share_button
 
 
 # ---------------------------------------------------------------------------
-# Служебная функция: инъекция CSS для размера шрифта в таблице
+# HTML-рендер таблицы диссертаций
 # ---------------------------------------------------------------------------
 
-def _inject_table_font_size(px: int) -> None:
+_TABLE_CSS = """
+<style>
+.diss-table-wrap {
+    overflow-x: auto;
+    font-size: {font_px}px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+.diss-table {
+    border-collapse: collapse;
+    width: 100%;
+    white-space: nowrap;
+}
+.diss-table th {
+    background: #f0f2f6;
+    border: 1px solid #d1d5db;
+    padding: 6px 10px;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.diss-table td {
+    border: 1px solid #e5e7eb;
+    padding: 5px 10px;
+    vertical-align: top;
+    white-space: normal;
+    max-width: 340px;
+}
+.diss-table tr:nth-child(even) {{ background: #f9fafb; }}
+.diss-table a {{ color: #1a73e8; text-decoration: none; }}
+.diss-table a:hover {{ text-decoration: underline; }}
+</style>
+"""
+
+
+def _df_to_html_table(display_df: pd.DataFrame, abstract_col: str = "Автореферат") -> str:
     """
-    Инъектирует CSS, который устанавливает размер шрифта в ячейках
-    всех Streamlit-таблиц (фрейм с data-testid="stDataFrame").
-    Вызывается перед каждым рендером таблицы, чтобы отразить
-    текущее значение слайдера.
+    Конвертирует DataFrame (с HTML-фрагментами в колонке «Автореферат')
+    в полноценную HTML-таблицу.
+
+    Все обычные ячейки эскейпируются; ячейки колонки «Автореферат»
+    вставляются as-is (содержат доверенный HTML из make_abstract_links_html).
 
     Args:
-        px: Размер шрифта в пикселях (8–22).
+        display_df:   DataFrame с русскими названиями колонок.
+        abstract_col: Имя колонки с HTML-ссылками (не эскейпируется).
+
+    Returns:
+        Строка с полной HTML-таблицей (без <style>).
     """
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stDataFrame"] iframe {{
-            min-height: {max(300, px * 20)}px;
-        }}
-        [data-testid="stDataFrame"] [role="gridcell"],
-        [data-testid="stDataFrame"] [role="columnheader"] {{
-            font-size: {px}px !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    cols = list(display_df.columns)
+    header = "".join(f"<th>{_html.escape(str(c))}</th>" for c in cols)
+    rows_html = []
+    for _, row in display_df.iterrows():
+        cells = []
+        for c in cols:
+            val = row[c]
+            if c == abstract_col:
+                cells.append(f"<td>{val}</td>")  # HTML as-is
+            else:
+                cells.append(f"<td>{_html.escape(str(val) if pd.notna(val) else '')}</td>")
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+    body = "\n".join(rows_html)
+    return f"<table class='diss-table'><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def render_dissertation_html_table(
+    display_df: pd.DataFrame,
+    font_px: int = 13,
+    height: int = 620,
+) -> None:
+    """
+    Рендерит таблицу диссертаций через st.html.
+
+    Использует HTML-таблицу вместо st.dataframe потому, что в одной ячейке
+    st.dataframe (LinkColumn) нельзя разместить две ссылки одновременно.
+    HTML-таблица позволяет отображать «Читать» и «Скачать» рядом в одной
+    ячейке колонки «Автореферат».
+
+    Args:
+        display_df: DataFrame из build_tree_display_df().
+        font_px:    Размер шрифта в пикселях.
+        height:     Высота блока st.html в пикселях.
+    """
+    if display_df.empty:
+        st.info("Данные отсутствуют.")
+        return
+    css = _TABLE_CSS.replace("{font_px}", str(font_px))
+    # Двойные фигурные скобки в CSS (nth-child) нужно восстановить после .format()
+    table_html = _df_to_html_table(display_df)
+    full_html = css + "<div class='diss-table-wrap'>" + table_html + "</div>"
+    st.html(full_html)
 
 
 # ---------------------------------------------------------------------------
@@ -67,19 +137,16 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     со следующими элементами:
 
     1. Слайдер размера шрифта (8–22 пк, по умолчанию 13) — внутри expander.
-    2. Таблица с русскими названиями колонок.
-    3. Колонка «Скачать» — LinkColumn, заполняется только для PDF-ссылок
-       (коды из цифр/подчёркиваний). Пустые ячейки Streamlit не отображает
-       как ссылки.
-    4. Колонка «Читать» — LinkColumn, заполняется только для NLR-ссылок.
-    5. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте обе ссылки
-       объединены в одну колонку «Автореферат».
+    2. HTML-таблица с единой колонкой «Автореферат», содержащей ссылки:
+       - числовой код → «Читать» + «Скачать» через пробел
+       - NLR-код      → только «Читать»
+       - иначе        → пусто
+    3. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте колонка
+       «Автореферат» содержит viewer-ссылку (для числовых и NLR кодов).
 
-    Почему две колонки вместо одной:
-        Streamlit LinkColumn.display_text принимает regex-паттерн для URL,
-        а не имя другой колонки DataFrame. Разделение на «Скачать» и «Читать»
-        — надёжное решение без хаков: каждая колонка всегда показывает
-        правильный текст ссылки.
+    Почему st.html вместо st.dataframe:
+        Streamlit LinkColumn не позволяет разместить две ссылки в одной ячейке.
+        HTML-таблица через st.html решает эту проблему нативно.
 
     Args:
         subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
@@ -102,36 +169,9 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             key=f"font_size_{key}",
             help="Изменяет размер шрифта в ячейках таблицы.",
         )
-        _inject_table_font_size(font_px)
 
-        # --- Настройка LinkColumn ---
-        # Две отдельные LinkColumn вместо одной:
-        # «Скачать» — ссылка на PDF (rusneb.ru)
-        # «Читать»   — ссылка на онлайн-просмотр (viewer.rusneb.ru)
-        # Пустые ячейки (где нет ссылки) Streamlit не отображает как ссылки,
-        # поэтому разделение работает корректно без дополнительных хаков.
-        column_config: dict = {}
-        download_col = "Скачать"
-        read_col = "Читать"
-        if download_col in display_df.columns:
-            column_config[download_col] = st.column_config.LinkColumn(
-                label=download_col,
-                display_text="Скачать",
-                help="Скачать PDF-автореферат с rusneb.ru.",
-            )
-        if read_col in display_df.columns:
-            column_config[read_col] = st.column_config.LinkColumn(
-                label=read_col,
-                display_text="Читать",
-                help="Читать автореферат онлайн на viewer.rusneb.ru.",
-            )
-
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            column_config=column_config,
-            key=f"df_{key}",
-        )
+        # --- HTML-таблица с единой колонкой «Автореферат» ---
+        render_dissertation_html_table(display_df, font_px=font_px)
 
         # --- Кнопки экспорта (внутри expander, под таблицей) ---
         xlsx_df, csv_df = build_tree_export_df(subset)
@@ -185,7 +225,7 @@ def render_school_trees_tab(
         options=sorted(all_supervisor_names),
         default=valid_shared_roots,
         help="Список формируется из столбцов с руководителями",
-        max_selections=20, # max_selections убирает нативную в Streamlit кнопку «Select all» и ограничивает выбор 20 руководителями.
+        max_selections=20,
         key="lineages_selected_roots",
     )
     manual = st.text_area(
