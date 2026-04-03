@@ -68,14 +68,23 @@ def _hide_select_all_for_roots() -> None:
     десятки тысяч имён.
 
     Streamlit не предоставляет параметра для отключения этой кнопки
-    в st.multiselect, поэтому используется CSS-инъекция, нацеленная
-    на data-testid конкретного виджета (lineages_selected_roots).
+    в st.multiselect, поэтому используется CSS-инъекция.
+    Несколько селекторов — страховка на разные версии Streamlit,
+    каждый из которых может рендерить кнопку иначе.
     """
     st.markdown(
         """
         <style>
-        /* Hide the native "Select all" button for the roots multiselect */
+        /* Вариант 1: по data-testid опции (актуальные версии Streamlit) */
         [data-testid="stMultiselectOption-Select all"] {
+            display: none !important;
+        }
+        /* Вариант 2: по li с data-testid внутри списка */
+        div[data-testid="stMultiSelect"] li[data-testid="stMultiselectOption-Select all"] {
+            display: none !important;
+        }
+        /* Вариант 3: первый невыбранный option внутри виджета с нужным aria-label */
+        div:has(> div > div[aria-label="Выберите имена из базы"]) div[role="option"][aria-selected="false"]:first-child {
             display: none !important;
         }
         </style>
