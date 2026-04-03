@@ -486,12 +486,13 @@ def create_node_scores_table(
     school_order: List[str],
     classifier_labels: Optional[Dict[str, str]] = None,
     selected_nodes: Optional[List[str]] = None,
+    threshold: float = 0.0,
 ) -> pd.DataFrame:
     """Строит таблицу средних баллов по всем узлам классификатора.
 
     Строки — все узлы классификатора всех уровней, отсортированные
     иерархически (родитель перед потомками). Строки, где среднее
-    равно 0 для всех школ одновременно, исключаются.
+    значение для всех школ одновременно не превышает порог, исключаются.
 
     Столбцы — сравниваемые научные школы.
     Значения — среднее по потомкам узла, усреднённое по диссертациям школы.
@@ -502,6 +503,10 @@ def create_node_scores_table(
         school_order: порядок школ в таблице
         classifier_labels: словарь {код: название узла}
         selected_nodes: если задан — показываем только потомков этих узлов
+        threshold: порог отсечения строк. Строка исключается, если для всех
+                   школ значение <= threshold. По умолчанию 0.0 (исключаются
+                   только строки, где все школы имеют нулевые значения —
+                   поведение идентично предыдущей версии).
     """
     if classifier_labels is None:
         classifier_labels = {}
@@ -557,8 +562,8 @@ def create_node_scores_table(
             row[school] = val
             school_values.append(val if val is not None else 0.0)
 
-        # Пропускаем строку, если все школы дают 0
-        if all(v == 0.0 for v in school_values):
+        # Пропускаем строку, если все школы не превышают порог
+        if all(v <= threshold for v in school_values):
             continue
 
         rows.append(row)
