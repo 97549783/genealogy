@@ -19,25 +19,71 @@ import streamlit as st
 
 from school_trees import build_pyvis_html, draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
-from utils.table_display import build_tree_display_df
-from utils.ui import download_data_dialog, show_instruction
+from utils.table_display import (
+    build_tree_display_df,
+    build_tree_export_df,
+)
+from utils.ui import show_instruction
 from utils.urls import share_button
 
 
-def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
-    """
-    Отрисовывает скрытый по умолчанию раздел «Список диссертаций в дереве»
-    с таблицей метаданных. Использует build_tree_display_df()
-    из utils/table_display.py для формирования DataFrame.
+# ---------------------------------------------------------------------------
+# Служебная функция: инъекция CSS для размера шрифта в таблице
+# ---------------------------------------------------------------------------
 
-    Колонка «Автореферат» отображается через st.column_config.LinkColumn:
-    - для PDF-ссылок отображается текст «Скачать»
-    - для viewer-ссылок отображается текст «Читать»
-    - пустые значения остаются пустыми (ничего не показывается)
+def _inject_table_font_size(px: int) -> None:
+    """
+    Инъектирует CSS, который устанавливает размер шрифта в ячейках
+    всех Streamlit-таблиц (фрейм с data-testid="stDataFrame").
+    Вызывается перед каждым рендером таблицы, чтобы отразить
+    текущее значение слайдера.
 
     Args:
-        subset: Исходный DataFrame с данными о диссертациях (results from lineage()).
-        key:    Уникальный ключ Streamlit для expander-а.
+        px: Размер шрифта в пикселях (8–22).
+    """
+    st.markdown(
+        f"""
+        <style>
+        [data-testid="stDataFrame"] iframe {{
+            min-height: {max(300, px * 20)}px;
+        }}
+        [data-testid="stDataFrame"] [role="gridcell"],
+        [data-testid="stDataFrame"] [role="columnheader"] {{
+            font-size: {px}px !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Главная функция рендеринга таблицы списка диссертаций
+# ---------------------------------------------------------------------------
+
+def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
+    """
+    Отрисовывает скрытый по умолчанию expander «Список диссертаций в дереве»
+    со следующими элементами:
+
+    1. Слайдер размера шрифта (8–22 пк, по умолчанию 13) — внутри expander.
+    2. Таблица с русскими названиями колонок.
+    3. Колонка «Скачать» — LinkColumn, заполняется только для PDF-ссылок
+       (коды из цифр/подчёркиваний). Пустые ячейки Streamlit не отображает
+       как ссылки.
+    4. Колонка «Читать» — LinkColumn, заполняется только для NLR-ссылок.
+    5. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте обе ссылки
+       объединены в одну колонку «Автореферат».
+
+    Почему две колонки вместо одной:
+        Streamlit LinkColumn.display_text принимает regex-паттерн для URL,
+        а не имя другой колонки DataFrame. Разделение на «Скачать» и «Читать»
+        — надёжное решение без хаков: каждая колонка всегда показывает
+        правильный текст ссылки.
+
+    Args:
+        subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
+        key:    Уникальный строковый ключ Streamlit для expander-а.
     """
     label = f"📋 Список диссертаций в дереве ({len(subset)})"
     with st.expander(label, expanded=False):
@@ -46,18 +92,38 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             st.info("Данные отсутствуют.")
             return
 
-        # LinkColumn делает ссылки кликабельными;
-        # display_text — regex, который Streamlit попытается извлечь
-        # из самого URL; т.к. rusneb содержит и «getFiles» и «viewer»,
-        # задаём постоянный текст «Смотреть» для всех ссылок,
-        # а возможность «Скачать» / «Читать» через tooltip.
-        abstract_col = "Автореферат"
-        column_config = {}
-        if abstract_col in display_df.columns:
-            column_config[abstract_col] = st.column_config.LinkColumn(
-                label=abstract_col,
-                display_text="Смотреть",
-                help="Скачать PDF или читать онлайн на rusneb.ru.",
+        # --- Слайдер шрифта (внутри expander) ---
+        font_px = st.slider(
+            "Размер шрифта в таблице",
+            min_value=8,
+            max_value=22,
+            value=13,
+            step=1,
+            key=f"font_size_{key}",
+            help="Изменяет размер шрифта в ячейках таблицы.",
+        )
+        _inject_table_font_size(font_px)
+
+        # --- Настройка LinkColumn ---
+        # Две отдельные LinkColumn вместо одной:
+        # «Скачать» — ссылка на PDF (rusneb.ru)
+        # «Читать»   — ссылка на онлайн-просмотр (viewer.rusneb.ru)
+        # Пустые ячейки (где нет ссылки) Streamlit не отображает как ссылки,
+        # поэтому разделение работает корректно без дополнительных хаков.
+        column_config: dict = {}
+        download_col = "Скачать"
+        read_col = "Читать"
+        if download_col in display_df.columns:
+            column_config[download_col] = st.column_config.LinkColumn(
+                label=download_col,
+                display_text="Скачать",
+                help="Скачать PDF-автореферат с rusneb.ru.",
+            )
+        if read_col in display_df.columns:
+            column_config[read_col] = st.column_config.LinkColumn(
+                label=read_col,
+                display_text="Читать",
+                help="Читать автореферат онлайн на viewer.rusneb.ru.",
             )
 
         st.dataframe(
@@ -66,6 +132,37 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             column_config=column_config,
             key=f"df_{key}",
         )
+
+        # --- Кнопки экспорта (внутри expander, под таблицей) ---
+        xlsx_df, csv_df = build_tree_export_df(subset)
+
+        col_xlsx, col_csv = st.columns(2)
+        with col_xlsx:
+            buf = io.BytesIO()
+            try:
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    xlsx_df.to_excel(writer, index=False, sheet_name="Диссертации")
+                st.download_button(
+                    label="📊 Скачать Excel",
+                    data=buf.getvalue(),
+                    file_name=f"{key}.sampling.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_xlsx_{key}",
+                    use_container_width=True,
+                )
+            except Exception as exc:
+                st.error(f"Ошибка создания Excel: {exc}")
+
+        with col_csv:
+            csv_bytes = csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+            st.download_button(
+                label="📄 Скачать CSV",
+                data=csv_bytes,
+                file_name=f"{key}.sampling.csv",
+                mime="text/csv",
+                key=f"dl_csv_{key}",
+                use_container_width=True,
+            )
 
 
 def render_school_trees_tab(
@@ -187,7 +284,8 @@ def render_school_trees_tab(
 
                 file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
 
-                c1, c2, c3, c4 = st.columns(4)
+                # Кнопки скачивания дерева (PNG / HTML / MD)
+                c1, c2, c3 = st.columns(3)
                 with c1:
                     st.download_button(
                         "Скачать PNG",
@@ -205,13 +303,6 @@ def render_school_trees_tab(
                         key=f"html_{file_prefix}",
                     )
                 with c3:
-                    if st.button("📥 Таблица данных", key=f"data_{file_prefix}"):
-                        download_data_dialog(
-                            subset,
-                            f"{file_prefix}.sampling",
-                            f"tree_{file_prefix}",
-                        )
-                with c4:
                     if md_bytes is not None:
                         st.download_button(
                             "Скачать оглавление .md",
@@ -224,19 +315,23 @@ def render_school_trees_tab(
                         st.empty()
 
                 # ----------------------------------------------------------------
-                # Список диссертаций в дереве (скрыт по умолчанию)
+                # Список диссертаций + экспорт (скрыт по умолчанию)
                 # ----------------------------------------------------------------
                 _render_tree_table(subset, key=file_prefix)
 
                 person_entries.append((f"{file_prefix}.png", png_bytes))
                 person_entries.append((f"{file_prefix}.html", html_bytes))
-                csv_bytes = subset.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-                person_entries.append((f"{file_prefix}.sampling.csv", csv_bytes))
+                # Для ZIP кладём xlsx/csv
                 try:
+                    xlsx_df_zip, csv_df_zip = build_tree_export_df(subset)
                     buf_xlsx = io.BytesIO()
                     with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
-                        subset.to_excel(writer, index=False)
+                        xlsx_df_zip.to_excel(writer, index=False, sheet_name="Диссертации")
                     person_entries.append((f"{file_prefix}.sampling.xlsx", buf_xlsx.getvalue()))
+                    person_entries.append((
+                        f"{file_prefix}.sampling.csv",
+                        csv_df_zip.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+                    ))
                 except Exception:
                     pass
                 if md_bytes is not None:

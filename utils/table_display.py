@@ -14,16 +14,22 @@ utils/table_display.py — утилиты для отображения табл
                               для таблицы на вкладке «Построение деревьев»
     make_abstract_link(code, name) -> str
         Возвращает URL автореферата (или пустую строку) по коду диссертации.
+    make_abstract_label(code) -> str
+        Возвращает текстовую метку ссылки: «Скачать», «Читать» или «».
     build_tree_display_df(subset) -> pd.DataFrame
         Формирует DataFrame для отображения в st.dataframe():
-        добавляет колонку «Автореферат», применяет порядок и русские названия.
+        добавляет две колонки — «Скачать» (URL для PDF) и «Читать» (URL для
+        онлайн-просмотра). Пустые значения скрываются Streamlit автоматически.
+    build_tree_export_df(subset) -> tuple[pd.DataFrame, pd.DataFrame]
+        Формирует два DataFrame для экспорта:
+        - xlsx_df: для Excel (колонка «Автореферат» = формула HYPERLINK)
+        - csv_df:  для CSV (колонка «Автореферат» = плоская ссылка)
 """
 
 from __future__ import annotations
 
 import re
 from urllib.parse import quote
-from typing import Optional
 
 import pandas as pd
 
@@ -63,7 +69,7 @@ COLUMN_ALIASES: dict[str, str] = {
     "opponents_3.title":    "opponents_3_rank",
 }
 
-# Обратный словарь: алиас → исходное имя (удобно для поиска колонки по любому варианту)
+# Обратный словарь: алиас → исходное имя
 _ALIAS_TO_ORIGINAL: dict[str, str] = {v: k for k, v in COLUMN_ALIASES.items()}
 
 
@@ -75,12 +81,12 @@ def _resolve(col: str) -> str:
 # ---------------------------------------------------------------------------
 # Русские названия колонок
 # Ключи — исходные имена с точками (canonical form).
-# Функции display принимают любой из вариантов через _resolve.
 # ---------------------------------------------------------------------------
 
 COLUMN_LABELS: dict[str, str] = {
-    # вычисляемая колонка
-    "abstract":                "Автореферат",
+    # вычисляемые колонки автореферата (раздельные)
+    "abstract_download":       "Скачать",
+    "abstract_read":           "Читать",
     # основные поля
     "candidate_name":          "Автор диссертации",
     "title":                   "Название диссертации",
@@ -124,38 +130,33 @@ for _orig, _alias in COLUMN_ALIASES.items():
 
 # ---------------------------------------------------------------------------
 # Порядок колонок для таблицы «Построение деревьев»
-# Используются исходные имена (с точками); build_tree_display_df найдёт
-# фактически присутствующие в DataFrame.
+# Первыми идут две раздельные колонки автореферата, затем все остальные.
 # ---------------------------------------------------------------------------
 
 TREE_TABLE_COLUMNS: list[str] = [
-    # вычисляемая — добавляется в build_tree_display_df
-    "abstract",
-    # автор и название
+    # вычисляемые колонки: «Скачать» (PDF) и «Читать» (онлайн)
+    "abstract_download",
+    "abstract_read",
     "candidate_name",
     "title",
     "year",
     "degree.degree_level",
     "degree.science_field",
-    # специальности
     "specialties_1.code",
     "specialties_1.name",
     "specialties_2.code",
     "specialties_2.name",
-    # руководители
     "supervisors_1.name",
     "supervisors_1.degree",
     "supervisors_1.title",
     "supervisors_2.name",
     "supervisors_2.degree",
     "supervisors_2.title",
-    # организации и место
     "institution_prepared",
     "defense_location",
     "city",
     "defense_council",
     "leading_organization",
-    # оппоненты
     "opponents_1.name",
     "opponents_1.degree",
     "opponents_1.title",
@@ -169,17 +170,14 @@ TREE_TABLE_COLUMNS: list[str] = [
 
 
 # ---------------------------------------------------------------------------
-# Логика формирования ссылки на автореферат
+# Логика формирования ссылок автореферата
 # ---------------------------------------------------------------------------
 
-# Шаблоны URL
 _URL_DOWNLOAD = (
     "https://rusneb.ru/local/tools/exalead/getFiles.php"
     "?book_id={code}&name={encoded_name}&doc_type=pdf"
 )
 _URL_READ = "https://viewer.rusneb.ru/ru/{code}?page=1"
-
-# Паттерн «только цифры и нижние подчёркивания»
 _RE_NUMERIC = re.compile(r'^[0-9_]+$')
 
 
@@ -189,26 +187,21 @@ def make_abstract_link(code: str, name: str) -> str:
 
     Правила:
     - Если code состоит только из цифр и нижних подчёркиваний
-      (например, «000199_000009_003279301») — ссылка на скачивание PDF
-      с именем «Автореферат. <ФИО автора>.pdf».
-      Пробелы в ФИО кодируются через urllib.parse.quote, чтобы URL
-      оставался рабочим и браузер корректно подставлял имя файла.
-    - Если code содержит подстроку «NLR»
-      (например, «000200_000018_RU_NLR_bibl_574554») — ссылка для
-      онлайн-просмотра через viewer.rusneb.ru.
-    - В остальных случаях (code пустой, неизвестный формат и т.д.)
-      возвращается пустая строка.
+      (например, «000199_000009_003279301») — ссылка на скачивание PDF.
+      Пробелы в ФИО кодируются через urllib.parse.quote.
+    - Если code содержит подстроку «NLR» — ссылка для онлайн-просмотра.
+    - В остальных случаях возвращается пустая строка.
 
     Args:
-        code: Код диссертации из колонки «Code» датафрейма.
-        name: ФИО автора (диссертанта) — используется как имя файла PDF.
+        code: Код диссертации из колонки «Code».
+        name: ФИО автора — используется как имя файла PDF.
 
     Returns:
         Строка-URL или пустая строка «».
 
     Examples:
         >>> make_abstract_link("000199_000009_003279301", "Иванов Иван Иванович")
-        'https://rusneb.ru/local/tools/exalead/getFiles.php?book_id=000199_000009_003279301&name=%D0%90%D0%B2%D1%82%D0%BE%D1%80%D0%B5%D1%84%D0%B5%D1%80%D0%B0%D1%82.%20%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2%20%D0%98%D0%B2%D0%B0%D0%BD%20%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2%D0%B8%D1%87&doc_type=pdf'
+        'https://rusneb.ru/local/tools/exalead/getFiles.php?book_id=000199_000009_003279301&name=%D0%90%D0%B2%D1%82%D0%BE%D1%80%D0%B5%D1%84%D0%B5%D1%80%D0%B0%D1%82.+%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2+%D0%98%D0%B2%D0%B0%D0%BD+%D0%98%D0%B2%D0%B0%D0%BD%D0%BE%D0%B2%D0%B8%D1%87&doc_type=pdf'
         >>> make_abstract_link("000200_000018_RU_NLR_bibl_574554", "Петров Пётр")
         'https://viewer.rusneb.ru/ru/000200_000018_RU_NLR_bibl_574554?page=1'
         >>> make_abstract_link("", "Кто-то")
@@ -217,17 +210,80 @@ def make_abstract_link(code: str, name: str) -> str:
     code = str(code).strip()
     if not code:
         return ""
-
     if _RE_NUMERIC.match(code):
-        # PDF: имя файла «Автореферат. <ФИО>.pdf»
-        # quote кодирует пробелы и кириллицу, оставляя URL рабочим
         file_name = f"Автореферат. {str(name).strip()}"
         encoded_name = quote(file_name, safe="")
         return _URL_DOWNLOAD.format(code=code, encoded_name=encoded_name)
-
     if "NLR" in code:
         return _URL_READ.format(code=code)
+    return ""
 
+
+def make_abstract_label(code: str) -> str:
+    """
+    Возвращает текстовую метку ссылки на автореферат:
+    «Скачать», «Читать» или пустая строка.
+
+    Используется совместно с make_abstract_link.
+
+    Args:
+        code: Код диссертации.
+
+    Returns:
+        'Скачать' — если только цифры/подчёркивания
+        'Читать'   — если содержит NLR
+        ''         — в остальных случаях
+    """
+    code = str(code).strip()
+    if not code:
+        return ""
+    if _RE_NUMERIC.match(code):
+        return "Скачать"
+    if "NLR" in code:
+        return "Читать"
+    return ""
+
+
+def make_abstract_download_url(code: str, name: str) -> str:
+    """
+    Возвращает URL для скачивания PDF-автореферата, если code состоит
+    только из цифр и нижних подчёркиваний. Иначе — пустую строку.
+
+    Это отдельная функция для использования в колонке «Скачать»
+    при разделённом отображении (две LinkColumn вместо одной).
+
+    Args:
+        code: Код диссертации.
+        name: ФИО автора.
+
+    Returns:
+        URL-строка или ''.
+    """
+    code = str(code).strip()
+    if code and _RE_NUMERIC.match(code):
+        file_name = f"Автореферат. {str(name).strip()}"
+        encoded_name = quote(file_name, safe="")
+        return _URL_DOWNLOAD.format(code=code, encoded_name=encoded_name)
+    return ""
+
+
+def make_abstract_read_url(code: str) -> str:
+    """
+    Возвращает URL для онлайн-просмотра автореферата, если code содержит
+    подстроку «NLR». Иначе — пустую строку.
+
+    Это отдельная функция для использования в колонке «Читать»
+    при разделённом отображении (две LinkColumn вместо одной).
+
+    Args:
+        code: Код диссертации.
+
+    Returns:
+        URL-строка или ''.
+    """
+    code = str(code).strip()
+    if code and "NLR" in code:
+        return _URL_READ.format(code=code)
     return ""
 
 
@@ -235,82 +291,185 @@ def make_abstract_link(code: str, name: str) -> str:
 # Формирование отображаемого DataFrame для таблицы деревьев
 # ---------------------------------------------------------------------------
 
+def _build_ordered_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Внутренняя функция: вычисляет abstract_download / abstract_read
+    и упорядочивает колонки согласно TREE_TABLE_COLUMNS.
+    Возвращает (df_extended, ordered_cols_list).
+
+    Примечание о дизайне:
+        Вместо единой колонки «Автореферат» используются две раздельные
+        LinkColumn — «Скачать» (только PDF) и «Читать» (только NLR).
+        Это позволяет Streamlit правильно отображать разные метки ссылок,
+        т.к. display_text в LinkColumn принимает regex-паттерн для URL,
+        а не имя другой колонки DataFrame.
+    """
+    df = subset.copy().reset_index(drop=True)
+    code_col = "Code" if "Code" in df.columns else None
+    name_col = "candidate_name" if "candidate_name" in df.columns else None
+
+    if code_col and name_col:
+        df["abstract_download"] = df.apply(
+            lambda row: make_abstract_download_url(
+                row.get(code_col, ""), row.get(name_col, "")
+            ),
+            axis=1,
+        )
+        df["abstract_read"] = df[code_col].apply(make_abstract_read_url)
+    else:
+        df["abstract_download"] = ""
+        df["abstract_read"] = ""
+
+    ordered_cols: list[str] = []
+    for col in TREE_TABLE_COLUMNS:
+        if col in ("abstract_download", "abstract_read"):
+            if col in df.columns:
+                ordered_cols.append(col)
+        elif col in df.columns:
+            ordered_cols.append(col)
+
+    return df, ordered_cols
+
+
 def build_tree_display_df(subset: pd.DataFrame) -> pd.DataFrame:
     """
     Формирует DataFrame для отображения в st.dataframe() на вкладке
     «Построение деревьев».
 
     Что делает:
-    1. Вычисляет колонку «abstract» (URL автореферата) через make_abstract_link.
-    2. Отбирает и упорядочивает колонки согласно TREE_TABLE_COLUMNS
-       (пропускает отсутствующие в subset).
-    3. Переименовывает колонки в русские названия из COLUMN_LABELS.
-       Пустые строки в колонке «abstract» остаются пустыми — Streamlit
-       не покажет ссылку для записей без автореферата.
+    1. Вычисляет колонку «abstract_download» (URL PDF) через
+       make_abstract_download_url — заполняется только для кодов из цифр/_.
+    2. Вычисляет колонку «abstract_read» (URL NLR) через
+       make_abstract_read_url — заполняется только для кодов с «NLR».
+    3. Отбирает и упорядочивает колонки согласно TREE_TABLE_COLUMNS.
+    4. Переименовывает в русские названия («Скачать» / «Читать» / ...).
+
+    Почему две колонки, а не одна:
+        Streamlit LinkColumn.display_text принимает regex-паттерн для URL,
+        а не имя другой колонки. Разделив ссылки на две колонки, мы получаем
+        нативную поддержку: «Скачать» показывается только там, где есть PDF,
+        «Читать» — только там, где есть NLR. Пустые ячейки Streamlit
+        не отображает как ссылки.
 
     Args:
-        subset: DataFrame с исходными колонками (из функции lineage в graph.py).
+        subset: DataFrame с исходными колонками (из lineage в graph.py).
 
     Returns:
-        Новый DataFrame, готовый для передачи в st.dataframe().
-        Индекс сброшен (0..N-1).
+        DataFrame с русскими названиями колонок. Первые две колонки —
+        «Скачать» (LinkColumn) и «Читать» (LinkColumn).
 
     Note:
-        Для колонки «Автореферат» используй st.column_config.LinkColumn
-        при вызове st.dataframe(), чтобы ссылки стали кликабельными:
+        Для правильной отрисовки используйте в st.dataframe():
 
             st.dataframe(
                 display_df,
                 column_config={
-                    "Автореферат": st.column_config.LinkColumn(
-                        label="Автореферат",
-                        display_text="Скачать|Читать",  # regex для отображения
-                    )
+                    "Скачать": st.column_config.LinkColumn(
+                        label="Скачать",
+                        display_text="Скачать",
+                    ),
+                    "Читать": st.column_config.LinkColumn(
+                        label="Читать",
+                        display_text="Читать",
+                    ),
                 },
                 use_container_width=True,
             )
+
+        См. _render_tree_table() в school_trees_tab.py для примера.
     """
     if subset.empty:
-        # Возвращаем пустой DataFrame с правильными русскими заголовками
-        final_cols = [
-            COLUMN_LABELS.get(c, c)
-            for c in TREE_TABLE_COLUMNS
-            if c in COLUMN_LABELS
-        ]
+        final_cols = [COLUMN_LABELS.get(c, c) for c in TREE_TABLE_COLUMNS]
         return pd.DataFrame(columns=final_cols)
 
-    df = subset.copy().reset_index(drop=True)
-
-    # Шаг 1: вычисляем колонку «abstract»
-    code_col = "Code" if "Code" in df.columns else None
-    name_col = "candidate_name" if "candidate_name" in df.columns else None
-
-    if code_col and name_col:
-        df["abstract"] = df.apply(
-            lambda row: make_abstract_link(
-                row.get(code_col, ""),
-                row.get(name_col, ""),
-            ),
-            axis=1,
-        )
-    else:
-        df["abstract"] = ""
-
-    # Шаг 2: определяем доступные колонки в нужном порядке
-    # Колонка «abstract» уже в df; остальные берём по исходному имени.
-    ordered_cols: list[str] = []
-    for col in TREE_TABLE_COLUMNS:
-        if col == "abstract":
-            if "abstract" in df.columns:
-                ordered_cols.append("abstract")
-        elif col in df.columns:
-            ordered_cols.append(col)
-        # Если колонки нет в subset — просто пропускаем
-
-    df = df[ordered_cols]
-
-    # Шаг 3: переименовываем в русские названия
+    df, ordered_cols = _build_ordered_df(subset)
+    df_out = df[ordered_cols]
     rename_map = {col: COLUMN_LABELS.get(col, col) for col in ordered_cols}
-    df = df.rename(columns=rename_map)
+    return df_out.rename(columns=rename_map)
 
-    return df
+
+def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Формирует два DataFrame для экспорта (скачивания) таблицы диссертаций.
+
+    Колонка «Автореферат»:
+    - xlsx_df: формула Excel =HYPERLINK("url","Скачать") или =HYPERLINK("url","Читать")
+               для кликабельных ссылок. Если у диссертации нет ни одной ссылки — пусто.
+    - csv_df:  плоская ссылка (URL-строка) — из abstract_download или abstract_read.
+               Если нет ни одной — пусто.
+
+    Оба DataFrame содержат русские названия колонок из COLUMN_LABELS
+    и следуют порядку TREE_TABLE_COLUMNS (кроме abstract_download/abstract_read,
+    которые объединяются в одну колонку «Автореферат»).
+
+    Args:
+        subset: DataFrame с исходными колонками (из lineage в graph.py).
+
+    Returns:
+        (xlsx_df, csv_df) — кортеж из двух DataFrame.
+
+    Usage:
+        xlsx_df, csv_df = build_tree_export_df(subset)
+
+        # Excel с гиперссылками
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            xlsx_df.to_excel(writer, index=False)
+        xlsx_bytes = buf.getvalue()
+
+        # CSV с плоскими URL
+        csv_bytes = csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+    """
+    abstract_ru = "Автореферат"
+
+    if subset.empty:
+        # Порядок для экспорта: abstract_download/read заменяются на одну колонку
+        export_cols = []
+        for c in TREE_TABLE_COLUMNS:
+            if c == "abstract_download":
+                export_cols.append(abstract_ru)
+            elif c == "abstract_read":
+                pass  # пропускаем — уже добавлена как «Автореферат»
+            else:
+                export_cols.append(COLUMN_LABELS.get(c, c))
+        empty = pd.DataFrame(columns=export_cols)
+        return empty, empty.copy()
+
+    df, ordered_cols = _build_ordered_df(subset)
+
+    # Строим базовый df для экспорта: abstract_download + abstract_read → «Автореферат»
+    rows_xlsx: list[dict] = []
+    rows_csv: list[dict] = []
+
+    for _, row in df.iterrows():
+        xlsx_row: dict = {}
+        csv_row: dict = {}
+        seen_abstract = False
+        for col in ordered_cols:
+            if col == "abstract_download":
+                if not seen_abstract:
+                    dl_url = row.get("abstract_download", "")
+                    rd_url = row.get("abstract_read", "")
+                    if dl_url:
+                        xlsx_row[abstract_ru] = f'=HYPERLINK("{dl_url}","Скачать")'
+                        csv_row[abstract_ru] = dl_url
+                    elif rd_url:
+                        xlsx_row[abstract_ru] = f'=HYPERLINK("{rd_url}","Читать")'
+                        csv_row[abstract_ru] = rd_url
+                    else:
+                        xlsx_row[abstract_ru] = ""
+                        csv_row[abstract_ru] = ""
+                    seen_abstract = True
+            elif col == "abstract_read":
+                pass  # уже обработано выше
+            else:
+                ru_name = COLUMN_LABELS.get(col, col)
+                val = row.get(col, "")
+                xlsx_row[ru_name] = val
+                csv_row[ru_name] = val
+        rows_xlsx.append(xlsx_row)
+        rows_csv.append(csv_row)
+
+    xlsx_df = pd.DataFrame(rows_xlsx)
+    csv_df = pd.DataFrame(rows_csv)
+    return xlsx_df, csv_df
