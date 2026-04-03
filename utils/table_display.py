@@ -19,6 +19,10 @@ utils/table_display.py — утилиты для отображения табл
     build_tree_display_df(subset) -> pd.DataFrame
         Формирует DataFrame для рендера HTML-таблицы:
         добавляет колонку «abstract_html» с HTML-ссылками.
+    build_tree_st_dataframe_df(subset) -> tuple[pd.DataFrame, dict]
+        Формирует DataFrame с pd.MultiIndex-заголовками для st.dataframe:
+        - колонки «Читать» и «Скачать» объединены под верхним уровнем «Автореферат»
+        - возвращает также column_config для LinkColumn
     build_tree_export_df(subset) -> tuple[pd.DataFrame, pd.DataFrame]
         Формирует два DataFrame для экспорта:
         - xlsx_df: для Excel (колонка «Автореферат» = формула HYPERLINK)
@@ -151,6 +155,9 @@ TREE_TABLE_COLUMNS: list[str] = [
     "opponents_3.title",
 ]
 
+# Колонки данных (без abstract_html) — используются в build_tree_st_dataframe_df
+_DATA_COLUMNS: list[str] = [c for c in TREE_TABLE_COLUMNS if c != "abstract_html"]
+
 
 # ---------------------------------------------------------------------------
 # Логика формирования ссылок автореферата
@@ -191,6 +198,27 @@ def make_abstract_read_url(code: str) -> str:
         return ""
     if _RE_NUMERIC.match(code) or "NLR" in code:
         return _URL_READ.format(code=code)
+    return ""
+
+
+def make_abstract_download_url_numeric(code: str, name: str) -> str:
+    """
+    Возвращает URL для скачивания PDF автореферата.
+    Только для числовых кодов (только цифры и '_').
+    В остальных случаях — пустая строка.
+
+    Args:
+        code: Код диссертации.
+        name: ФИО автора — используется как имя файла PDF.
+
+    Returns:
+        URL-строка или ''.
+    """
+    code = str(code).strip()
+    if code and _RE_NUMERIC.match(code):
+        file_name = f"Автореферат. {str(name).strip()}"
+        encoded_name = quote(file_name, safe="")
+        return _URL_DOWNLOAD.format(code=code, encoded_name=encoded_name)
     return ""
 
 
@@ -256,12 +284,7 @@ def make_abstract_label(code: str) -> str:
 
 def make_abstract_download_url(code: str, name: str) -> str:
     """Устаревшая функция. Возвращает URL для скачивания PDF."""
-    code = str(code).strip()
-    if code and _RE_NUMERIC.match(code):
-        file_name = f"Автореферат. {str(name).strip()}"
-        encoded_name = quote(file_name, safe="")
-        return _URL_DOWNLOAD.format(code=code, encoded_name=encoded_name)
-    return ""
+    return make_abstract_download_url_numeric(code, name)
 
 
 def make_abstract_read_url_nlr_only(code: str) -> str:
@@ -334,6 +357,108 @@ def build_tree_display_df(subset: pd.DataFrame) -> pd.DataFrame:
     df_out = df[ordered_cols]
     rename_map = {col: COLUMN_LABELS.get(col, col) for col in ordered_cols}
     return df_out.rename(columns=rename_map)
+
+
+def build_tree_st_dataframe_df(
+    subset: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Формирует DataFrame с pd.MultiIndex-заголовками для отображения через
+    st.dataframe с LinkColumn.
+
+    Структура заголовков (2 уровня):
+    - Верхний уровень «Автореферат» объединяет подколонки «Читать» и «Скачать».
+    - Для остальных колонок верхний уровень — пустая строка, нижний —
+      русское название колонки.
+
+    Правила заполнения ссылок:
+    - Числовой код (только цифры и '_'):
+        Читать → https://viewer.rusneb.ru/ru/{code}?page=1
+        Скачать → https://rusneb.ru/local/tools/exalead/getFiles.php?...
+    - NLR-код:
+        Читать → https://viewer.rusneb.ru/ru/{code}?page=1
+        Скачать → None (пустая строка)
+    - Иначе:
+        Читать → None, Скачать → None
+
+    Args:
+        subset: DataFrame с исходными колонками (из lineage в graph.py).
+
+    Returns:
+        Кортеж (df_multiindex, column_config):
+        - df_multiindex: DataFrame с pd.MultiIndex в колонках.
+        - column_config: dict для параметра column_config в st.dataframe.
+    """
+    import streamlit as st  # импорт здесь, чтобы не тянуть в тестах
+
+    if subset.empty:
+        # Возвращаем пустой DataFrame с правильной структурой заголовков
+        tuples: list[tuple[str, str]] = [
+            ("Автореферат", "Читать"),
+            ("Автореферат", "Скачать"),
+        ]
+        for col in _DATA_COLUMNS:
+            ru = COLUMN_LABELS.get(col, col)
+            tuples.append(("", ru))
+        mi = pd.MultiIndex.from_tuples(tuples)
+        return pd.DataFrame(columns=mi), {}
+
+    df = subset.copy().reset_index(drop=True)
+    code_col = "Code" if "Code" in df.columns else None
+    name_col = "candidate_name" if "candidate_name" in df.columns else None
+
+    # --- Вычисляем URL для ссылок ---
+    def _read_url(code: str) -> str:
+        code = str(code).strip()
+        if not code:
+            return ""
+        if _RE_NUMERIC.match(code) or "NLR" in code:
+            return _URL_READ.format(code=code)
+        return ""
+
+    def _dl_url(code: str, name: str) -> str:
+        return make_abstract_download_url_numeric(code, name)
+
+    if code_col and name_col:
+        read_urls = df.apply(
+            lambda r: _read_url(r.get(code_col, "")), axis=1
+        )
+        dl_urls = df.apply(
+            lambda r: _dl_url(r.get(code_col, ""), r.get(name_col, "")), axis=1
+        )
+    else:
+        read_urls = pd.Series([""] * len(df))
+        dl_urls = pd.Series([""] * len(df))
+
+    # --- Собираем данные колонок в порядке MultiIndex ---
+    col_data: dict[tuple[str, str], list] = {}
+    col_data[("Автореферат", "Читать")] = read_urls.tolist()
+    col_data[("Автореферат", "Скачать")] = dl_urls.tolist()
+
+    for col in _DATA_COLUMNS:
+        if col not in df.columns:
+            continue
+        ru = COLUMN_LABELS.get(col, col)
+        col_data[("", ru)] = df[col].fillna("").astype(str).tolist()
+
+    df_out = pd.DataFrame(col_data)
+    df_out.columns = pd.MultiIndex.from_tuples(list(col_data.keys()))
+
+    # --- Строим column_config ---
+    column_config: dict = {
+        ("Автореферат", "Читать"): st.column_config.LinkColumn(
+            "Читать",
+            display_text="Читать",
+            help="Открыть автореферат в онлайн-просмотрщике",
+        ),
+        ("Автореферат", "Скачать"): st.column_config.LinkColumn(
+            "Скачать",
+            display_text="Скачать",
+            help="Скачать PDF автореферата",
+        ),
+    }
+
+    return df_out, column_config
 
 
 def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
