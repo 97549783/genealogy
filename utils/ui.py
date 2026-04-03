@@ -3,7 +3,7 @@ utils/ui.py — переиспользуемые UI-компоненты и вс
 
 Публичный API:
     show_instruction(tab_key)                     — показать инструкцию в диалоге
-    download_data_dialog(df, file_base, key)       — диалог выбора формата скачивания
+    download_data_dialog(df, file_base, key)       — кнопки скачивания (inline, без диалога)
     feedback_button()                              — кнопка обратной связи
     make_silhouette_plot(...)  -> plt.Figure       — силуэтный график
 
@@ -204,14 +204,15 @@ def download_data_dialog(
     key_prefix: str,
 ) -> None:
     """
-    Открывает модальное окно для выбора формата скачивания (XLSX или CSV).
-    XLSX предлагается первым и выделен как основной вариант.
-    """
-    @st.dialog(f"Скачать данные: {file_base}")
-    def _show_dialog() -> None:
-        st.write("Выберите удобный формат:")
+    Рендерит кнопки скачивания данных (XLSX и CSV) прямо в основной поток страницы.
 
-        # Excel
+    Примечание: st.download_button не работает корректно внутри @st.dialog —
+    нажатие закрывает диалог и вызывает rerun без скачивания файла.
+    Поэтому кнопки рендерятся inline, без обёртки в диалог.
+    """
+    col1, col2 = st.columns(2)
+
+    with col1:
         try:
             buf_xlsx = io.BytesIO()
             with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
@@ -230,7 +231,7 @@ def download_data_dialog(
         except Exception as e:
             st.error(f"Ошибка формирования Excel: {e}")
 
-        # CSV
+    with col2:
         data_csv = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button(
             label="📄 Скачать CSV (.csv)",
@@ -240,8 +241,6 @@ def download_data_dialog(
             key=f"{key_prefix}_dl_csv",
             use_container_width=True,
         )
-
-    _show_dialog()
 
 
 # ---------------------------------------------------------------------------
