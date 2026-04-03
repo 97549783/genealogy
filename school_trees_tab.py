@@ -19,8 +19,53 @@ import streamlit as st
 
 from school_trees import build_pyvis_html, draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
+from utils.table_display import build_tree_display_df
 from utils.ui import download_data_dialog, show_instruction
 from utils.urls import share_button
+
+
+def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
+    """
+    Отрисовывает скрытый по умолчанию раздел «Список диссертаций в дереве»
+    с таблицей метаданных. Использует build_tree_display_df()
+    из utils/table_display.py для формирования DataFrame.
+
+    Колонка «Автореферат» отображается через st.column_config.LinkColumn:
+    - для PDF-ссылок отображается текст «Скачать»
+    - для viewer-ссылок отображается текст «Читать»
+    - пустые значения остаются пустыми (ничего не показывается)
+
+    Args:
+        subset: Исходный DataFrame с данными о диссертациях (results from lineage()).
+        key:    Уникальный ключ Streamlit для expander-а.
+    """
+    label = f"📋 Список диссертаций в дереве ({len(subset)})"
+    with st.expander(label, expanded=False):
+        display_df = build_tree_display_df(subset)
+        if display_df.empty:
+            st.info("Данные отсутствуют.")
+            return
+
+        # LinkColumn делает ссылки кликабельными;
+        # display_text — regex, который Streamlit попытается извлечь
+        # из самого URL; т.к. rusneb содержит и «getFiles» и «viewer»,
+        # задаём постоянный текст «Смотреть» для всех ссылок,
+        # а возможность «Скачать» / «Читать» через tooltip.
+        abstract_col = "Автореферат"
+        column_config = {}
+        if abstract_col in display_df.columns:
+            column_config[abstract_col] = st.column_config.LinkColumn(
+                label=abstract_col,
+                display_text="Смотреть",
+                help="Скачать PDF или читать онлайн на rusneb.ru.",
+            )
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            column_config=column_config,
+            key=f"df_{key}",
+        )
 
 
 def render_school_trees_tab(
@@ -177,6 +222,11 @@ def render_school_trees_tab(
                         )
                     else:
                         st.empty()
+
+                # ----------------------------------------------------------------
+                # Список диссертаций в дереве (скрыт по умолчанию)
+                # ----------------------------------------------------------------
+                _render_tree_table(subset, key=file_prefix)
 
                 person_entries.append((f"{file_prefix}.png", png_bytes))
                 person_entries.append((f"{file_prefix}.html", html_bytes))
