@@ -10,7 +10,6 @@ school_trees_tab.py — интерфейс вкладки «Построение
 
 from __future__ import annotations
 
-import html as _html
 import io
 import zipfile
 from typing import Dict, List, Optional, Set
@@ -21,114 +20,15 @@ import streamlit as st
 from school_trees import build_pyvis_html, draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
 from utils.table_display import (
-    build_tree_display_df,
     build_tree_export_df,
+    build_tree_st_dataframe_df,
 )
 from utils.ui import show_instruction
 from utils.urls import share_button
 
 
 # ---------------------------------------------------------------------------
-# HTML-рендер таблицы диссертаций
-# ---------------------------------------------------------------------------
-
-_TABLE_CSS = """
-<style>
-.diss-table-wrap {
-    overflow-x: auto;
-    font-size: {font_px}px;
-    max-height: 600px;
-    overflow-y: auto;
-}
-.diss-table {
-    border-collapse: collapse;
-    width: 100%;
-    white-space: nowrap;
-}
-.diss-table th {
-    background: #f0f2f6;
-    border: 1px solid #d1d5db;
-    padding: 6px 10px;
-    text-align: left;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-.diss-table td {
-    border: 1px solid #e5e7eb;
-    padding: 5px 10px;
-    vertical-align: top;
-    white-space: normal;
-    max-width: 340px;
-}
-.diss-table tr:nth-child(even) {{ background: #f9fafb; }}
-.diss-table a {{ color: #1a73e8; text-decoration: none; }}
-.diss-table a:hover {{ text-decoration: underline; }}
-</style>
-"""
-
-
-def _df_to_html_table(display_df: pd.DataFrame, abstract_col: str = "Автореферат") -> str:
-    """
-    Конвертирует DataFrame (с HTML-фрагментами в колонке «Автореферат')
-    в полноценную HTML-таблицу.
-
-    Все обычные ячейки эскейпируются; ячейки колонки «Автореферат»
-    вставляются as-is (содержат доверенный HTML из make_abstract_links_html).
-
-    Args:
-        display_df:   DataFrame с русскими названиями колонок.
-        abstract_col: Имя колонки с HTML-ссылками (не эскейпируется).
-
-    Returns:
-        Строка с полной HTML-таблицей (без <style>).
-    """
-    cols = list(display_df.columns)
-    header = "".join(f"<th>{_html.escape(str(c))}</th>" for c in cols)
-    rows_html = []
-    for _, row in display_df.iterrows():
-        cells = []
-        for c in cols:
-            val = row[c]
-            if c == abstract_col:
-                cells.append(f"<td>{val}</td>")  # HTML as-is
-            else:
-                cells.append(f"<td>{_html.escape(str(val) if pd.notna(val) else '')}</td>")
-        rows_html.append("<tr>" + "".join(cells) + "</tr>")
-    body = "\n".join(rows_html)
-    return f"<table class='diss-table'><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
-
-
-def render_dissertation_html_table(
-    display_df: pd.DataFrame,
-    font_px: int = 13,
-    height: int = 620,
-) -> None:
-    """
-    Рендерит таблицу диссертаций через st.html.
-
-    Использует HTML-таблицу вместо st.dataframe потому, что в одной ячейке
-    st.dataframe (LinkColumn) нельзя разместить две ссылки одновременно.
-    HTML-таблица позволяет отображать «Читать» и «Скачать» рядом в одной
-    ячейке колонки «Автореферат».
-
-    Args:
-        display_df: DataFrame из build_tree_display_df().
-        font_px:    Размер шрифта в пикселях.
-        height:     Высота блока st.html в пикселях.
-    """
-    if display_df.empty:
-        st.info("Данные отсутствуют.")
-        return
-    css = _TABLE_CSS.replace("{font_px}", str(font_px))
-    # Двойные фигурные скобки в CSS (nth-child) нужно восстановить после .format()
-    table_html = _df_to_html_table(display_df)
-    full_html = css + "<div class='diss-table-wrap'>" + table_html + "</div>"
-    st.html(full_html)
-
-
-# ---------------------------------------------------------------------------
-# Главная функция рендеринга таблицы списка диссертаций
+# Таблица диссертаций через st.dataframe
 # ---------------------------------------------------------------------------
 
 def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
@@ -136,17 +36,12 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     Отрисовывает скрытый по умолчанию expander «Список диссертаций в дереве»
     со следующими элементами:
 
-    1. Слайдер размера шрифта (8–22 пк, по умолчанию 13) — внутри expander.
-    2. HTML-таблица с единой колонкой «Автореферат», содержащей ссылки:
-       - числовой код → «Читать» + «Скачать» через пробел
-       - NLR-код      → только «Читать»
-       - иначе        → пусто
-    3. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте колонка
-       «Автореферат» содержит viewer-ссылку (для числовых и NLR кодов).
-
-    Почему st.html вместо st.dataframe:
-        Streamlit LinkColumn не позволяет разместить две ссылки в одной ячейке.
-        HTML-таблица через st.html решает эту проблему нативно.
+    1. st.dataframe с MultiIndex-заголовками:
+       - Верхний уровень «Автореферат» объединяет подколонки «Читать» и «Скачать»
+       - Обе ссылочные колонки рендерятся через LinkColumn
+       - Встроенный тулбар: поиск, скрытие колонок, полный экран, скачать CSV
+    2. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте
+       колонка «Автореферат» содержит viewer-ссылку.
 
     Args:
         subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
@@ -154,24 +49,19 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     """
     label = f"📋 Список диссертаций в дереве ({len(subset)})"
     with st.expander(label, expanded=False):
-        display_df = build_tree_display_df(subset)
-        if display_df.empty:
+        if subset.empty:
             st.info("Данные отсутствуют.")
             return
 
-        # --- Слайдер шрифта (внутри expander) ---
-        font_px = st.slider(
-            "Размер шрифта в таблице",
-            min_value=8,
-            max_value=22,
-            value=13,
-            step=1,
-            key=f"font_size_{key}",
-            help="Изменяет размер шрифта в ячейках таблицы.",
+        # --- st.dataframe с MultiIndex-заголовками ---
+        df_st, col_cfg = build_tree_st_dataframe_df(subset)
+        st.dataframe(
+            df_st,
+            column_config=col_cfg,
+            use_container_width=True,
+            hide_index=True,
+            key=f"df_table_{key}",
         )
-
-        # --- HTML-таблица с единой колонкой «Автореферат» ---
-        render_dissertation_html_table(display_df, font_px=font_px)
 
         # --- Кнопки экспорта (внутри expander, под таблицей) ---
         xlsx_df, csv_df = build_tree_export_df(subset)
