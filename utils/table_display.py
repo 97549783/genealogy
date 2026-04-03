@@ -21,7 +21,7 @@ utils/table_display.py — утилиты для отображения табл
         добавляет колонку «abstract_html» с HTML-ссылками.
     build_tree_st_dataframe_df(subset) -> tuple[pd.DataFrame, dict]
         Формирует DataFrame с плоскими колонками для st.dataframe:
-        - колонки «Автореферат (читать)» и «Автореферат (скачать)»— LinkColumn
+        - колонки «Автореферат» и «PDF-файл» — LinkColumn
         - возвращает также column_config
     build_tree_export_df(subset) -> tuple[pd.DataFrame, pd.DataFrame]
         Формирует два DataFrame для экспорта:
@@ -156,9 +156,8 @@ TREE_TABLE_COLUMNS: list[str] = [
 _DATA_COLUMNS: list[str] = [c for c in TREE_TABLE_COLUMNS if c != "abstract_html"]
 
 # Имена плоских колонок для ссылок в st.dataframe.
-# Названия содержат префикс «Автореферат» для визуальной группировки.
-_COL_READ = "Автореферат (читать)"
-_COL_DOWNLOAD = "Автореферат (скачать)"
+_COL_READ = "Автореферат"
+_COL_DOWNLOAD = "PDF-файл"
 
 
 # ---------------------------------------------------------------------------
@@ -296,12 +295,12 @@ def build_tree_st_dataframe_df(
     Формирует DataFrame с плоскими строковыми колонками для st.dataframe.
 
     Колонки для ссылок:
-      - "Автореферат (читать)" — LinkColumn, URL viewer.rusneb.ru
-      - "Автореферат (скачать)" — LinkColumn, URL rusneb.ru PDF
+      - «Автореферат» — LinkColumn, URL viewer.rusneb.ru
+      - «PDF-файл»    — LinkColumn, URL rusneb.ru PDF
 
     Правила заполнения:
       - Числовой код: обе ссылки
-      - NLR-код: только читать
+      - NLR-код: только «Автореферат»
       - Иначе: пустые строки
 
     ВАЖНО: НЕ используется pd.MultiIndex и НЕ используется group=
@@ -313,15 +312,14 @@ def build_tree_st_dataframe_df(
     """
     import streamlit as st
 
-    # column_config без group= и без MultiIndex
     col_cfg: dict = {
         _COL_READ: st.column_config.LinkColumn(
-            "Автореферат (читать)",
+            "Автореферат",
             display_text="Читать",
             help="Открыть автореферат в онлайн-просмотрщике",
         ),
         _COL_DOWNLOAD: st.column_config.LinkColumn(
-            "Автореферат (скачать)",
+            "PDF-файл",
             display_text="Скачать",
             help="Скачать PDF автореферата",
         ),
