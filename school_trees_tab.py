@@ -1,3 +1,13 @@
+"""
+school_trees_tab.py — интерфейс вкладки «Построение деревьев».
+
+Публичный API:
+    render_school_trees_tab(df, idx, all_supervisor_names, shared_roots)
+
+Модуль отвечает только за UI. Вся логика отрисовки деревьев
+находится в school_trees.py, алгоритмы обхода графа — в utils/graph.py.
+"""
+
 from __future__ import annotations
 
 import io
@@ -57,20 +67,14 @@ def _hide_select_all_for_roots() -> None:
     При нажатии «Select all» приложение зависает, так как в базе
     десятки тысяч имён.
 
-    Streamlit не предоставляет параметра для отключения этой кнопки,
-    поэтому используется CSS-инъекция, нацеленная на data-testid
-    конкретного виджета (lineages_selected_roots).
+    Streamlit не предоставляет параметра для отключения этой кнопки
+    в st.multiselect, поэтому используется CSS-инъекция, нацеленная
+    на data-testid конкретного виджета (lineages_selected_roots).
     """
     st.markdown(
         """
         <style>
-        [data-testid="stMultiSelect"][aria-label="Выберите имена из базы"] ~ div span[data-baseweb="tag"],
-        div[data-testid="stMultiSelect"] > div:last-child > div > span:last-child {
-            /* fallback — not used */
-        }
         /* Hide the native "Select all" button for the roots multiselect */
-        div:has(> div > div[aria-label="Выберите имена из базы"]) div[role="option"][aria-selected="false"]:first-child,
-        div[data-testid="stMultiSelect"] li[data-testid="stMultiselectOption-Select all"],
         [data-testid="stMultiselectOption-Select all"] {
             display: none !important;
         }
@@ -128,6 +132,11 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
         _inject_table_font_size(font_px)
 
         # --- Настройка LinkColumn ---
+        # Две отдельные LinkColumn вместо одной:
+        # «Скачать» — ссылка на PDF (rusneb.ru)
+        # «Читать»   — ссылка на онлайн-просмотр (viewer.rusneb.ru)
+        # Пустые ячейки (где нет ссылки) Streamlit не отображает как ссылки,
+        # поэтому разделение работает корректно без дополнительных хаков.
         column_config: dict = {}
         download_col = "Скачать"
         read_col = "Читать"
