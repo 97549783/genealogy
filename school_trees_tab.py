@@ -58,6 +58,42 @@ def _inject_table_font_size(px: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Служебная функция: скрыть кнопку «Select all» у конкретного multiselect
+# ---------------------------------------------------------------------------
+
+def _hide_select_all_for_roots() -> None:
+    """
+    Скрывает кнопку «Select all» в виджете «Выберите имена из базы».
+    При нажатии «Select all» приложение зависает, так как в базе
+    десятки тысяч имён.
+
+    Streamlit не предоставляет параметра для отключения этой кнопки
+    в st.multiselect, поэтому используется CSS-инъекция.
+    Несколько селекторов — страховка на разные версии Streamlit,
+    каждый из которых может рендерить кнопку иначе.
+    """
+    st.markdown(
+        """
+        <style>
+        /* Вариант 1: по data-testid опции (актуальные версии Streamlit) */
+        [data-testid="stMultiselectOption-Select all"] {
+            display: none !important;
+        }
+        /* Вариант 2: по li с data-testid внутри списка */
+        div[data-testid="stMultiSelect"] li[data-testid="stMultiselectOption-Select all"] {
+            display: none !important;
+        }
+        /* Вариант 3: первый невыбранный option внутри виджета с нужным aria-label */
+        div:has(> div > div[aria-label="Выберите имена из базы"]) div[role="option"][aria-selected="false"]:first-child {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Главная функция рендеринга таблицы списка диссертаций
 # ---------------------------------------------------------------------------
 
@@ -179,6 +215,10 @@ def render_school_trees_tab(
     shared_roots = shared_roots or []
     valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
     manual_prefill = "\n".join(r for r in shared_roots if r not in all_supervisor_names)
+
+    # Скрываем кнопку «Select all» — при её нажатии приложение зависает,
+    # так как в базе десятки тысяч имён.
+    _hide_select_all_for_roots()
 
     roots = st.multiselect(
         "Выберите имена из базы",
