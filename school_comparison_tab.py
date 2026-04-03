@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.graph import lineage, rows_for
+from utils.ui import download_data_dialog
 from school_comparison import (
     DistanceMetric,
     ComparisonScope,
@@ -414,6 +415,74 @@ def render_school_comparison_tab(
         st.markdown("---")
         st.markdown("## 📈 Результаты анализа")
 
+        # =====================================================================
+        # ТАБЛИЦА ТЕМАТИЧЕСКИХ ПРОФИЛЕЙ (идёт первой)
+        # =====================================================================
+        st.markdown("### 📋 Тематические профили по узлам классификатора")
+        st.markdown(
+            "Средний балл по каждому узлу классификатора — среднее значение "
+            "по потомкам узла, усреднённое по диссертациям школы."
+        )
+
+        threshold_value = st.slider(
+            "Порог отсечения строк",
+            min_value=0,
+            max_value=10,
+            value=2,
+            step=1,
+            key="school_comp_node_threshold",
+            help=(
+                "Узел классификатора скрывается, если для ВСЕХ школ значение ≤ порога. "
+                "Строка показывается, если хотя бы одна школа превышает порог."
+            ),
+        )
+
+        nodes_for_table = selected_nodes if basis_choice == "selected" else None
+
+        # Полная таблица (без порога) — для скачивания
+        node_scores_df_full = create_node_scores_table(
+            datasets=valid_datasets,
+            feature_columns=used_columns,
+            school_order=school_order,
+            classifier_labels=classifier_labels,
+            selected_nodes=nodes_for_table,
+            threshold=0.0,
+        )
+
+        # Отфильтрованная таблица — для отображения
+        node_scores_df = create_node_scores_table(
+            datasets=valid_datasets,
+            feature_columns=used_columns,
+            school_order=school_order,
+            classifier_labels=classifier_labels,
+            selected_nodes=nodes_for_table,
+            threshold=float(threshold_value),
+        )
+
+        if not node_scores_df_full.empty:
+            display_cols = ["Раздел"] + school_order
+            display_df = node_scores_df[display_cols] if not node_scores_df.empty else pd.DataFrame(columns=display_cols)
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                height=600,
+            )
+
+            if st.button("📥 Скачать таблицу профилей", key="school_comp_node_scores_download"):
+                download_data_dialog(
+                    df=node_scores_df_full,
+                    file_base="school_node_scores",
+                    key_prefix="school_comp_node_scores",
+                )
+        else:
+            st.info("Узлы с ненулевыми значениями не найдены.")
+
+        # =====================================================================
+        # МЕТРИКА СИЛУЭТА
+        # =====================================================================
+        st.markdown("---")
         col_score, col_interp = st.columns([1, 2])
         with col_score:
             st.metric(
@@ -436,7 +505,7 @@ def render_school_comparison_tab(
         )
 
         # =====================================================================
-        # ГРАФИК СИЛУЭТА
+        # ГРАФИК СИЛУЭТА (идёт после таблицы)
         # =====================================================================
         st.markdown("### 📊 График силуэта")
         fig = create_silhouette_plot(
@@ -459,50 +528,6 @@ def render_school_comparison_tab(
             mime="image/png",
             key="school_comp_download_png"
         )
-
-        # =====================================================================
-        # ТАБЛИЦА ТЕМАТИЧЕСКИХ ПРОФИЛЕЙ ПО УЗЛАМ КЛАССИФИКАТОРА
-        # =====================================================================
-        st.markdown("---")
-        st.markdown("### 📋 Тематические профили по узлам классификатора")
-        st.markdown(
-            "Средний балл по каждому узлу классификатора — среднее значение "
-            "по потомкам узла, усреднённое по диссертациям школы. "
-            "Строки с нулевыми значениями для всех школ исключены."
-        )
-
-        nodes_for_table = selected_nodes if basis_choice == "selected" else None
-        node_scores_df = create_node_scores_table(
-            datasets=valid_datasets,
-            feature_columns=used_columns,
-            school_order=school_order,
-            classifier_labels=classifier_labels,
-            selected_nodes=nodes_for_table,
-        )
-
-        if not node_scores_df.empty:
-            # Скрываем служебные колонки «Код» и «Уровень» из отображения,
-            # но оставляем «Раздел» и колонки школ
-            display_cols = ["Раздел"] + school_order
-            display_df = node_scores_df[display_cols]
-
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                hide_index=True,
-                height=600,
-            )
-
-            csv_scores = node_scores_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                label="📥 Скачать таблицу профилей (CSV)",
-                data=csv_scores.encode("utf-8-sig"),
-                file_name="school_node_scores.csv",
-                mime="text/csv",
-                key="school_comp_node_scores_csv"
-            )
-        else:
-            st.info("Узлы с ненулевыми значениями не найдены.")
 
         # =====================================================================
         # СВОДНАЯ СТАТИСТИКА
