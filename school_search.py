@@ -839,6 +839,13 @@ def search_by_opponent(
     """
     Топ-N школ, в диссертациях которых указанное лицо выступает оппонентом
     (нечёткий поиск с нормализацией инициалов и ё→е по OPPONENT_COLUMNS).
+
+    Логика подсчёта:
+      - Строится объединённая булева маска по всем OPPONENT_COLUMNS (OR).
+      - row_count = число уникальных диссертаций (строк), где хотя бы в одном
+        столбце оппонентов найдено совпадение.
+      - Это исключает двойной счёт одной диссертации при совпадении сразу
+        в нескольких столбцах оппонентов.
     """
     roots = get_all_roots(df)
     rows: List[SearchRow] = []
@@ -849,28 +856,36 @@ def search_by_opponent(
         if subset.empty:
             continue
 
-        total_count = 0
+        # Строим объединённую маску по всем колонкам оппонентов (OR)
+        combined_mask = pd.Series(False, index=subset.index)
         all_matched: Set[str] = set()
 
         for col in OPPONENT_COLUMNS:
-            count, matched_vals = _fuzzy_count(subset, col, person_query)
-            total_count += count
+            if col not in subset.columns:
+                continue
+            col_series = subset[col].fillna("").astype(str)
+            col_mask = _fuzzy_match(col_series, person_query)
+            combined_mask = combined_mask | col_mask
+
+            # Собираем оригинальные варианты написания из совпавших строк
+            matched_vals = (
+                col_series[col_mask]
+                .str.strip()
+                .pipe(lambda s: s[s != ""])
+                .unique()
+                .tolist()
+            )
             all_matched.update(matched_vals)
 
-        if total_count > 0:
-            combined_mask = pd.Series(False, index=subset.index)
-            for col in OPPONENT_COLUMNS:
-                if col in subset.columns:
-                    combined_mask = combined_mask | _fuzzy_match(
-                        subset[col].fillna("").astype(str), person_query
-                    )
-            row_count = int(combined_mask.sum())
-            if row_count == 0:
-                continue
-            matched_map[root] = sorted(all_matched)
-            row = build_result_row(0, root, row_count, subset, "Диссертаций с оппонентом")
-            row["Найденные варианты"] = "; ".join(sorted(all_matched))
-            rows.append(row)
+        # row_count — число диссертаций (уникальных строк) с оппонентом
+        row_count = int(combined_mask.sum())
+        if row_count == 0:
+            continue
+
+        matched_map[root] = sorted(all_matched)
+        row = build_result_row(0, root, row_count, subset, "Диссертаций с оппонентом")
+        row["Найденные варианты"] = "; ".join(sorted(all_matched))
+        rows.append(row)
 
     rows.sort(key=lambda r: r["Диссертаций с оппонентом"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
