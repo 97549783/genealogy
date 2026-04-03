@@ -185,6 +185,7 @@ def render_school_trees_tab(
         options=sorted(all_supervisor_names),
         default=valid_shared_roots,
         help="Список формируется из столбцов с руководителями",
+        max_selections=20, # max_selections убирает нативную в Streamlit кнопку «Select all» и ограничивает выбор 20 руководителями.
         key="lineages_selected_roots",
     )
     manual = st.text_area(
