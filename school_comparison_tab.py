@@ -41,6 +41,9 @@ from school_comparison import (
 DEFAULT_SCORES_FOLDER = "basic_scores"
 AUTHOR_COLUMN = "candidate_name"
 
+# Ключ в session_state для хранения результатов анализа
+_RESULTS_KEY = "school_comp_results"
+
 # ==============================================================================
 # ИНСТРУКЦИЯ ДЛЯ ВКЛАДКИ
 # ==============================================================================
@@ -205,6 +208,8 @@ def render_school_comparison_tab(
 
     if len(selected_schools) < 2:
         st.warning("⚠️ Выберите минимум 2 научных руководителя для сравнения")
+        # Если школы сменились, сбрасываем кэшированные результаты
+        st.session_state.pop(_RESULTS_KEY, None)
         return
 
     st.markdown("---")
@@ -373,10 +378,6 @@ def render_school_comparison_tab(
                 progress_bar.progress((i + 1) / len(selected_schools))
             progress_bar.empty()
 
-        if stats_info:
-            st.markdown("#### 📊 Статистика сбора данных")
-            st.dataframe(pd.DataFrame(stats_info), use_container_width=True, hide_index=True)
-
         valid_datasets = {k: v for k, v in datasets.items() if not v.empty}
 
         if len(valid_datasets) < 2:
@@ -409,37 +410,8 @@ def render_school_comparison_tab(
                 st.error(f"❌ Неожиданная ошибка: {e}")
                 return
 
-        # =====================================================================
-        # РЕЗУЛЬТАТЫ
-        # =====================================================================
-        st.markdown("---")
-        st.markdown("## 📈 Результаты анализа")
-
-        # =====================================================================
-        # ТАБЛИЦА ТЕМАТИЧЕСКИХ ПРОФИЛЕЙ (идёт первой)
-        # =====================================================================
-        st.markdown("### 📋 Тематические профили по узлам классификатора")
-        st.markdown(
-            "Средний балл по каждому узлу классификатора — среднее значение "
-            "по потомкам узла, усреднённое по диссертациям школы."
-        )
-
-        threshold_value = st.slider(
-            "Порог отсечения строк",
-            min_value=0,
-            max_value=10,
-            value=2,
-            step=1,
-            key="school_comp_node_threshold",
-            help=(
-                "Узел классификатора скрывается, если для ВСЕХ школ значение ≤ порога. "
-                "Строка показывается, если хотя бы одна школа превышает порог."
-            ),
-        )
-
+        # Сохраняем все результаты в session_state
         nodes_for_table = selected_nodes if basis_choice == "selected" else None
-
-        # Полная таблица (без порога) — для скачивания
         node_scores_df_full = create_node_scores_table(
             datasets=valid_datasets,
             feature_columns=used_columns,
@@ -448,132 +420,212 @@ def render_school_comparison_tab(
             selected_nodes=nodes_for_table,
             threshold=0.0,
         )
-
-        # Отфильтрованная таблица — для отображения
-        node_scores_df = create_node_scores_table(
+        summary_df = create_comparison_summary(
             datasets=valid_datasets,
             feature_columns=used_columns,
             school_order=school_order,
-            classifier_labels=classifier_labels,
-            selected_nodes=nodes_for_table,
-            threshold=float(threshold_value),
         )
-
-        if not node_scores_df_full.empty:
-            display_cols = ["Раздел"] + school_order
-            display_df = node_scores_df[display_cols] if not node_scores_df.empty else pd.DataFrame(columns=display_cols)
-
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                hide_index=True,
-                height=600,
-            )
-
-            if st.button("📥 Скачать таблицу профилей", key="school_comp_node_scores_download"):
-                download_data_dialog(
-                    df=node_scores_df_full,
-                    file_base="school_node_scores",
-                    key_prefix="school_comp_node_scores",
-                )
-        else:
-            st.info("Узлы с ненулевыми значениями не найдены.")
-
-        # =====================================================================
-        # МЕТРИКА СИЛУЭТА
-        # =====================================================================
-        st.markdown("---")
-        col_score, col_interp = st.columns([1, 2])
-        with col_score:
-            st.metric(
-                label="Коэффициент силуэта",
-                value=f"{overall_score:.3f}",
-                help="Диапазон от -1 до 1. Чем выше, тем лучше разделение школ."
-            )
-        with col_interp:
-            st.info(interpret_silhouette_score(overall_score))
-
-        basis_info = (
-            "весь базис"
-            if basis_choice == "full"
-            else f"узлы: {', '.join(selected_nodes or [])}"
-        )
-        st.caption(
-            f"📌 Базис: {basis_info} | "
-            f"Признаков: {len(used_columns)} | "
-            f"Метрика: {DISTANCE_METRIC_LABELS[selected_metric]}"
-        )
-
-        # =====================================================================
-        # ГРАФИК СИЛУЭТА (идёт после таблицы)
-        # =====================================================================
-        st.markdown("### 📊 График силуэта")
-        fig = create_silhouette_plot(
+        buf_silhouette = io.BytesIO()
+        fig_save = create_silhouette_plot(
             sample_scores=sample_scores,
             labels=labels,
             school_order=school_order,
             overall_score=overall_score,
             metric_label=DISTANCE_METRIC_LABELS[selected_metric],
         )
-        buf_silhouette = io.BytesIO()
-        fig.savefig(buf_silhouette, format="png", dpi=150, bbox_inches="tight")
-        buf_silhouette.seek(0)
-        st.pyplot(fig)
-        plt.close(fig)
+        fig_save.savefig(buf_silhouette, format="png", dpi=150, bbox_inches="tight")
+        plt.close(fig_save)
 
-        st.download_button(
-            label="📥 Скачать график силуэта (PNG)",
-            data=buf_silhouette.getvalue(),
-            file_name="silhouette_plot.png",
-            mime="image/png",
-            key="school_comp_download_png"
+        st.session_state[_RESULTS_KEY] = {
+            "stats_info": stats_info,
+            "valid_datasets": valid_datasets,
+            "overall_score": overall_score,
+            "sample_scores": sample_scores,
+            "labels": labels,
+            "school_order": school_order,
+            "used_columns": used_columns,
+            "node_scores_df_full": node_scores_df_full,
+            "summary_df": summary_df,
+            "silhouette_png": buf_silhouette.getvalue(),
+            "missing_info_all": missing_info_all,
+            "selected_metric": selected_metric,
+            "basis_choice": basis_choice,
+            "selected_nodes": selected_nodes,
+            "classifier_labels": classifier_labels,
+        }
+
+    # =========================================================================
+    # ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ (читаем из session_state, не из блока if-button)
+    # =========================================================================
+    results = st.session_state.get(_RESULTS_KEY)
+    if results is None:
+        return
+
+    # Сбрасываем кэш, если школы изменились
+    if set(results["school_order"]) != set(selected_schools):
+        st.session_state.pop(_RESULTS_KEY, None)
+        return
+
+    stats_info = results["stats_info"]
+    valid_datasets = results["valid_datasets"]
+    overall_score = results["overall_score"]
+    sample_scores = results["sample_scores"]
+    labels = results["labels"]
+    school_order = results["school_order"]
+    used_columns = results["used_columns"]
+    node_scores_df_full = results["node_scores_df_full"]
+    summary_df = results["summary_df"]
+    silhouette_png = results["silhouette_png"]
+    missing_info_all = results["missing_info_all"]
+    selected_metric_res = results["selected_metric"]
+    basis_choice_res = results["basis_choice"]
+    selected_nodes_res = results["selected_nodes"]
+    classifier_labels_res = results["classifier_labels"]
+
+    st.markdown("---")
+    st.markdown("## 📈 Результаты анализа")
+
+    if stats_info:
+        st.markdown("#### 📊 Статистика сбора данных")
+        st.dataframe(pd.DataFrame(stats_info), use_container_width=True, hide_index=True)
+
+    # =====================================================================
+    # ТАБЛИЦА ТЕМАТИЧЕСКИХ ПРОФИЛЕЙ
+    # =====================================================================
+    st.markdown("### 📋 Тематические профили по узлам классификатора")
+    st.markdown(
+        "Средний балл по каждому узлу классификатора — среднее значение "
+        "по потомкам узла, усреднённое по диссертациям школы."
+    )
+
+    threshold_value = st.slider(
+        "Порог отсечения строк",
+        min_value=0,
+        max_value=10,
+        value=2,
+        step=1,
+        key="school_comp_node_threshold",
+        help=(
+            "Узел классификатора скрывается, если для ВСЕХ школ значение ≤ порога. "
+            "Строка показывается, если хотя бы одна школа превышает порог."
+        ),
+    )
+
+    nodes_for_table_res = selected_nodes_res if basis_choice_res == "selected" else None
+    node_scores_df = create_node_scores_table(
+        datasets=valid_datasets,
+        feature_columns=used_columns,
+        school_order=school_order,
+        classifier_labels=classifier_labels_res,
+        selected_nodes=nodes_for_table_res,
+        threshold=float(threshold_value),
+    )
+
+    if not node_scores_df_full.empty:
+        display_cols = ["Раздел"] + school_order
+        display_df = node_scores_df[display_cols] if not node_scores_df.empty else pd.DataFrame(columns=display_cols)
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            height=600,
         )
-
-        # =====================================================================
-        # СВОДНАЯ СТАТИСТИКА
-        # =====================================================================
-        st.markdown("---")
-        st.markdown("### 📋 Сводная статистика по школам")
-        summary_df = create_comparison_summary(
-            datasets=valid_datasets,
-            feature_columns=used_columns,
-            school_order=school_order,
+        # Кнопки скачивания рендерятся прямо через download_data_dialog (inline, без диалога)
+        download_data_dialog(
+            df=node_scores_df_full,
+            file_base="school_node_scores",
+            key_prefix="school_comp_node_scores",
         )
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-        csv_summary = summary_df.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button(
-            label="📥 Скачать сводку (CSV)",
-            data=csv_summary.encode("utf-8-sig"),
-            file_name="school_comparison_summary.csv",
-            mime="text/csv",
-            key="school_comp_download_csv"
+    else:
+        st.info("Узлы с ненулевыми значениями не найдены.")
+
+    # =====================================================================
+    # МЕТРИКА СИЛУЭТА
+    # =====================================================================
+    st.markdown("---")
+    col_score, col_interp = st.columns([1, 2])
+    with col_score:
+        st.metric(
+            label="Коэффициент силуэта",
+            value=f"{overall_score:.3f}",
+            help="Диапазон от -1 до 1. Чем выше, тем лучше разделение школ."
         )
+    with col_interp:
+        st.info(interpret_silhouette_score(overall_score))
 
-        # =====================================================================
-        # ДЕТАЛИ
-        # =====================================================================
-        with st.expander(
-            f"📝 Использовано признаков: {len(used_columns)}",
-            expanded=False
-        ):
-            by_level: Dict[int, List[str]] = {}
-            for col in used_columns:
-                lv = get_code_depth(col)
-                by_level.setdefault(lv, []).append(col)
-            for lv in sorted(by_level.keys()):
-                cols = by_level[lv]
-                st.markdown(f"**Уровень {lv}** ({len(cols)} признаков)")
-                display_cols_list = []
-                for c in sorted(cols)[:30]:
-                    lbl = classifier_labels.get(c, "")
-                    display_cols_list.append(f"{c}" + (f" ({lbl})" if lbl else ""))
-                st.code(", ".join(display_cols_list) + ("…" if len(cols) > 30 else ""))
+    basis_info = (
+        "весь базис"
+        if basis_choice_res == "full"
+        else f"узлы: {', '.join(selected_nodes_res or [])}"
+    )
+    st.caption(
+        f"📌 Базис: {basis_info} | "
+        f"Признаков: {len(used_columns)} | "
+        f"Метрика: {DISTANCE_METRIC_LABELS[selected_metric_res]}"
+    )
 
-        if missing_info_all:
-            with st.expander("⚠️ Диссертации без профилей", expanded=False):
-                for school_name, missing_df in missing_info_all.items():
-                    st.markdown(f"**{school_name}**: {len(missing_df)} диссертаций")
-                    show_df = missing_df.head(20)
-                    st.dataframe(show_df, use_container_width=True, hide_index=True)
-                    if len(missing_df) > 20:
-                        st.caption(f"… и ещё {len(missing_df) - 20}")
+    # =====================================================================
+    # ГРАФИК СИЛУЭТА
+    # =====================================================================
+    st.markdown("### 📊 График силуэта")
+    fig = create_silhouette_plot(
+        sample_scores=sample_scores,
+        labels=labels,
+        school_order=school_order,
+        overall_score=overall_score,
+        metric_label=DISTANCE_METRIC_LABELS[selected_metric_res],
+    )
+    st.pyplot(fig)
+    plt.close(fig)
+
+    st.download_button(
+        label="📥 Скачать график силуэта (PNG)",
+        data=silhouette_png,
+        file_name="silhouette_plot.png",
+        mime="image/png",
+        key="school_comp_download_png"
+    )
+
+    # =====================================================================
+    # СВОДНАЯ СТАТИСТИКА
+    # =====================================================================
+    st.markdown("---")
+    st.markdown("### 📋 Сводная статистика по школам")
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    csv_summary = summary_df.to_csv(index=False, encoding="utf-8-sig")
+    st.download_button(
+        label="📥 Скачать сводку (CSV)",
+        data=csv_summary.encode("utf-8-sig"),
+        file_name="school_comparison_summary.csv",
+        mime="text/csv",
+        key="school_comp_download_csv"
+    )
+
+    # =====================================================================
+    # ДЕТАЛИ
+    # =====================================================================
+    with st.expander(
+        f"📝 Использовано признаков: {len(used_columns)}",
+        expanded=False
+    ):
+        by_level: Dict[int, List[str]] = {}
+        for col in used_columns:
+            lv = get_code_depth(col)
+            by_level.setdefault(lv, []).append(col)
+        for lv in sorted(by_level.keys()):
+            cols = by_level[lv]
+            st.markdown(f"**Уровень {lv}** ({len(cols)} признаков)")
+            display_cols_list = []
+            for c in sorted(cols)[:30]:
+                lbl = classifier_labels_res.get(c, "")
+                display_cols_list.append(f"{c}" + (f" ({lbl})" if lbl else ""))
+            st.code(", ".join(display_cols_list) + ("…" if len(cols) > 30 else ""))
+
+    if missing_info_all:
+        with st.expander("⚠️ Диссертации без профилей", expanded=False):
+            for school_name, missing_df in missing_info_all.items():
+                st.markdown(f"**{school_name}**: {len(missing_df)} диссертаций")
+                show_df = missing_df.head(20)
+                st.dataframe(show_df, use_container_width=True, hide_index=True)
+                if len(missing_df) > 20:
+                    st.caption(f"… и ещё {len(missing_df) - 20}")
