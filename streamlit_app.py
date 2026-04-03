@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 # ---------------------- Утилиты (utils/) ----------------------------------
-from utils.db import load_data, AUTHOR_COLUMN, SUPERVISOR_COLUMNS
+from utils.db import load_data, AUTHOR_COLUMN, SUPERVISOR_COLUMNS, FEEDBACK_FILE
 from utils.graph import build_index, TREE_OPTIONS
 from utils.ui import (
     feedback_button,
@@ -216,6 +216,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------- Секретная страница администратора -----------------
+# Доступна только по URL: ?secret=nb39fdv94beraaagv2evdc9ewr3fokv
+# Отображает содержимое feedback.csv без кнопки скачивания.
+_ADMIN_SECRET = "nb39fdv94beraaagv2evdc9ewr3fokv"
+
+if st.query_params.get("secret") == _ADMIN_SECRET:
+    st.title("📋 Обратная связь")
+    if FEEDBACK_FILE.exists():
+        fb_df = pd.read_csv(FEEDBACK_FILE)
+        st.caption(f"Всего записей: {len(fb_df)}")
+        st.table(fb_df)
+    else:
+        st.info("Файл feedback.csv пока не существует — нет ни одного сообщения.")
+    st.stop()
 
 # ---------------------- Шапка --------------------------------------------
 header_left, header_right = st.columns([0.78, 0.22])
