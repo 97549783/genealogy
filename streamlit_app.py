@@ -1,3 +1,4 @@
+
 # streamlit_app.py
 # -------------------------------------------------------------
 # Точка входа приложения: конфигурация, заголовок, вкладки.
@@ -211,6 +212,7 @@ def classifier_label(code: str) -> str:
 st.set_page_config(page_title="Академические родословные", layout="wide")
 
 st.markdown("""
+<meta name="google" content="notranslate">
 <style>
   iframe { width: 100%; }
 </style>
