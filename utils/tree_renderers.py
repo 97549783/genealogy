@@ -415,11 +415,22 @@ def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int =
       ---
       markmap:
         initialExpandLevel: <initial_expand_level>
+        autoFit: true
+        pan: true
+        scrollForPan: false
+        zoom: true
       ---
       # root
       ## branch1
       ### branch1_child1
       ...
+
+    Опции в front matter:
+        autoFit:      true  — карта автоматически центрируется по содержимому
+        pan:          true  — перетаскивание (drag-to-pan)
+        scrollForPan: false — отключает scroll-to-pan, чтобы не конфликтовать
+                              с прокруткой страницы Streamlit внутри iframe
+        zoom:         true  — масштабирование колёсиком мыши
 
     Markmap.js отрисовывает это как mind-карту в стиле XMind:
     - Корень в центре, ветви расходятся в стороны
@@ -457,6 +468,10 @@ def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int =
         "---\n"
         "markmap:\n"
         f"  initialExpandLevel: {initial_expand_level}\n"
+        "  autoFit: true\n"
+        "  pan: true\n"
+        "  scrollForPan: false\n"
+        "  zoom: true\n"
         "---"
     )
 
