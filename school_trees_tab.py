@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
+from streamlit_echarts import st_echarts
 
 from school_trees import build_pyvis_html, draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
@@ -23,6 +24,7 @@ from utils.table_display import (
     build_tree_export_df,
     build_tree_st_dataframe_df,
 )
+from utils.tree_renderers import build_echarts_tree_option
 from utils.ui import show_instruction
 from utils.urls import share_button
 
@@ -93,6 +95,44 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
                 key=f"dl_csv_{key}",
                 use_container_width=True,
             )
+
+
+def _render_echarts_tree(G, root: str, key: str) -> None:
+    """
+    Отрисовывает ECharts-дерево в стиле XMind внутри свёрнутого expander-а.
+
+    Особенности:
+    - Горизонтальная ориентация (LR), как в XMind
+    - Цвет узлов меняется по уровню (6 цветов)
+    - Узлы кликабельны: разворачивают/сворачивают ветви
+    - Pan + zoom мышью (roam=True)
+    - Высота холста автоматически подстраивается под размер дерева
+    - Для малых деревьев (≤15 узлов) сразу раскрыты все уровни
+    - Для больших — по умолчанию 2-3 уровня, остальные свёрнуты
+
+    Args:
+        G:    nx.DiGraph с деревом.
+        root: Имя корневого узла.
+        key:  Уникальный ключ Streamlit.
+    """
+    with st.expander("🗺️ XMind-стиль (интерактивное дерево)", expanded=False):
+        result = build_echarts_tree_option(G, root)
+        if not result:
+            st.info("Нет данных для отображения.")
+            return
+
+        option = result["option"]
+        height_px = result["height"]
+
+        st.caption(
+            "💡 Кликните на узел, чтобы свернуть/развернуть ветвь. "
+            "Колёсико мыши — масштаб; зажмите и тяните — панорама."
+        )
+        st_echarts(
+            options=option,
+            height=f"{height_px}px",
+            key=f"echarts_{key}",
+        )
 
 
 def render_school_trees_tab(
@@ -201,6 +241,12 @@ def render_school_trees_tab(
                 st.components.v1.html(html, height=800, width=2000, scrolling=True)
                 html_bytes = html.encode("utf-8")
 
+                # ----------------------------------------------------------------
+                # XMind-стиль ECharts (под pyvis-виджетом, те же данные)
+                # ----------------------------------------------------------------
+                file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
+                _render_echarts_tree(G, root, key=file_prefix)
+
                 md_bytes = None
                 if export_md_outline:
                     out_lines: List[str] = []
@@ -212,8 +258,6 @@ def render_school_trees_tab(
 
                     walk(root)
                     md_bytes = ("\n".join(out_lines)).encode("utf-8")
-
-                file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
 
                 # Кнопки скачивания дерева (PNG / HTML / MD)
                 c1, c2, c3 = st.columns(3)
