@@ -16,6 +16,12 @@ utils/tree_renderers.py — вспомогательные функции для
         • Плавная анимация при клике, pan + zoom мышью.
         • Адаптивная высота холста и глубина по умолчанию.
 
+    build_markmap_markdown(G, root, initial_expand_level) -> str
+        Генерирует строку Markdown для streamlit-markmap (Markmap.js).
+        Mind-карта в стиле XMind: корень в центре, цветные ветви,
+        автоматический layout, защита от циклов.
+        Повторно используется в любых вкладках.
+
 Функции этого модуля могут повторно использоваться в любых других
 вкладках, где нужна XMind-визуализация дерева.
 """
@@ -23,7 +29,7 @@ utils/tree_renderers.py — вспомогательные функции для
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
@@ -210,7 +216,7 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
     # Адаптивная высота: 38 px на узел, min 520, max 2000
     height_px = max(520, min(n_nodes * 38, 2000))
 
-    # --- Разбиваем детей ко໊ня: половина влево (RL), половина вправо (LR) ---
+    # --- Разбиваем детей корня: половина влево (RL), половина вправо (LR) ---
     left_children = n_children[: n_top // 2]
     right_children = n_children[n_top // 2 :]
 
@@ -222,7 +228,7 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
         color: str,
         text_color: str,
     ) -> Dict[str, Any]:
-        """""" 
+        """"""
         children = list(G.successors(branch_child))
         is_leaf = len(children) == 0
         node_data = {
@@ -394,3 +400,77 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 </html>"""
 
     return html, height_px
+
+
+# ---------------------------------------------------------------------------
+# Markmap — генерация Markdown для streamlit-markmap (Markmap.js)
+# ---------------------------------------------------------------------------
+
+def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int = 2) -> str:
+    """
+    Генерирует строку Markdown для передачи в streamlit-markmap.
+
+    Уровни вложенности отображаются как заголовки Markdown::
+
+      ---
+      markmap:
+        initialExpandLevel: <initial_expand_level>
+      ---
+      # root
+      ## branch1
+      ### branch1_child1
+      ...
+
+    Markmap.js отрисовывает это как mind-карту в стиле XMind:
+    - Корень в центре, ветви расходятся в стороны
+    - Цветные линии ветвей (автоматически по HSL, как в XMind)
+    - Узлы сворачиваются/разворачиваются по клику
+    - Pan + zoom колёсиком мыши
+
+    Функция намеренно вынесена в utils, чтобы повторно использоваться
+    в любых других вкладках, где нужна XMind-визуализация дерева.
+
+    Args:
+        G:                    Ориентированный граф NetworkX (дерево)
+        root:                 Имя корневого узла
+        initial_expand_level: Глубина раскрытия по умолчанию
+                              (1 = только корень, 2 = до внуков, -1 = авто).
+                              При -1 глубина определяется по размеру графа.
+
+    Returns:
+        Строка Markdown с YAML front matter и заголовками (#, ##, ### ...)
+    """
+    if G.number_of_nodes() == 0:
+        return f"# {root}"
+
+    # Адаптивный initial_expand_level при авто-режиме
+    n_nodes = G.number_of_nodes()
+    if initial_expand_level < 0:
+        if n_nodes <= 15:
+            initial_expand_level = -1  # markmap: всё раскрыто
+        elif n_nodes <= 50:
+            initial_expand_level = 3
+        else:
+            initial_expand_level = 2
+
+    front_matter = (
+        "---\n"
+        "markmap:\n"
+        f"  initialExpandLevel: {initial_expand_level}\n"
+        "---"
+    )
+
+    lines: List[str] = [front_matter]
+    visited: Set[str] = set()  # защита от циклов в графе
+
+    def _walk(node: str, depth: int) -> None:
+        if node in visited:
+            return
+        visited.add(node)
+        prefix = "#" * max(1, depth)
+        lines.append(f"{prefix} {node}")
+        for child in G.successors(node):
+            _walk(child, depth + 1)
+
+    _walk(root, 1)
+    return "\n".join(lines)
