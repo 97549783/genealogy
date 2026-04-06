@@ -7,28 +7,13 @@ utils/tree_renderers.py — вспомогательные функции для
         Генерирует самодостаточный HTML-строку + рекомендуемую
         высоту холста в пикселях для st.components.v1.html.
 
-        Дизайн:
-        • Корень в центре, ветви расходятся влево и вправо (RL + LR).
-        • Каждая ветвь 1-го уровня своего цвета (палитра 10 цветов XMind).
-        • Цвет ветви наследуется потомками до листьев.
-        • Скруглённые заливные коннекторы, пилл-бейджи узлов.
-        • Листья — чистый текст без фона.
-        • Плавная анимация при клике, pan + zoom мышью.
-        • Адаптивная высота холста и глубина по умолчанию.
-
     build_markmap_html(G, root, initial_expand_level) -> tuple[str, int]
         Генерирует самодостаточный HTML с Markmap.js 0.18.12 (mind-карта
         в стиле XMind). Передаётся в st.components.v1.html — без
         зависимости от streamlit-markmap.
-        Pan, zoom, autoFit и центрирование работают через JS API.
 
     build_markmap_markdown(G, root, initial_expand_level) -> str
-        Генерирует строку Markdown для Markmap.js (без front matter).
-        Может использоваться для экспорта .md-файлов.
-        Повторно используется в любых вкладках.
-
-Функции этого модуля могут повторно использоваться в любых других
-вкладках, где нужна XMind-визуализация дерева.
+        Генерирует строку Markdown для экспорта .md-файлов.
 """
 
 from __future__ import annotations
@@ -38,28 +23,14 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
-# ---------------------------------------------------------------------------
-# Палитра XMind — 10 цветов, назначаются ветвям 1-го уровня циклически.
-# Цвет передаётся всем потомкам ветви без изменений.
-# ---------------------------------------------------------------------------
 _BRANCH_PALETTE: List[str] = [
-    "#ef5350",  # красный
-    "#ab47bc",  # фиолетовый
-    "#5c6bc0",  # тёмно-синий
-    "#29b6f6",  # голубой
-    "#26a69a",  # бирюзовый
-    "#66bb6a",  # зелёный
-    "#d4e157",  # жёлто-зелёный
-    "#ffa726",  # оранжевый
-    "#ff7043",  # глубокий оранжевый
-    "#8d6e63",  # коричневый
+    "#ef5350", "#ab47bc", "#5c6bc0", "#29b6f6", "#26a69a",
+    "#66bb6a", "#d4e157", "#ffa726", "#ff7043", "#8d6e63",
 ]
 
-# Цвет текста на пилле узла
 _BRANCH_TEXT: List[str] = [
     "#fff", "#fff", "#fff", "#fff", "#fff",
-    "#1a1a1a",  # жёлто-зелёный — тёмный текст
-    "#1a1a1a",  # жёлтый — тёмный текст
+    "#1a1a1a", "#1a1a1a",
     "#fff", "#fff", "#fff",
 ]
 
@@ -72,17 +43,10 @@ def _build_tree_data(
     depth: int = 0,
     initial_depth: int = 2,
 ) -> Dict[str, Any]:
-    """
-    Рекурсивно строит словарь узла для ECharts `tree` series.
-
-    Для листьев (depth > 0 и нет потомков) — простой текст (нет фона).
-    Для внутренних узлов — пилл с фоном цвета ветви.
-    """
     successors = list(G.successors(node))
     is_leaf = len(successors) == 0
 
     if is_leaf:
-        # Лист: чистый текст, цвет как у ветви, но без заливки
         result: Dict[str, Any] = {
             "name": node,
             "symbol": "circle",
@@ -98,7 +62,6 @@ def _build_tree_data(
             },
         }
     else:
-        # Внутренний узел: пилл с цветом ветви
         result = {
             "name": node,
             "symbol": "roundRect",
@@ -114,10 +77,8 @@ def _build_tree_data(
                 "width": max(76, min(len(node) * 7, 196)),
             },
         }
-        # collapsed=True если глубже initial_depth
         if depth >= initial_depth:
             result["collapsed"] = True
-
         result["children"] = [
             _build_tree_data(G, child, branch_color, branch_text_color, depth + 1, initial_depth)
             for child in successors
@@ -136,7 +97,6 @@ def _echarts_series(
     line_color: str,
     initial_depth: int,
 ) -> Dict[str, Any]:
-    """Возвращает один ECharts tree-series."""
     return {
         "type": "tree",
         "data": [data],
@@ -148,17 +108,8 @@ def _echarts_series(
         "symbol": "roundRect",
         "roam": True,
         "initialTreeDepth": initial_depth,
-        "lineStyle": {
-            "color": line_color,
-            "width": 1.8,
-            "curveness": 0.45,
-        },
-        "label": {
-            "show": True,
-            "position": "inside",
-            "verticalAlign": "middle",
-            "align": "center",
-        },
+        "lineStyle": {"color": line_color, "width": 1.8, "curveness": 0.45},
+        "label": {"show": True, "position": "inside", "verticalAlign": "middle", "align": "center"},
         "leaves": {
             "symbol": "circle",
             "symbolSize": 5,
@@ -187,19 +138,8 @@ def _echarts_series(
 
 def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
     """
-    Генерирует самодостаточный HTML для передачи в st.components.v1.html.
-
-    Дизайн в стиле XMind:
-    - Корень в центре (реализовано через две series: RL влево + LR вправо)
-    - Каждая ветвь 1-го уровня — своего цвета
-    - Цвет передаётся потомкам до листьев
-    - Листья — чистый текст без фона
-    - Скруглённые пилл-узлы для внутренних узлов
-    - Pan + zoom; клик — свернуть/развернуть ветвь
-    - Адаптивная высота холста
-
-    Returns:
-        (html_str, height_px)
+    Генерирует самодостаточный HTML (ECharts, XMind-стиль) для st.components.v1.html.
+    Returns: (html_str, height_px)
     """
     if G.number_of_nodes() == 0:
         return "<p style='color:#888'>&#x1f6ab; Данных нет</p>", 120
@@ -208,9 +148,8 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
     n_children = list(G.successors(root))
     n_top = len(n_children)
 
-    # Автовыбор глубины по умолчанию
     if n_nodes <= 10:
-        initial_depth = -1  # всё раскрыто
+        initial_depth = -1
     elif n_nodes <= 40:
         initial_depth = 3
     elif n_nodes <= 100:
@@ -218,22 +157,15 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
     else:
         initial_depth = 1
 
-    # Адаптивная высота: 38 px на узел, min 520, max 2000
     height_px = max(520, min(n_nodes * 38, 2000))
 
-    # --- Разбиваем детей корня: половина влево (RL), половина вправо (LR) ---
     left_children = n_children[: n_top // 2]
     right_children = n_children[n_top // 2 :]
 
     series: List[Dict[str, Any]] = []
     palette_idx = 0
 
-    def make_branch_root(
-        branch_child: str,
-        color: str,
-        text_color: str,
-    ) -> Dict[str, Any]:
-        """"""
+    def make_branch_root(branch_child: str, color: str, text_color: str) -> Dict[str, Any]:
         children = list(G.successors(branch_child))
         is_leaf = len(children) == 0
         node_data = {
@@ -261,7 +193,6 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
             ]
         return node_data
 
-    # Дети влево — серия RL
     if left_children:
         left_tree_children = []
         for child in left_children:
@@ -269,32 +200,24 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
             text_color = _BRANCH_TEXT[palette_idx % len(_BRANCH_TEXT)]
             left_tree_children.append(make_branch_root(child, color, text_color))
             palette_idx += 1
-
         left_root_data: Dict[str, Any] = {
             "name": root,
             "symbol": "roundRect",
             "symbolSize": [max(100, min(len(root) * 8, 220)), 32],
             "itemStyle": {"color": "#37474f", "borderColor": "#37474f"},
             "label": {
-                "show": True,
-                "color": "#fff",
-                "fontSize": 13,
-                "fontWeight": "bold",
+                "show": True, "color": "#fff", "fontSize": 13, "fontWeight": "bold",
                 "fontFamily": "'Segoe UI','Noto Sans',Arial,sans-serif",
-                "overflow": "break",
-                "width": max(96, min(len(root) * 8, 216)),
+                "overflow": "break", "width": max(96, min(len(root) * 8, 216)),
                 "backgroundColor": "#37474f",
             },
             "children": left_tree_children,
         }
         series.append(_echarts_series(
-            left_root_data, "RL",
-            left="50%", right="2%", top="2%", bottom="2%",
-            line_color="#b0bec5",
-            initial_depth=initial_depth,
+            left_root_data, "RL", left="50%", right="2%", top="2%", bottom="2%",
+            line_color="#b0bec5", initial_depth=initial_depth,
         ))
 
-    # Дети вправо — серия LR
     if right_children:
         right_tree_children = []
         for child in right_children:
@@ -302,52 +225,37 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
             text_color = _BRANCH_TEXT[palette_idx % len(_BRANCH_TEXT)]
             right_tree_children.append(make_branch_root(child, color, text_color))
             palette_idx += 1
-
         right_root_data: Dict[str, Any] = {
             "name": root,
             "symbol": "roundRect",
             "symbolSize": [max(100, min(len(root) * 8, 220)), 32],
             "itemStyle": {"color": "#37474f", "borderColor": "#37474f"},
             "label": {
-                "show": True,
-                "color": "#fff",
-                "fontSize": 13,
-                "fontWeight": "bold",
+                "show": True, "color": "#fff", "fontSize": 13, "fontWeight": "bold",
                 "fontFamily": "'Segoe UI','Noto Sans',Arial,sans-serif",
-                "overflow": "break",
-                "width": max(96, min(len(root) * 8, 216)),
+                "overflow": "break", "width": max(96, min(len(root) * 8, 216)),
                 "backgroundColor": "#37474f",
             },
             "children": right_tree_children,
         }
         series.append(_echarts_series(
-            right_root_data, "LR",
-            left="50%", right="2%", top="2%", bottom="2%",
-            line_color="#b0bec5",
-            initial_depth=initial_depth,
+            right_root_data, "LR", left="50%", right="2%", top="2%", bottom="2%",
+            line_color="#b0bec5", initial_depth=initial_depth,
         ))
 
-    # Если детей нет вообще — одна series LR
     if not series:
         root_data: Dict[str, Any] = {
             "name": root,
             "symbol": "roundRect",
             "symbolSize": [max(100, min(len(root) * 8, 220)), 32],
             "itemStyle": {"color": "#37474f", "borderColor": "#37474f"},
-            "label": {
-                "show": True, "color": "#fff",
-                "fontSize": 13, "fontWeight": "bold",
-                "backgroundColor": "#37474f",
-            },
+            "label": {"show": True, "color": "#fff", "fontSize": 13, "fontWeight": "bold", "backgroundColor": "#37474f"},
         }
         series.append(_echarts_series(
-            root_data, "LR",
-            left="5%", right="5%", top="5%", bottom="5%",
-            line_color="#b0bec5",
-            initial_depth=initial_depth,
+            root_data, "LR", left="5%", right="5%", top="5%", bottom="5%",
+            line_color="#b0bec5", initial_depth=initial_depth,
         ))
 
-    # Если только одна сторона — расширяем на весь холст
     if len(series) == 1:
         s = series[0]
         orient = s["orient"]
@@ -359,17 +267,13 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
     option = {
         "backgroundColor": "#ffffff",
         "tooltip": {
-            "trigger": "item",
-            "triggerOn": "mousemove",
-            "formatter": "{b}",
-            "backgroundColor": "rgba(30,30,30,0.88)",
-            "borderWidth": 0,
+            "trigger": "item", "triggerOn": "mousemove", "formatter": "{b}",
+            "backgroundColor": "rgba(30,30,30,0.88)", "borderWidth": 0,
             "textStyle": {"color": "#fff", "fontSize": 12},
             "extraCssText": "border-radius:6px;padding:6px 10px",
         },
         "series": series,
     }
-
     option_json = json.dumps(option, ensure_ascii=False)
 
     html = f"""<!DOCTYPE html>
@@ -388,47 +292,40 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 (function () {{
   var chart = echarts.init(document.getElementById('chart'), null, {{renderer: 'canvas'}});
   var option = {option_json};
-
-  // Привязываем левую series к правой половине canvas
   if (option.series.length >= 2) {{
     option.series[0].left  = '2%';
     option.series[0].right = '50%';
     option.series[1].left  = '50%';
     option.series[1].right = '2%';
   }}
-
   chart.setOption(option);
   window.addEventListener('resize', function () {{ chart.resize(); }});
 }})();
 </script>
 </body>
 </html>"""
-
     return html, height_px
 
 
 # ---------------------------------------------------------------------------
-# Markmap HTML — самодостаточный рендер через Markmap.js 0.18.12
+# Markmap HTML — рендер через markmap-autoloader@0.18.12
+#
+# Почему autoloader, а не markmap-lib + markmap-view отдельно:
+#   markmap-view@0.18.x не ре-экспортирует Markmap в window.markmap.
+#   autoloader загружает всесторонний стек (d3 + markmap-lib +
+#   markmap-view) и гарантирует, что window.markmap.Markmap доступен.
 # ---------------------------------------------------------------------------
 
 def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
     """
     Генерирует самодостаточный HTML с Markmap.js 0.18.12 (mind-карта в стиле XMind).
-    Передаётся в st.components.v1.html — без зависимости от streamlit-markmap.
+    Передаётся в st.components.v1.html — без streamlit-markmap.
 
-    Гарантирует работу pan, zoom, autoFit, центрирование корня:
-    - Pan и zoom передаются напрямую в JS API (не через YAML front matter)
-    - autoFit центрирует дерево в холсте сразу после рендера
-    - Два вызова mm.fit() с задержкой обходят баг iframe-размера Streamlit
+    Использует markmap-autoloader, который подгружает весь стек
+    (d3 + markmap-lib + markmap-view) и обеспечивает наличие
+    window.markmap.Markmap к моменту исполнения логики.
 
-    Args:
-        G:                    Ориентированный граф NetworkX (дерево)
-        root:                 Имя корневого узла
-        initial_expand_level: Глубина раскрытия по умолчанию
-                              (-1 = авто по размеру графа, 0+ = явная глубина)
-
-    Returns:
-        (html_str, height_px)
+    Returns: (html_str, height_px)
     """
     if G.number_of_nodes() == 0:
         return "<p style='color:#888'>Данных нет</p>", 300
@@ -436,10 +333,9 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     n_nodes = G.number_of_nodes()
     height_px = max(600, min(n_nodes * 32, 2000))
 
-    # Адаптивная глубина раскрытия
     if initial_expand_level < 0:
         if n_nodes <= 15:
-            iel = -1   # markmap: всё раскрыто
+            iel = -1
         elif n_nodes <= 50:
             iel = 3
         else:
@@ -447,7 +343,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     else:
         iel = initial_expand_level
 
-    # Строим Markdown без front matter — опции передаём напрямую в JS API
     md_lines: List[str] = []
     visited: Set[str] = set()
 
@@ -461,13 +356,15 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 
     _walk(root, 1)
 
-    # Экранируем для JS template literal
     md_escaped = (
         "\n".join(md_lines)
         .replace("\\", "\\\\")
         .replace("`", "\\`")
         .replace("${", "\\${")
     )
+
+    # Палитра цветов для JS (JSON-массив, безопасно вставляется в HTML)
+    palette_js = json.dumps(_BRANCH_PALETTE)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -480,64 +377,79 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     overflow: hidden;
     width: 100%; height: {height_px}px;
   }}
-  svg#mindmap {{
+  #mindmap {{
     width: 100%;
     height: {height_px}px;
     display: block;
+  }}
+  #err {{
+    display:none; position:absolute; top:8px; left:8px; right:8px;
+    background:#fee; color:#900; padding:8px 12px;
+    border-radius:6px; font:13px monospace; white-space:pre-wrap;
+    z-index:9999;
   }}
 </style>
 </head>
 <body>
 <svg id="mindmap"></svg>
+<div id="err"></div>
 
-<!-- Markmap 0.18.12 -->
-<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/markmap-lib@0.18.12/dist/browser/index.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.12/dist/browser/index.js"></script>
+<!--
+  markmap-autoloader загружает весь стек Markmap.js и гарантирует
+  наличие window.markmap.Markmap после загрузки.
+  markmap-view@0.18 не ре-экспортирует Markmap в window.markmap,
+  поэтому отдельные скрипты markmap-lib + markmap-view не работают.
+-->
+<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.18.12/dist/browser/index.js"></script>
 
 <script>
-(async function () {{
-  const {{ Transformer }} = window.markmap;
-  const {{ Markmap }}     = window.markmap;
+(function waitForMarkmap() {{
+  // Поллинг: дожидаемся, пока autoloader не инициализирует window.markmap
+  if (!window.markmap || !window.markmap.Markmap || !window.markmap.Transformer) {{
+    return setTimeout(waitForMarkmap, 50);
+  }}
 
-  const md = `{md_escaped}`;
+  (async function () {{
+    try {{
+      const {{ Transformer, Markmap }} = window.markmap;
+      const palette = {palette_js};
 
-  const transformer = new Transformer();
-  const {{ root, features }} = transformer.transform(md);
+      const md = `{md_escaped}`;
+      const transformer = new Transformer();
+      const {{ root, features }} = transformer.transform(md);
 
-  // Загружаем доп. ресурсы если нужны (KaTeX и т.п.)
-  const assets = transformer.getUsedAssets(features);
-  if (assets.styles)  window.markmap.loadCSS(assets.styles);
-  if (assets.scripts) await window.markmap.loadJS(assets.scripts, {{ getMarkmap: () => window.markmap }});
+      const assets = transformer.getUsedAssets(features);
+      if (assets.styles)  window.markmap.loadCSS(assets.styles);
+      if (assets.scripts) await window.markmap.loadJS(
+        assets.scripts, {{ getMarkmap: () => window.markmap }}
+      );
 
-  const svg = document.getElementById('mindmap');
+      const svg = document.getElementById('mindmap');
+      const mm = Markmap.create(svg, {{
+        autoFit:            true,
+        pan:                true,
+        zoom:               true,
+        initialExpandLevel: {iel},
+        duration:           500,
+        maxWidth:           300,
+        nodeMinHeight:      20,
+        spacingVertical:    8,
+        spacingHorizontal:  60,
+        fitRatio:           0.92,
+        color: (node) => palette[(node.state?.key ?? 0) % palette.length],
+      }}, root);
 
-  const mm = Markmap.create(svg, {{
-    autoFit:            true,
-    pan:                true,
-    zoom:               true,
-    initialExpandLevel: {iel},
-    duration:           500,
-    maxWidth:           300,
-    nodeMinHeight:      20,
-    spacingVertical:    8,
-    spacingHorizontal:  60,
-    fitRatio:           0.92,
-    color:              (node) => {{
-      const palette = [
-        '#ef5350','#ab47bc','#5c6bc0','#29b6f6','#26a69a',
-        '#66bb6a','#d4e157','#ffa726','#ff7043','#8d6e63',
-      ];
-      return palette[(node.state?.key ?? 0) % palette.length];
-    }},
-  }}, root);
+      setTimeout(() => mm.fit(), 200);
+      setTimeout(() => mm.fit(), 700);
+      window.addEventListener('resize', () => mm.fit());
 
-  // Принудительный fit после первого рендера (обходит баг iframe-размера)
-  setTimeout(() => mm.fit(), 200);
-  setTimeout(() => mm.fit(), 600);
-
-  window.addEventListener('resize', () => mm.fit());
-}})();
+    }} catch (e) {{
+      const el = document.getElementById('err');
+      el.style.display = 'block';
+      el.textContent = 'Ошибка Markmap: ' + e.message;
+    }}
+  }})();
+}})()
 </script>
 </body>
 </html>"""
@@ -551,18 +463,8 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 
 def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int = 2) -> str:
     """
-    Генерирует строку Markdown с иерархией заголовков (#, ##, ### ...).
-
-    Используется для экспорта .md-файлов. Для рендера в Streamlit
-    используйте build_markmap_html + st.components.v1.html вместо этой функции.
-
-    Args:
-        G:                    Ориентированный граф NetworkX (дерево)
-        root:                 Имя корневого узла
-        initial_expand_level: Сохранён для совместимости, не влияет на вывод
-
-    Returns:
-        Строка Markdown с заголовками
+    Генерирует строку Markdown для экспорта .md-файлов.
+    Для рендера в Streamlit используйте build_markmap_html.
     """
     if G.number_of_nodes() == 0:
         return f"# {root}"
