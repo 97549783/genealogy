@@ -23,7 +23,7 @@ from utils.table_display import (
     build_tree_export_df,
     build_tree_st_dataframe_df,
 )
-from utils.tree_renderers import build_xmind_html
+from utils.tree_renderers import build_markmap_markdown, build_xmind_html
 from utils.ui import show_instruction
 from utils.urls import share_button
 
@@ -100,6 +100,41 @@ def _render_xmind_widget(G, root: str, key: str) -> None:
         )
         # scrolling=False чтобы pan/zoom работал без конфликта со Streamlit
         st.components.v1.html(xmind_html, height=height_px + 20, scrolling=False)
+
+
+def _render_markmap_widget(G, root: str, key: str) -> None:
+    """
+    Отрисовывает дерево через streamlit-markmap (Markmap.js) в expander-е.
+
+    Выглядит максимально близко к XMind:
+    - Корень в центре, ветви расходятся в стороны
+    - Цветные ветви (Markmap.js назначает цвета автоматически по HSL)
+    - Клик на узел — свернуть/развернуть
+    - Pan + zoom мышью
+
+    key сохранён для единообразия с _render_xmind_widget,
+    но в markmap() не передаётся (у него нет аргумента key).
+
+    Требует: pip install streamlit-markmap
+    """
+    try:
+        from streamlit_markmap import markmap
+    except ImportError:
+        st.warning(
+            "Для этого виджета нужен пакет: `pip install streamlit-markmap`. "
+            "Добавьте его в requirements.txt."
+        )
+        return
+
+    with st.expander("🗺️ Markmap", expanded=False):
+        md_str = build_markmap_markdown(G, root, initial_expand_level=-1)
+        n_nodes = G.number_of_nodes()
+        height_px = max(600, min(n_nodes * 30, 1800))
+        st.caption(
+            "💡 Клик на узел — свернуть/развернуть ветвь. "
+            "Колёсико мыши — масштаб; зажмите и тяните — панорама."
+        )
+        markmap(md_str, height=height_px)
 
 
 def render_school_trees_tab(
@@ -213,6 +248,11 @@ def render_school_trees_tab(
                 # ----------------------------------------------------------------
                 file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
                 _render_xmind_widget(G, root, key=file_prefix)
+
+                # ----------------------------------------------------------------
+                # Markmap (под ECharts-виджетом, те же данные)
+                # ----------------------------------------------------------------
+                _render_markmap_widget(G, root, key=file_prefix)
 
                 md_bytes = None
                 if export_md_outline:
