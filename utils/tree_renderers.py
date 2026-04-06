@@ -8,9 +8,9 @@ utils/tree_renderers.py — вспомогательные функции для
         высоту холста в пикселях для st.components.v1.html.
 
     build_markmap_html(G, root, initial_expand_level) -> tuple[str, int]
-        Генерирует самодостаточный HTML с Markmap.js 0.17.2 (mind-карта
-        в стиле XMind). Передаётся в st.components.v1.html — без
-        зависимости от streamlit-markmap.
+        Генерирует самодостаточный HTML через markmap-autoloader
+        (mind-карта в стиле XMind). Передаётся в st.components.v1.html
+        без зависимости от streamlit-markmap.
 
     build_markmap_markdown(G, root, initial_expand_level) -> str
         Генерирует строку Markdown для экспорта .md-файлов.
@@ -310,23 +310,24 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # ---------------------------------------------------------------------------
 # Markmap HTML
 #
-# Версия 0.17.2 — последняя стабильная с синхронным API (Markmap.create,
-# mm.fit). Версии 0.17.9 и 0.18.x на jsdelivr не дают корректного
-# window.markmap с Transformer + Markmap через простые <script> теги.
+# markmap-lib и markmap-view — это ESM-модули. Они НЕ выставляют window.markmap
+# через обычные <script> теги (не UMD-бундл).
 #
-# Скрипты загружаются через 4 последовательных <script defer> —
-# браузер выполняет defer-скрипты строго по порядку после парсинга DOM,
-# без race condition, без addEventListener('load', ...).
+# markmap-autoloader — это официально рекомендованный инструмент для
+# браузерного рендера без сборщика. Он сам подтягивает d3, markmap-lib и
+# markmap-view, инициализирует window.markmap с Markmap + Transformer.
+# С manual: true мы управляем моментом рендера вручную.
 # ---------------------------------------------------------------------------
 
 
 def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
     """
-    Генерирует самодостаточный HTML с Markmap.js 0.17.2 (mind-карта в стиле XMind).
+    Генерирует самодостаточный HTML с markmap-autoloader (mind-карта в стиле XMind).
     Передаётся в st.components.v1.html — без зависимости от streamlit-markmap.
 
-    Версия 0.17.2 — последняя с синхронным API (Markmap.create, mm.fit).
-    Четыре <script defer> гарантируют порядок загрузки без race condition.
+    Использует markmap-autoloader — официальный CDN-бундл для браузера,
+    который правильно инициализирует window.markmap.
+    markmap-lib/view — ESM, они не выставляют window.markmap через <script>.
 
     Returns: (html_str, height_px)
     """
@@ -359,15 +360,34 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 
     _walk(root, 1)
 
-    # Правильное экранирование для JS template literal
-    md_escaped = (
-        "\n".join(md_lines)
-        .replace("\\", "\\\\")
-        .replace("`", "\\`")
-        .replace("${", "\\${")
-    )
+    # Для markmap-autoloader Маркдаун вставляется прямо в HTML через
+    # <script type="text/template"> — экранирование HTML-символов обязательно.
+    def _escape_html(s: str) -> str:
+        return (
+            s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+        )
+
+    md_content = "\n".join(md_lines)
+    md_html = _escape_html(md_content)
 
     palette_js = json.dumps(_BRANCH_PALETTE)
+
+    # front matter для markmap-autoloader: initialExpandLevel, pan, zoom, autoFit
+    front_matter = f"""---
+markmap:
+  pan: true
+  zoom: true
+  autoFit: true
+  initialExpandLevel: {iel}
+  maxWidth: 300
+  nodeMinHeight: 20
+  spacingVertical: 8
+  spacingHorizontal: 60
+  fitRatio: 0.92
+---"""
+    full_md_html = _escape_html(front_matter) + "\n" + md_html
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -378,101 +398,72 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     margin: 0; padding: 0;
     background: #fff;
     overflow: hidden;
-    width: 100%; height: {height_px}px;
+    width: 100%;
+    height: {height_px}px;
   }}
-  #mindmap {{
+  .markmap > svg {{
     width: 100%;
     height: {height_px}px;
     display: block;
   }}
-  #mm-err {{
-    display: none;
-    position: absolute; top: 8px; left: 8px; right: 8px;
-    background: #fee2e2; color: #991b1b;
-    padding: 8px 12px; border-radius: 6px;
-    font: 13px monospace; white-space: pre-wrap;
-    z-index: 9999;
-  }}
 </style>
+<!--
+  markmap-autoloader — официальный CDN-бундл для браузера.
+  Он сам подтягивает d3, markmap-lib, markmap-view и
+  правильно инициализирует window.markmap.
+  manual:true — отключаем авто-рендер, рендерим вручную через JS для
+  полного контроля над опциями и палитрой.
+-->
+<script>
+window.markmap = {{ autoLoader: {{ manual: true }} }};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.17.2"></script>
 </head>
 <body>
-<svg id="mindmap"></svg>
-<div id="mm-err"></div>
-
-<!--
-  markmap 0.17.2 — последняя версия с синхронным API и корректным
-  window.markmap {{ Transformer, Markmap }}.
-  defer гарантирует выполнение скриптов строго по порядку после парсинга DOM.
--->
-<script defer src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/markmap-lib@0.17.2/dist/browser/index.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/markmap-view@0.17.2/dist/browser/index.js"></script>
-<script defer>
-(function () {{
-  try {{
-    var mm_ns = window.markmap;
-    if (!mm_ns || !mm_ns.Transformer || !mm_ns.Markmap) {{
-      var errEl = document.getElementById('mm-err');
-      errEl.style.display = 'block';
-      errEl.textContent =
-        'Markmap не загружен. Проверьте интернет-соединение и обновите страницу.\\n' +
-        'window.markmap = ' + JSON.stringify(mm_ns ? Object.keys(mm_ns) : null);
-      return;
-    }}
-
-    var Transformer = mm_ns.Transformer;
-    var Markmap     = mm_ns.Markmap;
-    var palette     = {palette_js};
-
-    var md          = `{md_escaped}`;
-    var transformer = new Transformer();
-    var result      = transformer.transform(md);
-    var rootNode    = result.root;
-    var features    = result.features;
-
-    var assets = transformer.getUsedAssets(features);
-    if (assets.styles) mm_ns.loadCSS(assets.styles);
-
-    function renderMap() {{
-      var svg = document.getElementById('mindmap');
-      var mm  = Markmap.create(svg, {{
-        autoFit:            true,
-        pan:                true,
-        zoom:               true,
-        initialExpandLevel: {iel},
-        duration:           500,
-        maxWidth:           300,
-        nodeMinHeight:      20,
-        spacingVertical:    8,
-        spacingHorizontal:  60,
-        fitRatio:           0.92,
-        color: function (node) {{
-          return palette[(node.state ? node.state.key : 0) % palette.length];
-        }},
-      }}, rootNode);
-
-      // Двойной fit обходит баг с iframe-размером Streamlit
-      setTimeout(function () {{ mm.fit(); }}, 200);
-      setTimeout(function () {{ mm.fit(); }}, 700);
-      window.addEventListener('resize', function () {{ mm.fit(); }});
-    }}
-
-    if (assets.scripts && assets.scripts.length > 0) {{
-      mm_ns.loadJS(assets.scripts, {{ getMarkmap: function () {{ return window.markmap; }} }})
-        .then(renderMap)
-        .catch(function (e) {{
-          var errEl = document.getElementById('mm-err');
-          errEl.style.display = 'block';
-          errEl.textContent = 'Ошибка загрузки assets: ' + e.message;
-        }});
-    }} else {{
-      renderMap();
-    }}
-  }} catch (e) {{
-    var errEl = document.getElementById('mm-err');
-    errEl.style.display = 'block';
-    errEl.textContent = 'Ошибка Markmap: ' + e.message + '\\n' + e.stack;
+<div class="markmap">
+<script type="text/template">
+{full_md_html}
+</script>
+</div>
+<script>
+(function waitForMarkmap() {{
+  var mm_ns = window.markmap;
+  if (!mm_ns || !mm_ns.Markmap || !mm_ns.Transformer) {{
+    setTimeout(waitForMarkmap, 50);
+    return;
   }}
+
+  var palette = {palette_js};
+
+  // Переопределяем цвет до рендера
+  mm_ns.defaultOptions = Object.assign(mm_ns.defaultOptions || {{}}, {{
+    color: function(node) {{
+      return palette[(node.state ? node.state.key : 0) % palette.length];
+    }},
+  }});
+
+  mm_ns.autoLoader.renderAll();
+
+  // fit после рендера: обходим баг iframe-размера Streamlit
+  setTimeout(function() {{
+    var svgs = document.querySelectorAll('.markmap svg');
+    svgs.forEach(function(svg) {{
+      if (svg._mm) svg._mm.fit();
+    }});
+  }}, 300);
+  setTimeout(function() {{
+    var svgs = document.querySelectorAll('.markmap svg');
+    svgs.forEach(function(svg) {{
+      if (svg._mm) svg._mm.fit();
+    }});
+  }}, 800);
+
+  window.addEventListener('resize', function() {{
+    var svgs = document.querySelectorAll('.markmap svg');
+    svgs.forEach(function(svg) {{
+      if (svg._mm) svg._mm.fit();
+    }});
+  }});
 }})();
 </script>
 </body>
