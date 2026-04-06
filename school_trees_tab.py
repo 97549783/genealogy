@@ -16,7 +16,6 @@ from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
-from streamlit_echarts import st_echarts
 
 from school_trees import build_pyvis_html, draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
@@ -24,7 +23,7 @@ from utils.table_display import (
     build_tree_export_df,
     build_tree_st_dataframe_df,
 )
-from utils.tree_renderers import build_echarts_tree_option
+from utils.tree_renderers import build_xmind_html
 from utils.ui import show_instruction
 from utils.urls import share_button
 
@@ -35,15 +34,7 @@ from utils.urls import share_button
 
 def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     """
-    Отрисовывает скрытый по умолчанию expander «Список диссертаций в дереве»
-    со следующими элементами:
-
-    1. st.dataframe с MultiIndex-заголовками:
-       - Верхний уровень «Автореферат» объединяет подколонки «Читать» и «Скачать»
-       - Обе ссылочные колонки рендерятся через LinkColumn
-       - Встроенный тулбар: поиск, скрытие колонок, полный экран, скачать CSV
-    2. Кнопки «Скачать Excel» / «Скачать CSV» — в экспорте
-       колонка «Автореферат» содержит viewer-ссылку.
+    Отрисовывает скрытый по умолчанию expander «Список диссертаций в дереве».
 
     Args:
         subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
@@ -55,7 +46,6 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             st.info("Данные отсутствуют.")
             return
 
-        # --- st.dataframe с MultiIndex-заголовками ---
         df_st, col_cfg = build_tree_st_dataframe_df(subset)
         st.dataframe(
             df_st,
@@ -65,9 +55,7 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             key=f"df_table_{key}",
         )
 
-        # --- Кнопки экспорта (внутри expander, под таблицей) ---
         xlsx_df, csv_df = build_tree_export_df(subset)
-
         col_xlsx, col_csv = st.columns(2)
         with col_xlsx:
             buf = io.BytesIO()
@@ -84,7 +72,6 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
                 )
             except Exception as exc:
                 st.error(f"Ошибка создания Excel: {exc}")
-
         with col_csv:
             csv_bytes = csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
             st.download_button(
@@ -97,42 +84,22 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             )
 
 
-def _render_echarts_tree(G, root: str, key: str) -> None:
+def _render_xmind_widget(G, root: str, key: str) -> None:
     """
-    Отрисовывает ECharts-дерево в стиле XMind внутри свёрнутого expander-а.
+    Отрисовывает ECharts-дерево в стиле XMind через st.components.v1.html.
 
-    Особенности:
-    - Горизонтальная ориентация (LR), как в XMind
-    - Цвет узлов меняется по уровню (6 цветов)
-    - Узлы кликабельны: разворачивают/сворачивают ветви
-    - Pan + zoom мышью (roam=True)
-    - Высота холста автоматически подстраивается под размер дерева
-    - Для малых деревьев (≤15 узлов) сразу раскрыты все уровни
-    - Для больших — по умолчанию 2-3 уровня, остальные свёрнуты
-
-    Args:
-        G:    nx.DiGraph с деревом.
-        root: Имя корневого узла.
-        key:  Уникальный ключ Streamlit.
+    Корень — в центре, ветви расходятся влево и вправо.
+    Каждая ветвь своего цвета. Клик — свернуть/развернуть.
+    Pan + zoom мышью.
     """
     with st.expander("🗺️ XMind-стиль (интерактивное дерево)", expanded=False):
-        result = build_echarts_tree_option(G, root)
-        if not result:
-            st.info("Нет данных для отображения.")
-            return
-
-        option = result["option"]
-        height_px = result["height"]
-
+        xmind_html, height_px = build_xmind_html(G, root)
         st.caption(
-            "💡 Кликните на узел, чтобы свернуть/развернуть ветвь. "
+            "💡 Клик на узел — свернуть/развернуть ветвь. "
             "Колёсико мыши — масштаб; зажмите и тяните — панорама."
         )
-        st_echarts(
-            options=option,
-            height=f"{height_px}px",
-            key=f"echarts_{key}",
-        )
+        # scrolling=False чтобы pan/zoom работал без конфликта со Streamlit
+        st.components.v1.html(xmind_html, height=height_px + 20, scrolling=False)
 
 
 def render_school_trees_tab(
@@ -237,15 +204,15 @@ def render_school_trees_tab(
 
                 st.image(png_bytes, caption="Миниатюра PNG", width=220)
 
-                html = build_pyvis_html(G, root)
-                st.components.v1.html(html, height=800, width=2000, scrolling=True)
-                html_bytes = html.encode("utf-8")
+                html_pyvis = build_pyvis_html(G, root)
+                st.components.v1.html(html_pyvis, height=800, width=2000, scrolling=True)
+                html_bytes = html_pyvis.encode("utf-8")
 
                 # ----------------------------------------------------------------
                 # XMind-стиль ECharts (под pyvis-виджетом, те же данные)
                 # ----------------------------------------------------------------
                 file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
-                _render_echarts_tree(G, root, key=file_prefix)
+                _render_xmind_widget(G, root, key=file_prefix)
 
                 md_bytes = None
                 if export_md_outline:
@@ -259,7 +226,6 @@ def render_school_trees_tab(
                     walk(root)
                     md_bytes = ("\n".join(out_lines)).encode("utf-8")
 
-                # Кнопки скачивания дерева (PNG / HTML / MD)
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     st.download_button(
@@ -289,14 +255,10 @@ def render_school_trees_tab(
                     else:
                         st.empty()
 
-                # ----------------------------------------------------------------
-                # Список диссертаций + экспорт (скрыт по умолчанию)
-                # ----------------------------------------------------------------
                 _render_tree_table(subset, key=file_prefix)
 
                 person_entries.append((f"{file_prefix}.png", png_bytes))
                 person_entries.append((f"{file_prefix}.html", html_bytes))
-                # Для ZIP кладём xlsx/csv
                 try:
                     xlsx_df_zip, csv_df_zip = build_tree_export_df(subset)
                     buf_xlsx = io.BytesIO()
