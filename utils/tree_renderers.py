@@ -8,7 +8,7 @@ utils/tree_renderers.py — вспомогательные функции для
         высоту холста в пикселях для st.components.v1.html.
 
     build_markmap_html(G, root, initial_expand_level) -> tuple[str, int]
-        Генерирует самодостаточный HTML с Markmap.js 0.17.9 (mind-карта
+        Генерирует самодостаточный HTML с Markmap.js 0.17.2 (mind-карта
         в стиле XMind). Передаётся в st.components.v1.html — без
         зависимости от streamlit-markmap.
 
@@ -310,20 +310,23 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # ---------------------------------------------------------------------------
 # Markmap HTML
 #
-# Используем markmap-view@0.17.9 — единственная версия, которая
-# корректно экспортирует Markmap и Transformer в window.markmap.
-# markmap-view@0.18.x не ре-экспортирует их в window.markmap,
-# а markmap-autoloader@0.18.12 не существует на npm.
-# Скрипты загружаются через onload-цепочку для гарантированного порядка.
+# Версия 0.17.2 — последняя стабильная с синхронным API (Markmap.create,
+# mm.fit). Версии 0.17.9 и 0.18.x на jsdelivr не дают корректного
+# window.markmap с Transformer + Markmap через простые <script> теги.
+#
+# Скрипты загружаются через 4 последовательных <script defer> —
+# браузер выполняет defer-скрипты строго по порядку после парсинга DOM,
+# без race condition, без addEventListener('load', ...).
 # ---------------------------------------------------------------------------
+
 
 def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
     """
-    Генерирует самодостаточный HTML с Markmap.js 0.17.9 (mind-карта в стиле XMind).
-    Передаётся в st.components.v1.html — без streamlit-markmap.
+    Генерирует самодостаточный HTML с Markmap.js 0.17.2 (mind-карта в стиле XMind).
+    Передаётся в st.components.v1.html — без зависимости от streamlit-markmap.
 
-    Скрипты загружаются через onload-цепочку (не async),
-    чтобы гарантировать порядок загрузки d3 → markmap-lib → markmap-view.
+    Версия 0.17.2 — последняя с синхронным API (Markmap.create, mm.fit).
+    Четыре <script defer> гарантируют порядок загрузки без race condition.
 
     Returns: (html_str, height_px)
     """
@@ -356,7 +359,7 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 
     _walk(root, 1)
 
-    # Экранируем для JS template literal: backtick, \ и ${}
+    # Правильное экранирование для JS template literal
     md_escaped = (
         "\n".join(md_lines)
         .replace("\\", "\\\\")
@@ -385,7 +388,7 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
   #mm-err {{
     display: none;
     position: absolute; top: 8px; left: 8px; right: 8px;
-    background: #fee; color: #900;
+    background: #fee2e2; color: #991b1b;
     padding: 8px 12px; border-radius: 6px;
     font: 13px monospace; white-space: pre-wrap;
     z-index: 9999;
@@ -397,46 +400,28 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 <div id="mm-err"></div>
 
 <!--
-  markmap-view@0.17.9 экспортирует Markmap + Transformer в window.markmap.
-  Скрипты загружаются поцепочно: d3 → markmap-lib → markmap-view → логика.
+  markmap 0.17.2 — последняя версия с синхронным API и корректным
+  window.markmap {{ Transformer, Markmap }}.
+  defer гарантирует выполнение скриптов строго по порядку после парсинга DOM.
 -->
-<script id="d3-script" src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
-<script>
-document.getElementById('d3-script').addEventListener('load', function() {{
-  var s1 = document.createElement('script');
-  s1.src = 'https://cdn.jsdelivr.net/npm/markmap-lib@0.17.9/dist/browser/index.js';
-  s1.addEventListener('load', function() {{
-    var s2 = document.createElement('script');
-    s2.src = 'https://cdn.jsdelivr.net/npm/markmap-view@0.17.9/dist/browser/index.js';
-    s2.addEventListener('load', function() {{
-      initMarkmap();
-    }});
-    s2.addEventListener('error', function(e) {{ showErr('markmap-view load failed: ' + e.message); }});
-    document.head.appendChild(s2);
-  }});
-  s1.addEventListener('error', function(e) {{ showErr('markmap-lib load failed: ' + e.message); }});
-  document.head.appendChild(s1);
-}});
-document.getElementById('d3-script').addEventListener('error', function(e) {{
-  showErr('d3 load failed: ' + e.message);
-}});
-
-function showErr(msg) {{
-  var el = document.getElementById('mm-err');
-  el.style.display = 'block';
-  el.textContent = msg;
-}}
-
-function initMarkmap() {{
+<script defer src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/markmap-lib@0.17.2/dist/browser/index.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/markmap-view@0.17.2/dist/browser/index.js"></script>
+<script defer>
+(function () {{
   try {{
-    var markmap = window.markmap;
-    if (!markmap || !markmap.Transformer || !markmap.Markmap) {{
-      showErr('Ошибка: window.markmap не содержит Transformer/Markmap после загрузки всех скриптов.');
+    var mm_ns = window.markmap;
+    if (!mm_ns || !mm_ns.Transformer || !mm_ns.Markmap) {{
+      var errEl = document.getElementById('mm-err');
+      errEl.style.display = 'block';
+      errEl.textContent =
+        'Markmap не загружен. Проверьте интернет-соединение и обновите страницу.\\n' +
+        'window.markmap = ' + JSON.stringify(mm_ns ? Object.keys(mm_ns) : null);
       return;
     }}
 
-    var Transformer = markmap.Transformer;
-    var Markmap     = markmap.Markmap;
+    var Transformer = mm_ns.Transformer;
+    var Markmap     = mm_ns.Markmap;
     var palette     = {palette_js};
 
     var md          = `{md_escaped}`;
@@ -446,9 +431,9 @@ function initMarkmap() {{
     var features    = result.features;
 
     var assets = transformer.getUsedAssets(features);
-    if (assets.styles)  markmap.loadCSS(assets.styles);
+    if (assets.styles) mm_ns.loadCSS(assets.styles);
 
-    var afterAssets = function() {{
+    function renderMap() {{
       var svg = document.getElementById('mindmap');
       var mm  = Markmap.create(svg, {{
         autoFit:            true,
@@ -461,27 +446,34 @@ function initMarkmap() {{
         spacingVertical:    8,
         spacingHorizontal:  60,
         fitRatio:           0.92,
-        color: function(node) {{
+        color: function (node) {{
           return palette[(node.state ? node.state.key : 0) % palette.length];
         }},
       }}, rootNode);
 
-      setTimeout(function() {{ mm.fit(); }}, 200);
-      setTimeout(function() {{ mm.fit(); }}, 700);
-      window.addEventListener('resize', function() {{ mm.fit(); }});
-    }};
+      // Двойной fit обходит баг с iframe-размером Streamlit
+      setTimeout(function () {{ mm.fit(); }}, 200);
+      setTimeout(function () {{ mm.fit(); }}, 700);
+      window.addEventListener('resize', function () {{ mm.fit(); }});
+    }}
 
     if (assets.scripts && assets.scripts.length > 0) {{
-      markmap.loadJS(assets.scripts, {{ getMarkmap: function() {{ return window.markmap; }} }})
-        .then(afterAssets)
-        .catch(function(e) {{ showErr('Ошибка загрузки assets: ' + e.message); }});
+      mm_ns.loadJS(assets.scripts, {{ getMarkmap: function () {{ return window.markmap; }} }})
+        .then(renderMap)
+        .catch(function (e) {{
+          var errEl = document.getElementById('mm-err');
+          errEl.style.display = 'block';
+          errEl.textContent = 'Ошибка загрузки assets: ' + e.message;
+        }});
     }} else {{
-      afterAssets();
+      renderMap();
     }}
-  }} catch(e) {{
-    showErr('Ошибка Markmap: ' + e.message + '\\n' + e.stack);
+  }} catch (e) {{
+    var errEl = document.getElementById('mm-err');
+    errEl.style.display = 'block';
+    errEl.textContent = 'Ошибка Markmap: ' + e.message + '\\n' + e.stack;
   }}
-}}
+}})();
 </script>
 </body>
 </html>"""
@@ -491,7 +483,9 @@ function initMarkmap() {{
 
 # ---------------------------------------------------------------------------
 # Markmap Markdown — генерация .md строки (для экспорта файлов)
+# Для рендера в Streamlit используйте build_markmap_html.
 # ---------------------------------------------------------------------------
+
 
 def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int = 2) -> str:
     """
