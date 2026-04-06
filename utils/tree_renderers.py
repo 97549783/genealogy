@@ -4,13 +4,12 @@ utils/tree_renderers.py — вспомогательные функции для
 
 Публичный API:
     build_xmind_html(G, root) -> tuple[str, int]
-        Генерирует самодостаточный HTML-строку + рекомендуемую
-        высоту холста в пикселях для st.components.v1.html.
+        Генерирует самодостаточный HTML (ECharts) для st.components.v1.html.
 
     build_markmap_html(G, root, initial_expand_level) -> tuple[str, int]
-        Генерирует самодостаточный HTML через markmap-autoloader
-        (mind-карта в стиле XMind). Передаётся в st.components.v1.html
-        без зависимости от streamlit-markmap.
+        Генерирует самодостаточный HTML (Markmap.js через ESM + JSON-дерево)
+        для st.components.v1.html. Без autoloader, без Transformer,
+        без streamlit-markmap.
 
     build_markmap_markdown(G, root, initial_expand_level) -> str
         Генерирует строку Markdown для экспорта .md-файлов.
@@ -310,31 +309,60 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # ---------------------------------------------------------------------------
 # Markmap HTML
 #
-# Используем markmap-autoloader БЕЗ manual:true.
+# Подход: ESM import из esm.sh + JSON-дерево без Transformer/autoloader.
 #
-# Почему НЕ manual:true:
-#   - С manual:true autoloader только загружает зависимости, но НЕ
-#     регистрирует Markmap/Transformer в window.markmap.
-#     Наш waitForMarkmap() ждёт mm_ns.Markmap — и ждёт вечно.
+# Почему не autoloader:
+#   - autoloader рендерит асинхронно, front matter обрабатывается
+#     ненадёжно (часть опций игнорируется в iframe).
 #
-# Правильный подход:
-#   1. autoloader рендерит дерево сам (без manual:true)
-#   2. MutationObserver ловит момент появления <svg> внутри .markmap
-#   3. После рендера достаём mm = svg.__markmap__ и вызываем fit()
-#
-# front matter (---) НЕ экранируется — вставляется в <script type=text/template>
-# как есть. Экранируются только символы внутри Markdown-контента (< > &),
-# чтобы не сломать HTML-парсер.
+# Что делаем:
+#   1. Строим JSON-дерево в Python (так же, как делает Transformer—
+#      {content: текст, children: [...]})
+#   2. Импортируем только Markmap через <script type="module">
+#      из esm.sh (CDN для ESM-модулей в браузере)
+#   3. Вызываем Markmap.create(svg, options, rootNode) напрямую
+#   4. mm.fit() сразу после create() + через таймауты
 # ---------------------------------------------------------------------------
+
+
+def _build_markmap_node(
+    G: nx.DiGraph,
+    node: str,
+    visited: Set[str],
+    depth: int,
+    max_depth: int,
+) -> Dict[str, Any]:
+    """
+    Рекурсивно строит JSON-узел в формате INode Markmap.js:
+    {{ content: str, children: [...], payload: {{fold: 1}} }}
+    """
+    if node in visited:
+        return {"content": node, "children": []}
+    visited.add(node)
+
+    children_nodes = list(G.successors(node))
+    children_data = [
+        _build_markmap_node(G, c, visited, depth + 1, max_depth)
+        for c in children_nodes
+    ]
+
+    result: Dict[str, Any] = {
+        "content": node,
+        "children": children_data,
+    }
+    # Сворачиваем узлы глубже max_depth (если max_depth > 0)
+    if max_depth > 0 and depth >= max_depth and children_data:
+        result["payload"] = {"fold": 1}
+
+    return result
 
 
 def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
     """
-    Генерирует самодостаточный HTML с markmap-autoloader (mind-карта в стиле XMind).
-    Передаётся в st.components.v1.html — без зависимости от streamlit-markmap.
+    Генерирует самодостаточный HTML (Markmap.js) для st.components.v1.html.
 
-    Использует markmap-autoloader без manual:true — autoloader рендерит
-    дерево самостоятельно, после чего MutationObserver применяет fit().
+    Подход: ESM import (esm.sh) + готовое JSON-дерево без Transformer.
+    Гарантирует: pan, zoom, autoFit, центрирование корня.
 
     Returns: (html_str, height_px)
     """
@@ -344,42 +372,23 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     n_nodes = G.number_of_nodes()
     height_px = max(600, min(n_nodes * 32, 2000))
 
+    # Адаптивная глубина раскрытия
     if initial_expand_level < 0:
         if n_nodes <= 15:
-            iel = -1
+            max_depth = 0   # 0 = всё раскрыто
         elif n_nodes <= 50:
-            iel = 3
+            max_depth = 3
         else:
-            iel = 2
+            max_depth = 2
     else:
-        iel = initial_expand_level
+        max_depth = initial_expand_level
 
-    md_lines: List[str] = []
+    # Строим JSON-дерево
     visited: Set[str] = set()
+    root_node = _build_markmap_node(G, root, visited, depth=0, max_depth=max_depth)
+    tree_json = json.dumps(root_node, ensure_ascii=False)
 
-    def _walk(node: str, depth: int) -> None:
-        if node in visited:
-            return
-        visited.add(node)
-        md_lines.append("#" * max(1, depth) + " " + node)
-        for child in G.successors(node):
-            _walk(child, depth + 1)
-
-    _walk(root, 1)
-
-    # Экранируем только Markdown-контент (не front matter!).
-    # front matter с "---" должен остаться нетронутым для YAML-парсера.
-    def _escape_html(s: str) -> str:
-        return (
-            s.replace("&", "&amp;")
-             .replace("<", "&lt;")
-             .replace(">", "&gt;")
-        )
-
-    md_content = _escape_html("\n".join(md_lines))
-
-    # front matter вставляется как есть (без экранирования)
-    front_matter = f"---\nmarkmap:\n  pan: true\n  zoom: true\n  autoFit: true\n  initialExpandLevel: {iel}\n  maxWidth: 300\n  nodeMinHeight: 20\n  spacingVertical: 8\n  spacingHorizontal: 60\n  fitRatio: 0.92\n---"
+    palette_js = json.dumps(_BRANCH_PALETTE)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -387,59 +396,65 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 <meta charset="utf-8">
 <style>
   html, body {{
-    margin: 0; padding: 0;
+    margin: 0;
+    padding: 0;
     background: #fff;
     overflow: hidden;
     width: 100%;
     height: {height_px}px;
   }}
-  .markmap {{
-    width: 100%;
-    height: {height_px}px;
-    display: block;
-  }}
-  .markmap svg {{
+  #mm-svg {{
     width: 100%;
     height: {height_px}px;
     display: block;
   }}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.17.2"></script>
 </head>
 <body>
-<div class="markmap">
-<script type="text/template">
-{front_matter}
-{md_content}
-</script>
-</div>
-<script>
-// MutationObserver: ждём появления <svg> внутри .markmap (autoloader
-// создаёт его асинхронно), затем вызываем fit() через __markmap__.
-(function () {{
-  var container = document.querySelector('.markmap');
-  if (!container) return;
+<svg id="mm-svg"></svg>
+<script type="module">
+// ESM-импорт через esm.sh — CDN для ES-модулей в браузере.
+// Импортируем только Markmap (визуальный компонент) — Transformer не нужен,
+// так как дерево уже построено в Python и передано как JSON.
+import {{ Markmap }} from 'https://esm.sh/markmap-view@0.18';
 
-  function tryFit() {{
-    var svg = container.querySelector('svg');
-    if (svg && svg.__markmap__) {{
-      svg.__markmap__.fit();
-    }}
+const palette = {palette_js};
+
+// Назначаем цвет каждой ветви первого уровня по индексу
+function assignColors(node, idx) {{
+  node.state = node.state || {{}};
+  node.state.color = palette[idx % palette.length];
+  if (node.children) {{
+    node.children.forEach((child, i) => assignColors(child, idx === -1 ? i : idx));
   }}
+}}
 
-  var observer = new MutationObserver(function () {{
-    var svg = container.querySelector('svg');
-    if (svg) {{
-      observer.disconnect();
-      // Даём небольшую задержку для завершения layout
-      setTimeout(tryFit, 150);
-      setTimeout(tryFit, 600);
-    }}
-  }});
-  observer.observe(container, {{ childList: true, subtree: true }});
+const data = {tree_json};
+// Для корневого узла перебираем ветви первого уровня
+if (data.children) {{
+  data.children.forEach((child, i) => assignColors(child, i));
+}}
 
-  window.addEventListener('resize', tryFit);
-}})();
+const svg = document.getElementById('mm-svg');
+const mm = Markmap.create(svg, {{
+  autoFit:            true,
+  pan:                true,
+  zoom:               true,
+  duration:           400,
+  maxWidth:           280,
+  nodeMinHeight:      16,
+  spacingVertical:    5,
+  spacingHorizontal:  80,
+  fitRatio:           0.92,
+  color:              (node) => (node.state && node.state.color) || palette[0],
+}}, data);
+
+// fit() сразу + через таймауты для iframe Streamlit
+requestAnimationFrame(() => mm.fit());
+setTimeout(() => mm.fit(), 300);
+setTimeout(() => mm.fit(), 800);
+
+window.addEventListener('resize', () => mm.fit());
 </script>
 </body>
 </html>"""
