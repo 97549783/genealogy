@@ -310,13 +310,21 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # ---------------------------------------------------------------------------
 # Markmap HTML
 #
-# markmap-lib и markmap-view — это ESM-модули. Они НЕ выставляют window.markmap
-# через обычные <script> теги (не UMD-бундл).
+# Используем markmap-autoloader БЕЗ manual:true.
 #
-# markmap-autoloader — это официально рекомендованный инструмент для
-# браузерного рендера без сборщика. Он сам подтягивает d3, markmap-lib и
-# markmap-view, инициализирует window.markmap с Markmap + Transformer.
-# С manual: true мы управляем моментом рендера вручную.
+# Почему НЕ manual:true:
+#   - С manual:true autoloader только загружает зависимости, но НЕ
+#     регистрирует Markmap/Transformer в window.markmap.
+#     Наш waitForMarkmap() ждёт mm_ns.Markmap — и ждёт вечно.
+#
+# Правильный подход:
+#   1. autoloader рендерит дерево сам (без manual:true)
+#   2. MutationObserver ловит момент появления <svg> внутри .markmap
+#   3. После рендера достаём mm = svg.__markmap__ и вызываем fit()
+#
+# front matter (---) НЕ экранируется — вставляется в <script type=text/template>
+# как есть. Экранируются только символы внутри Markdown-контента (< > &),
+# чтобы не сломать HTML-парсер.
 # ---------------------------------------------------------------------------
 
 
@@ -325,9 +333,8 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     Генерирует самодостаточный HTML с markmap-autoloader (mind-карта в стиле XMind).
     Передаётся в st.components.v1.html — без зависимости от streamlit-markmap.
 
-    Использует markmap-autoloader — официальный CDN-бундл для браузера,
-    который правильно инициализирует window.markmap.
-    markmap-lib/view — ESM, они не выставляют window.markmap через <script>.
+    Использует markmap-autoloader без manual:true — autoloader рендерит
+    дерево самостоятельно, после чего MutationObserver применяет fit().
 
     Returns: (html_str, height_px)
     """
@@ -360,8 +367,8 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 
     _walk(root, 1)
 
-    # Для markmap-autoloader Маркдаун вставляется прямо в HTML через
-    # <script type="text/template"> — экранирование HTML-символов обязательно.
+    # Экранируем только Markdown-контент (не front matter!).
+    # front matter с "---" должен остаться нетронутым для YAML-парсера.
     def _escape_html(s: str) -> str:
         return (
             s.replace("&", "&amp;")
@@ -369,25 +376,10 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
              .replace(">", "&gt;")
         )
 
-    md_content = "\n".join(md_lines)
-    md_html = _escape_html(md_content)
+    md_content = _escape_html("\n".join(md_lines))
 
-    palette_js = json.dumps(_BRANCH_PALETTE)
-
-    # front matter для markmap-autoloader: initialExpandLevel, pan, zoom, autoFit
-    front_matter = f"""---
-markmap:
-  pan: true
-  zoom: true
-  autoFit: true
-  initialExpandLevel: {iel}
-  maxWidth: 300
-  nodeMinHeight: 20
-  spacingVertical: 8
-  spacingHorizontal: 60
-  fitRatio: 0.92
----"""
-    full_md_html = _escape_html(front_matter) + "\n" + md_html
+    # front matter вставляется как есть (без экранирования)
+    front_matter = f"---\nmarkmap:\n  pan: true\n  zoom: true\n  autoFit: true\n  initialExpandLevel: {iel}\n  maxWidth: 300\n  nodeMinHeight: 20\n  spacingVertical: 8\n  spacingHorizontal: 60\n  fitRatio: 0.92\n---"
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -401,69 +393,52 @@ markmap:
     width: 100%;
     height: {height_px}px;
   }}
-  .markmap > svg {{
+  .markmap {{
+    width: 100%;
+    height: {height_px}px;
+    display: block;
+  }}
+  .markmap svg {{
     width: 100%;
     height: {height_px}px;
     display: block;
   }}
 </style>
-<!--
-  markmap-autoloader — официальный CDN-бундл для браузера.
-  Он сам подтягивает d3, markmap-lib, markmap-view и
-  правильно инициализирует window.markmap.
-  manual:true — отключаем авто-рендер, рендерим вручную через JS для
-  полного контроля над опциями и палитрой.
--->
-<script>
-window.markmap = {{ autoLoader: {{ manual: true }} }};
-</script>
 <script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.17.2"></script>
 </head>
 <body>
 <div class="markmap">
 <script type="text/template">
-{full_md_html}
+{front_matter}
+{md_content}
 </script>
 </div>
 <script>
-(function waitForMarkmap() {{
-  var mm_ns = window.markmap;
-  if (!mm_ns || !mm_ns.Markmap || !mm_ns.Transformer) {{
-    setTimeout(waitForMarkmap, 50);
-    return;
+// MutationObserver: ждём появления <svg> внутри .markmap (autoloader
+// создаёт его асинхронно), затем вызываем fit() через __markmap__.
+(function () {{
+  var container = document.querySelector('.markmap');
+  if (!container) return;
+
+  function tryFit() {{
+    var svg = container.querySelector('svg');
+    if (svg && svg.__markmap__) {{
+      svg.__markmap__.fit();
+    }}
   }}
 
-  var palette = {palette_js};
-
-  // Переопределяем цвет до рендера
-  mm_ns.defaultOptions = Object.assign(mm_ns.defaultOptions || {{}}, {{
-    color: function(node) {{
-      return palette[(node.state ? node.state.key : 0) % palette.length];
-    }},
+  var observer = new MutationObserver(function () {{
+    var svg = container.querySelector('svg');
+    if (svg) {{
+      observer.disconnect();
+      // Даём небольшую задержку для завершения layout
+      setTimeout(tryFit, 150);
+      setTimeout(tryFit, 600);
+    }}
   }});
+  observer.observe(container, {{ childList: true, subtree: true }});
 
-  mm_ns.autoLoader.renderAll();
-
-  // fit после рендера: обходим баг iframe-размера Streamlit
-  setTimeout(function() {{
-    var svgs = document.querySelectorAll('.markmap svg');
-    svgs.forEach(function(svg) {{
-      if (svg._mm) svg._mm.fit();
-    }});
-  }}, 300);
-  setTimeout(function() {{
-    var svgs = document.querySelectorAll('.markmap svg');
-    svgs.forEach(function(svg) {{
-      if (svg._mm) svg._mm.fit();
-    }});
-  }}, 800);
-
-  window.addEventListener('resize', function() {{
-    var svgs = document.querySelectorAll('.markmap svg');
-    svgs.forEach(function(svg) {{
-      if (svg._mm) svg._mm.fit();
-    }});
-  }});
+  window.addEventListener('resize', tryFit);
 }})();
 </script>
 </body>
