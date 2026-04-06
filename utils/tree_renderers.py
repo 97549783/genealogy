@@ -16,10 +16,15 @@ utils/tree_renderers.py — вспомогательные функции для
         • Плавная анимация при клике, pan + zoom мышью.
         • Адаптивная высота холста и глубина по умолчанию.
 
+    build_markmap_html(G, root, initial_expand_level) -> tuple[str, int]
+        Генерирует самодостаточный HTML с Markmap.js 0.18.12 (mind-карта
+        в стиле XMind). Передаётся в st.components.v1.html — без
+        зависимости от streamlit-markmap.
+        Pan, zoom, autoFit и центрирование работают через JS API.
+
     build_markmap_markdown(G, root, initial_expand_level) -> str
-        Генерирует строку Markdown для streamlit-markmap (Markmap.js).
-        Mind-карта в стиле XMind: корень в центре, цветные ветви,
-        автоматический layout, защита от циклов.
+        Генерирует строку Markdown для Markmap.js (без front matter).
+        Может использоваться для экспорта .md-файлов.
         Повторно используется в любых вкладках.
 
 Функции этого модуля могут повторно использоваться в любых других
@@ -403,87 +408,173 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Markmap — генерация Markdown для streamlit-markmap (Markmap.js)
+# Markmap HTML — самодостаточный рендер через Markmap.js 0.18.12
 # ---------------------------------------------------------------------------
 
-def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int = 2) -> str:
+def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
     """
-    Генерирует строку Markdown для передачи в streamlit-markmap.
+    Генерирует самодостаточный HTML с Markmap.js 0.18.12 (mind-карта в стиле XMind).
+    Передаётся в st.components.v1.html — без зависимости от streamlit-markmap.
 
-    Уровни вложенности отображаются как заголовки Markdown::
-
-      ---
-      markmap:
-        initialExpandLevel: <initial_expand_level>
-        autoFit: true
-        pan: true
-        scrollForPan: false
-        zoom: true
-      ---
-      # root
-      ## branch1
-      ### branch1_child1
-      ...
-
-    Опции в front matter:
-        autoFit:      true  — карта автоматически центрируется по содержимому
-        pan:          true  — перетаскивание (drag-to-pan)
-        scrollForPan: false — отключает scroll-to-pan, чтобы не конфликтовать
-                              с прокруткой страницы Streamlit внутри iframe
-        zoom:         true  — масштабирование колёсиком мыши
-
-    Markmap.js отрисовывает это как mind-карту в стиле XMind:
-    - Корень в центре, ветви расходятся в стороны
-    - Цветные линии ветвей (автоматически по HSL, как в XMind)
-    - Узлы сворачиваются/разворачиваются по клику
-    - Pan + zoom колёсиком мыши
-
-    Функция намеренно вынесена в utils, чтобы повторно использоваться
-    в любых других вкладках, где нужна XMind-визуализация дерева.
+    Гарантирует работу pan, zoom, autoFit, центрирование корня:
+    - Pan и zoom передаются напрямую в JS API (не через YAML front matter)
+    - autoFit центрирует дерево в холсте сразу после рендера
+    - Два вызова mm.fit() с задержкой обходят баг iframe-размера Streamlit
 
     Args:
         G:                    Ориентированный граф NetworkX (дерево)
         root:                 Имя корневого узла
         initial_expand_level: Глубина раскрытия по умолчанию
-                              (1 = только корень, 2 = до внуков, -1 = авто).
-                              При -1 глубина определяется по размеру графа.
+                              (-1 = авто по размеру графа, 0+ = явная глубина)
 
     Returns:
-        Строка Markdown с YAML front matter и заголовками (#, ##, ### ...)
+        (html_str, height_px)
     """
     if G.number_of_nodes() == 0:
-        return f"# {root}"
+        return "<p style='color:#888'>Данных нет</p>", 300
 
-    # Адаптивный initial_expand_level при авто-режиме
     n_nodes = G.number_of_nodes()
+    height_px = max(600, min(n_nodes * 32, 2000))
+
+    # Адаптивная глубина раскрытия
     if initial_expand_level < 0:
         if n_nodes <= 15:
-            initial_expand_level = -1  # markmap: всё раскрыто
+            iel = -1   # markmap: всё раскрыто
         elif n_nodes <= 50:
-            initial_expand_level = 3
+            iel = 3
         else:
-            initial_expand_level = 2
+            iel = 2
+    else:
+        iel = initial_expand_level
 
-    front_matter = (
-        "---\n"
-        "markmap:\n"
-        f"  initialExpandLevel: {initial_expand_level}\n"
-        "  autoFit: true\n"
-        "  pan: true\n"
-        "  scrollForPan: false\n"
-        "  zoom: true\n"
-        "---"
-    )
-
-    lines: List[str] = [front_matter]
-    visited: Set[str] = set()  # защита от циклов в графе
+    # Строим Markdown без front matter — опции передаём напрямую в JS API
+    md_lines: List[str] = []
+    visited: Set[str] = set()
 
     def _walk(node: str, depth: int) -> None:
         if node in visited:
             return
         visited.add(node)
-        prefix = "#" * max(1, depth)
-        lines.append(f"{prefix} {node}")
+        md_lines.append("#" * max(1, depth) + " " + node)
+        for child in G.successors(node):
+            _walk(child, depth + 1)
+
+    _walk(root, 1)
+
+    # Экранируем для JS template literal
+    md_escaped = (
+        "\n".join(md_lines)
+        .replace("\\", "\\\\")
+        .replace("`", "\\`")
+        .replace("${", "\\${")
+    )
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {{
+    margin: 0; padding: 0;
+    background: #fff;
+    overflow: hidden;
+    width: 100%; height: {height_px}px;
+  }}
+  svg#mindmap {{
+    width: 100%;
+    height: {height_px}px;
+    display: block;
+  }}
+</style>
+</head>
+<body>
+<svg id="mindmap"></svg>
+
+<!-- Markmap 0.18.12 -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-lib@0.18.12/dist/browser/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.12/dist/browser/index.js"></script>
+
+<script>
+(async function () {{
+  const {{ Transformer }} = window.markmap;
+  const {{ Markmap }}     = window.markmap;
+
+  const md = `{md_escaped}`;
+
+  const transformer = new Transformer();
+  const {{ root, features }} = transformer.transform(md);
+
+  // Загружаем доп. ресурсы если нужны (KaTeX и т.п.)
+  const assets = transformer.getUsedAssets(features);
+  if (assets.styles)  window.markmap.loadCSS(assets.styles);
+  if (assets.scripts) await window.markmap.loadJS(assets.scripts, {{ getMarkmap: () => window.markmap }});
+
+  const svg = document.getElementById('mindmap');
+
+  const mm = Markmap.create(svg, {{
+    autoFit:            true,
+    pan:                true,
+    zoom:               true,
+    initialExpandLevel: {iel},
+    duration:           500,
+    maxWidth:           300,
+    nodeMinHeight:      20,
+    spacingVertical:    8,
+    spacingHorizontal:  60,
+    fitRatio:           0.92,
+    color:              (node) => {{
+      const palette = [
+        '#ef5350','#ab47bc','#5c6bc0','#29b6f6','#26a69a',
+        '#66bb6a','#d4e157','#ffa726','#ff7043','#8d6e63',
+      ];
+      return palette[(node.state?.key ?? 0) % palette.length];
+    }},
+  }}, root);
+
+  // Принудительный fit после первого рендера (обходит баг iframe-размера)
+  setTimeout(() => mm.fit(), 200);
+  setTimeout(() => mm.fit(), 600);
+
+  window.addEventListener('resize', () => mm.fit());
+}})();
+</script>
+</body>
+</html>"""
+
+    return html, height_px
+
+
+# ---------------------------------------------------------------------------
+# Markmap Markdown — генерация .md строки (для экспорта файлов)
+# ---------------------------------------------------------------------------
+
+def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int = 2) -> str:
+    """
+    Генерирует строку Markdown с иерархией заголовков (#, ##, ### ...).
+
+    Используется для экспорта .md-файлов. Для рендера в Streamlit
+    используйте build_markmap_html + st.components.v1.html вместо этой функции.
+
+    Args:
+        G:                    Ориентированный граф NetworkX (дерево)
+        root:                 Имя корневого узла
+        initial_expand_level: Сохранён для совместимости, не влияет на вывод
+
+    Returns:
+        Строка Markdown с заголовками
+    """
+    if G.number_of_nodes() == 0:
+        return f"# {root}"
+
+    lines: List[str] = []
+    visited: Set[str] = set()
+
+    def _walk(node: str, depth: int) -> None:
+        if node in visited:
+            return
+        visited.add(node)
+        lines.append("#" * max(1, depth) + " " + node)
         for child in G.successors(node):
             _walk(child, depth + 1)
 
