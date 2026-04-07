@@ -313,13 +313,19 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 #
 # markmap-view не имеет встроенной опции direction/bidirectional.
 #
-# Решение: два отдельных SVG-инстанса Markmap рядом:
-#   • правый SVG — LR (ветви вправо)
-#   • левый SVG — LR тоже, но весь контейнер CSS scaleX(-1)
-#     → ветви растут влево
-#     → текст узлов (тег <text>) исправляется JS-патчем:
-#       находим x-центр узла и применяем transform="scale(-1,1) translate(-2x, 0)"
-#       непосредственно к SVG-элементу <text>
+# Дом-структура узла Markmap v0.18 (verified from source):
+#   <g class="markmap-node" transform="translate(x,y)">
+#     <circle/>
+#     <foreignObject class="markmap-foreign" x="paddingX" y="0" width="W" height="H">
+#       <div>           ← width: var(--markmap-max-width); text-align: left
+#         <div>...</div>  ← display: inline-block  ← вот куда применяем scaleX(-1)
+#       </div>
+#     </foreignObject>
+#   </g>
+#
+# Метод fix: CSS-правило через <style> в документ — охватывает все узлы
+# сразу, в том числе после expand/collapse:
+#   #mm-svg-left .markmap-foreign > div > div { transform: scaleX(-1); }
 # ---------------------------------------------------------------------------
 
 _EXPAND_THRESHOLD = 35
@@ -426,15 +432,25 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     height: {height_px}px;
   }}
   /*
-   * Левый контейнер зеркалится CSS scaleX(-1).
-   * Это заставляет ветви расти влево.
-   * Текст при этом тоже зеркалится — его исправляет JS-патч fixLeftText().
+   * Левый контейнер зеркалится CSS scaleX(-1) — ветви растут влево.
+   * Текст узлов исправляется CSS-правилом ниже.
    */
   #mm-left-wrap {{
     transform: scaleX(-1);
     transform-origin: center center;
     width: 100%;
     height: 100%;
+  }}
+  /*
+   * Ключевое правило: зеркалим внутренний inline-block div
+   * внутри foreignObject обратно, чтобы компенсировать CSS scaleX(-1)
+   * на #mm-left-wrap. DOM-структура Markmap v0.18:
+   *   foreignObject.markmap-foreign > div > div {{ display: inline-block }}
+   * Ветви/пути это правило не затрагивает.
+   */
+  #mm-svg-left .markmap-foreign > div > div {{
+    transform: scaleX(-1) !important;
+    transform-origin: center center !important;
   }}
   .mm-side {{
     flex: 1;
@@ -538,38 +554,9 @@ if (hasLeft) {{
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
   const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
-
-  /*
-   * fixLeftText() — исправляет зеркальный текст в левом SVG.
-   *
-   * Проблема: весь контейнер #mm-left-wrap зеркален CSS scaleX(-1),
-   * поэтому SVG-текст (элементы <text>) тоже отображаются.
-   *
-   * Решение: находим каждый <text> элемент, читаем его
-   * атрибут x (горизонтальная позиция центра текста) и применяем:
-   *   transform="scale(-1,1) translate(-2*x, 0)"
-   * Это отражает только текст относительно его оси X.
-   * Ветви (<path>, <g>, <circle>) не трогаются вообще.
-   */
-  function fixLeftText(svgEl) {{
-    svgEl.querySelectorAll('text').forEach(function(textEl) {{
-      const x = parseFloat(textEl.getAttribute('x') || '0');
-      textEl.setAttribute('transform', 'scale(-1,1) translate(' + (-2 * x) + ',0)');
-    }});
-  }}
-
-  function fitAndFix() {{
-    mmL.fit();
-    setTimeout(() => fixLeftText(svgL), 80);
-  }}
-
-  requestAnimationFrame(fitAndFix);
-  setTimeout(fitAndFix, 400);
-  setTimeout(fitAndFix, 950);
-
-  svgL.addEventListener('click', () => {{
-    setTimeout(() => fixLeftText(svgL), 650);
-  }});
+  requestAnimationFrame(() => mmL.fit());
+  setTimeout(() => mmL.fit(), 300);
+  setTimeout(() => mmL.fit(), 800);
 }}
 
 window.addEventListener('resize', () => {{
