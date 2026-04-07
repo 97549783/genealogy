@@ -1,5 +1,5 @@
 """
-utils/tree_renderers.py — вспомогательные функции для альтернативных
+udils/tree_renderers.py — вспомогательные функции для альтернативных
 визуализаций деревьев (помимо matplotlib и pyvis).
 
 Публичный API:
@@ -324,6 +324,23 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 #   4. mm.fit() сразу после create() + через таймауты
 # ---------------------------------------------------------------------------
 
+_EXPAND_THRESHOLD = 35  # порог суммарного числа узлов уровней 1+2
+
+
+def _count_levels(G: nx.DiGraph, root: str, levels: int = 2) -> int:
+    """
+    Считает общее количество узлов на уровнях 1..levels (корень — уровень 0).
+    """
+    frontier = list(G.successors(root))  # уровень 1
+    total = len(frontier)
+    for _ in range(levels - 1):
+        next_frontier: List[str] = []
+        for node in frontier:
+            next_frontier.extend(G.successors(node))
+        total += len(next_frontier)
+        frontier = next_frontier
+    return total
+
 
 def _build_markmap_node(
     G: nx.DiGraph,
@@ -334,7 +351,7 @@ def _build_markmap_node(
 ) -> Dict[str, Any]:
     """
     Рекурсивно строит JSON-узел в формате INode Markmap.js:
-    {{ content: str, children: [...], payload: {{fold: 1}} }}
+    { content: str, children: [...], payload: {fold: 1} }
     """
     if node in visited:
         return {"content": node, "children": []}
@@ -350,7 +367,7 @@ def _build_markmap_node(
         "content": node,
         "children": children_data,
     }
-    # Сворачиваем узлы глубже max_depth (если max_depth > 0)
+    # Сворачиваем узлы глубже max_depth (max_depth=0 — всё раскрыто)
     if max_depth > 0 and depth >= max_depth and children_data:
         result["payload"] = {"fold": 1}
 
@@ -361,8 +378,14 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     """
     Генерирует самодостаточный HTML (Markmap.js) для st.components.v1.html.
 
-    Подход: ESM import (esm.sh) + готовое JSON-дерево без Transformer.
-    Гарантирует: pan, zoom, autoFit, центрирование корня.
+    Ветви расходятся влево и вправо от основателя (direction='bidirectional').
+
+    Правило авто-раскрытия (initial_expand_level < 0):
+      - Подсчитываем суммарное число узлов на уровнях 1 и 2.
+      - Если > {_EXPAND_THRESHOLD}: по умолчанию развёрнут только уровень 1
+        (узлы уровня 2+ свёрнуты), т.е. max_depth = 1.
+      - Если <= {_EXPAND_THRESHOLD}: по умолчанию развёрнуты уровни 1 и 2
+        (узлы уровня 3+ свёрнуты), т.е. max_depth = 2.
 
     Returns: (html_str, height_px)
     """
@@ -372,14 +395,10 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     n_nodes = G.number_of_nodes()
     height_px = max(600, min(n_nodes * 32, 2000))
 
-    # Адаптивная глубина раскрытия
     if initial_expand_level < 0:
-        if n_nodes <= 15:
-            max_depth = 0   # 0 = всё раскрыто
-        elif n_nodes <= 50:
-            max_depth = 3
-        else:
-            max_depth = 2
+        # Считаем узлы уровней 1 и 2 вместе
+        nodes_l1_l2 = _count_levels(G, root, levels=2)
+        max_depth = 1 if nodes_l1_l2 > _EXPAND_THRESHOLD else 2
     else:
         max_depth = initial_expand_level
 
@@ -446,6 +465,7 @@ const mm = Markmap.create(svg, {{
   spacingVertical:    5,
   spacingHorizontal:  80,
   fitRatio:           0.92,
+  direction:          'bidirectional',
   color:              (node) => (node.state && node.state.color) || palette[0],
 }}, data);
 
@@ -457,7 +477,7 @@ setTimeout(() => mm.fit(), 800);
 window.addEventListener('resize', () => mm.fit());
 </script>
 </body>
-</html>"""
+</html>"""  # noqa: E501
 
     return html, height_px
 
