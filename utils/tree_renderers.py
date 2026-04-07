@@ -1,5 +1,5 @@
 """
-udils/tree_renderers.py — вспомогательные функции для альтернативных
+utils/tree_renderers.py — вспомогательные функции для альтернативных
 визуализаций деревьев (помимо matplotlib и pyvis).
 
 Публичный API:
@@ -10,6 +10,8 @@ udils/tree_renderers.py — вспомогательные функции для
         Генерирует самодостаточный HTML (Markmap.js через ESM + JSON-дерево)
         для st.components.v1.html. Без autoloader, без Transformer,
         без streamlit-markmap.
+        Двунаправное дерево: дети основателя делятся пополам и расходятся
+        влево и вправо через два отдельных SVG-инстанса Markmap.
 
     build_markmap_markdown(G, root, initial_expand_level) -> str
         Генерирует строку Markdown для экспорта .md-файлов.
@@ -309,19 +311,15 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # ---------------------------------------------------------------------------
 # Markmap HTML
 #
-# Подход: ESM import из esm.sh + JSON-дерево без Transformer/autoloader.
+# markmap-view не имеет встроенной опции direction/bidirectional
+# (открытый feature request #235/#265).
 #
-# Почему не autoloader:
-#   - autoloader рендерит асинхронно, front matter обрабатывается
-#     ненадёжно (часть опций игнорируется в iframe).
-#
-# Что делаем:
-#   1. Строим JSON-дерево в Python (так же, как делает Transformer—
-#      {content: текст, children: [...]})
-#   2. Импортируем только Markmap через <script type="module">
-#      из esm.sh (CDN для ESM-модулей в браузере)
-#   3. Вызываем Markmap.create(svg, options, rootNode) напрямую
-#   4. mm.fit() сразу после create() + через таймауты
+# Решение: два отдельных SVG-инстанса Markmap рядом:
+#   • правый SVG — LR (ветви вправо), корень = первая половина детей
+#   • левый SVG — LR тоже, но весь контейнер зеркально отражён
+#     scaleX(-1), а текст каждого узла возвращается JS-патчем
+#     (чтобы читальный текст не был зеркальным)
+#   • в центре — HTML-блок с именем основателя
 # ---------------------------------------------------------------------------
 
 _EXPAND_THRESHOLD = 35  # порог суммарного числа узлов уровней 1+2
@@ -378,14 +376,15 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     """
     Генерирует самодостаточный HTML (Markmap.js) для st.components.v1.html.
 
-    Ветви расходятся влево и вправо от основателя (direction='bidirectional').
+    Двунаправное дерево: дети основателя делятся пополам и расходятся влево
+    и вправо через два отдельных SVG-инстанса Markmap рядом.
+    markmap-view не имеет встроенной опции direction='bidirectional',
+    поэтому двунаправность реализована вручную.
 
     Правило авто-раскрытия (initial_expand_level < 0):
       - Подсчитываем суммарное число узлов на уровнях 1 и 2.
-      - Если > {_EXPAND_THRESHOLD}: по умолчанию развёрнут только уровень 1
-        (узлы уровня 2+ свёрнуты), т.е. max_depth = 1.
-      - Если <= {_EXPAND_THRESHOLD}: по умолчанию развёрнуты уровни 1 и 2
-        (узлы уровня 3+ свёрнуты), т.е. max_depth = 2.
+      - Если > {_EXPAND_THRESHOLD}: по умолчанию развёрнут только уровень 1 (max_depth=1).
+      - Если <= {_EXPAND_THRESHOLD}: по умолчанию развёрнуты уровни 1 и 2 (max_depth=2).
 
     Returns: (html_str, height_px)
     """
@@ -396,18 +395,48 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     height_px = max(600, min(n_nodes * 32, 2000))
 
     if initial_expand_level < 0:
-        # Считаем узлы уровней 1 и 2 вместе
         nodes_l1_l2 = _count_levels(G, root, levels=2)
         max_depth = 1 if nodes_l1_l2 > _EXPAND_THRESHOLD else 2
     else:
         max_depth = initial_expand_level
 
-    # Строим JSON-дерево
-    visited: Set[str] = set()
-    root_node = _build_markmap_node(G, root, visited, depth=0, max_depth=max_depth)
-    tree_json = json.dumps(root_node, ensure_ascii=False)
+    # -----------------------------------------------------------------------
+    # Делим детей основателя пополам
+    # -----------------------------------------------------------------------
+    all_children: List[str] = list(G.successors(root))
+    half = len(all_children) // 2
+    left_children  = all_children[:half]   # пойдут влево
+    right_children = all_children[half:]   # пойдут вправо
 
     palette_js = json.dumps(_BRANCH_PALETTE)
+    root_json = json.dumps(root)
+
+    def _make_subtree_json(children: List[str], palette_offset: int) -> str:
+        """
+        Строит INode-дерево с фиктивным корнем (content=''),
+        чьи children — переданные ветви. Цвета считаются
+        от palette_offset, чтобы левая и правая половины не пересекались
+        по цвету.
+        """
+        child_nodes = []
+        for i, child in enumerate(children):
+            visited: Set[str] = set()
+            node = _build_markmap_node(G, child, visited, depth=1, max_depth=max_depth)
+            # цвет ветви (palette_offset + i)
+            node["_palette_idx"] = palette_offset + i
+            child_nodes.append(node)
+        root_node: Dict[str, Any] = {
+            "content": "",
+            "children": child_nodes,
+        }
+        return json.dumps(root_node, ensure_ascii=False)
+
+    left_json  = _make_subtree_json(left_children,  palette_offset=0)
+    right_json = _make_subtree_json(right_children, palette_offset=half)
+
+    # Если детей мало (только правая половина), левый SVG пустой
+    has_left  = bool(left_children)
+    has_right = bool(right_children)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -415,69 +444,178 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 <meta charset="utf-8">
 <style>
   html, body {{
-    margin: 0;
-    padding: 0;
-    background: #fff;
+    margin: 0; padding: 0; background: #fff;
     overflow: hidden;
+    width: 100%; height: {height_px}px;
+  }}
+  #mm-wrapper {{
+    position: relative;
+    display: flex;
+    flex-direction: row;
     width: 100%;
     height: {height_px}px;
   }}
-  #mm-svg {{
+  /* Левый SVG: зеркально отображаем весь контейнер */
+  #mm-left-wrap {{
+    transform: scaleX(-1);
+    transform-origin: center center;
+  }}
+  .mm-side {{
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    overflow: hidden;
+  }}
+  .mm-side svg {{
     width: 100%;
     height: {height_px}px;
     display: block;
   }}
+  /* Основатель: поверх всех SVG, выровнен по центру */
+  #mm-root-label {{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: #37474f;
+    color: #fff;
+    font: bold 13px \'Segoe UI\',\'Noto Sans\',Arial,sans-serif;
+    padding: 6px 14px;
+    border-radius: 6px;
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 10;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }}
 </style>
 </head>
 <body>
-<svg id="mm-svg"></svg>
+<div id="mm-wrapper">
+  <div class="mm-side" id="mm-left-side">
+    <div id="mm-left-wrap"><svg id="mm-svg-left"></svg></div>
+  </div>
+  <div class="mm-side" id="mm-right-side">
+    <svg id="mm-svg-right"></svg>
+  </div>
+  <div id="mm-root-label">{{}}</div>
+</div>
 <script type="module">
-// ESM-импорт через esm.sh — CDN для ES-модулей в браузере.
-// Импортируем только Markmap (визуальный компонент) — Transformer не нужен,
-// так как дерево уже построено в Python и передано как JSON.
 import {{ Markmap }} from 'https://esm.sh/markmap-view@0.18';
 
-const palette = {palette_js};
+const palette  = {palette_js};
+const rootName = {root_json};
 
-// Назначаем цвет каждой ветви первого уровня по индексу
-function assignColors(node, idx) {{
+// заполняем заголовок
+document.getElementById('mm-root-label').textContent = rootName;
+
+const hasLeft  = {json.dumps(has_left)};
+const hasRight = {json.dumps(has_right)};
+
+// Если одна сторона пустая — растягиваем другую
+if (!hasLeft)  document.getElementById('mm-left-side').style.display  = 'none';
+if (!hasRight) document.getElementById('mm-right-side').style.display = 'none';
+
+// ---------- помощник: назначаем цвета по palette_idx ----------
+function assignColors(node, paletteIdx) {{
   node.state = node.state || {{}};
-  node.state.color = palette[idx % palette.length];
+  if (paletteIdx !== undefined) {{
+    node.state.color = palette[paletteIdx % palette.length];
+  }}
   if (node.children) {{
-    node.children.forEach((child, i) => assignColors(child, idx === -1 ? i : idx));
+    node.children.forEach(child => {{
+      assignColors(child, node._palette_idx !== undefined ? node._palette_idx : paletteIdx);
+    }});
   }}
 }}
 
-const data = {tree_json};
-// Для корневого узла перебираем ветви первого уровня
-if (data.children) {{
-  data.children.forEach((child, i) => assignColors(child, i));
+function colorTree(rootNode) {{
+  if (rootNode.children) {{
+    rootNode.children.forEach((child, i) => {{
+      const idx = child._palette_idx !== undefined ? child._palette_idx : i;
+      assignColors(child, idx);
+    }});
+  }}
 }}
 
-const svg = document.getElementById('mm-svg');
-const mm = Markmap.create(svg, {{
-  autoFit:            true,
-  pan:                true,
-  zoom:               true,
-  duration:           400,
-  maxWidth:           280,
-  nodeMinHeight:      16,
-  spacingVertical:    5,
-  spacingHorizontal:  80,
-  fitRatio:           0.92,
-  direction:          'bidirectional',
-  color:              (node) => (node.state && node.state.color) || palette[0],
-}}, data);
+// ---------- общие опции Markmap ----------
+const MM_OPTS = {{
+  autoFit: true,
+  pan:     true,
+  zoom:    true,
+  duration: 400,
+  maxWidth: 280,
+  nodeMinHeight: 16,
+  spacingVertical:   5,
+  spacingHorizontal: 80,
+  fitRatio: 0.92,
+  color: (node) => (node.state && node.state.color) || palette[0],
+}};
 
-// fit() сразу + через таймауты для iframe Streamlit
-requestAnimationFrame(() => mm.fit());
-setTimeout(() => mm.fit(), 300);
-setTimeout(() => mm.fit(), 800);
+// ---------- Правое дерево ----------
+if (hasRight) {{
+  const rightData = {right_json};
+  colorTree(rightData);
+  const svgR = document.getElementById('mm-svg-right');
+  const mmR  = Markmap.create(svgR, MM_OPTS, rightData);
+  requestAnimationFrame(() => mmR.fit());
+  setTimeout(() => mmR.fit(), 300);
+  setTimeout(() => mmR.fit(), 800);
+}}
 
-window.addEventListener('resize', () => mm.fit());
+// ---------- Левое дерево (макет) ----------
+// markmap-view не имеет direction='bidirectional'.
+// Мы рендерим LR-дерево в #mm-left-wrap, который CSS·scaleX(-1)
+// зеркалит весь контейнер. Результат: ветви растут влево.
+// Текст после рендера возвращается отдельным проходом через SVG-элементы.
+if (hasLeft) {{
+  const leftData = {left_json};
+  colorTree(leftData);
+  const svgL = document.getElementById('mm-svg-left');
+  const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
+
+  // После рендера: проходимся по всем узлам SVG и
+  // применяем scaleX(-1) непосредственно к transform-атрибуту
+  // текстовых групп, чтобы текст снова стал читаемым.
+  function mirrorTextNodes(svgEl) {{
+    const nodes = svgEl.querySelectorAll('g.markmap-node');
+    nodes.forEach(g => {{
+      // Текстовые элементы внутри узла
+      g.querySelectorAll('foreignObject, text').forEach(el => {{
+        const cur = el.getAttribute('transform') || '';
+        if (!cur.includes('scaleX(-1)')) {{
+          el.setAttribute('transform', cur + ' scaleX(-1)');
+        }}
+      }});
+    }});
+  }}
+
+  function fitAndMirror() {{
+    mmL.fit();
+    setTimeout(() => mirrorTextNodes(svgL), 50);
+  }}
+
+  requestAnimationFrame(fitAndMirror);
+  setTimeout(fitAndMirror, 350);
+  setTimeout(fitAndMirror, 900);
+
+  // Переприменяем зеркалирование текста при развертывании/сворачивании узлов
+  svgL.addEventListener('click', () => {{
+    setTimeout(() => mirrorTextNodes(svgL), 600);
+  }});
+}}
+
+window.addEventListener('resize', () => {{
+  document.querySelectorAll('svg').forEach(s => {{
+    const mm = s._mm;
+    if (mm) mm.fit();
+  }});
+}});
 </script>
 </body>
-</html>"""  # noqa: E501
+</html>"""
 
     return html, height_px
 
