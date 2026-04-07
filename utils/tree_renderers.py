@@ -311,25 +311,22 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # ---------------------------------------------------------------------------
 # Markmap HTML
 #
-# markmap-view не имеет встроенной опции direction/bidirectional
-# (открытый feature request #235/#265).
+# markmap-view не имеет встроенной опции direction/bidirectional.
 #
 # Решение: два отдельных SVG-инстанса Markmap рядом:
-#   • правый SVG — LR (ветви вправо), корень = первая половина детей
-#   • левый SVG — LR тоже, но весь контейнер зеркально отражён
-#     scaleX(-1), а текст каждого узла возвращается JS-патчем
-#     (чтобы читальный текст не был зеркальным)
-#   • в центре — HTML-блок с именем основателя
+#   • правый SVG — LR (ветви вправо)
+#   • левый SVG — LR тоже, но весь контейнер CSS scaleX(-1)
+#     → ветви растут влево
+#     → текст узлов (тег <text>) исправляется JS-патчем:
+#       находим x-центр узла и применяем transform="scale(-1,1) translate(-2x, 0)"
+#       непосредственно к SVG-элементу <text>
 # ---------------------------------------------------------------------------
 
-_EXPAND_THRESHOLD = 35  # порог суммарного числа узлов уровней 1+2
+_EXPAND_THRESHOLD = 35
 
 
 def _count_levels(G: nx.DiGraph, root: str, levels: int = 2) -> int:
-    """
-    Считает общее количество узлов на уровнях 1..levels (корень — уровень 0).
-    """
-    frontier = list(G.successors(root))  # уровень 1
+    frontier = list(G.successors(root))
     total = len(frontier)
     for _ in range(levels - 1):
         next_frontier: List[str] = []
@@ -347,10 +344,6 @@ def _build_markmap_node(
     depth: int,
     max_depth: int,
 ) -> Dict[str, Any]:
-    """
-    Рекурсивно строит JSON-узел в формате INode Markmap.js:
-    { content: str, children: [...], payload: {fold: 1} }
-    """
     if node in visited:
         return {"content": node, "children": []}
     visited.add(node)
@@ -365,7 +358,6 @@ def _build_markmap_node(
         "content": node,
         "children": children_data,
     }
-    # Сворачиваем узлы глубже max_depth (max_depth=0 — всё раскрыто)
     if max_depth > 0 and depth >= max_depth and children_data:
         result["payload"] = {"fold": 1}
 
@@ -375,17 +367,6 @@ def _build_markmap_node(
 def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
     """
     Генерирует самодостаточный HTML (Markmap.js) для st.components.v1.html.
-
-    Двунаправное дерево: дети основателя делятся пополам и расходятся влево
-    и вправо через два отдельных SVG-инстанса Markmap рядом.
-    markmap-view не имеет встроенной опции direction='bidirectional',
-    поэтому двунаправность реализована вручную.
-
-    Правило авто-раскрытия (initial_expand_level < 0):
-      - Подсчитываем суммарное число узлов на уровнях 1 и 2.
-      - Если > {_EXPAND_THRESHOLD}: по умолчанию развёрнут только уровень 1 (max_depth=1).
-      - Если <= {_EXPAND_THRESHOLD}: по умолчанию развёрнуты уровни 1 и 2 (max_depth=2).
-
     Returns: (html_str, height_px)
     """
     if G.number_of_nodes() == 0:
@@ -400,29 +381,19 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     else:
         max_depth = initial_expand_level
 
-    # -----------------------------------------------------------------------
-    # Делим детей основателя пополам
-    # -----------------------------------------------------------------------
     all_children: List[str] = list(G.successors(root))
     half = len(all_children) // 2
-    left_children  = all_children[:half]   # пойдут влево
-    right_children = all_children[half:]   # пойдут вправо
+    left_children  = all_children[:half]
+    right_children = all_children[half:]
 
     palette_js = json.dumps(_BRANCH_PALETTE)
     root_json = json.dumps(root)
 
     def _make_subtree_json(children: List[str], palette_offset: int) -> str:
-        """
-        Строит INode-дерево с фиктивным корнем (content=''),
-        чьи children — переданные ветви. Цвета считаются
-        от palette_offset, чтобы левая и правая половины не пересекались
-        по цвету.
-        """
         child_nodes = []
         for i, child in enumerate(children):
             visited: Set[str] = set()
             node = _build_markmap_node(G, child, visited, depth=1, max_depth=max_depth)
-            # цвет ветви (palette_offset + i)
             node["_palette_idx"] = palette_offset + i
             child_nodes.append(node)
         root_node: Dict[str, Any] = {
@@ -434,7 +405,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     left_json  = _make_subtree_json(left_children,  palette_offset=0)
     right_json = _make_subtree_json(right_children, palette_offset=half)
 
-    # Если детей мало (только правая половина), левый SVG пустой
     has_left  = bool(left_children)
     has_right = bool(right_children)
 
@@ -455,8 +425,11 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     width: 100%;
     height: {height_px}px;
   }}
-  /* Левый SVG: зеркально отображаем весь контейнер —
-     ветви растут влево. Текст будет исправлен JS-патчем. */
+  /*
+   * Левый контейнер зеркалится CSS scaleX(-1).
+   * Это заставляет ветви расти влево.
+   * Текст при этом тоже зеркалится — его исправляет JS-патч fixLeftText().
+   */
   #mm-left-wrap {{
     transform: scaleX(-1);
     transform-origin: center center;
@@ -474,7 +447,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     height: {height_px}px;
     display: block;
   }}
-  /* Основатель: поверх всех SVG, выровнен по центру */
   #mm-root-label {{
     position: absolute;
     left: 50%;
@@ -511,22 +483,17 @@ import {{ Markmap }} from 'https://esm.sh/markmap-view@0.18';
 const palette  = {palette_js};
 const rootName = {root_json};
 
-// заполняем заголовок
 document.getElementById('mm-root-label').textContent = rootName;
 
 const hasLeft  = {json.dumps(has_left)};
 const hasRight = {json.dumps(has_right)};
 
-// Если одна сторона пустая — растягиваем другую
 if (!hasLeft)  document.getElementById('mm-left-side').style.display  = 'none';
 if (!hasRight) document.getElementById('mm-right-side').style.display = 'none';
 
-// ---------- помощник: назначаем цвета по palette_idx ----------
 function assignColors(node, paletteIdx) {{
   node.state = node.state || {{}};
-  if (paletteIdx !== undefined) {{
-    node.state.color = palette[paletteIdx % palette.length];
-  }}
+  if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
   if (node.children) {{
     node.children.forEach(child => {{
       assignColors(child, node._palette_idx !== undefined ? node._palette_idx : paletteIdx);
@@ -543,21 +510,19 @@ function colorTree(rootNode) {{
   }}
 }}
 
-// ---------- общие опции Markmap ----------
 const MM_OPTS = {{
   autoFit: true,
-  pan:     true,
-  zoom:    true,
+  pan: true,
+  zoom: true,
   duration: 400,
   maxWidth: 280,
   nodeMinHeight: 16,
-  spacingVertical:   5,
+  spacingVertical: 5,
   spacingHorizontal: 80,
   fitRatio: 0.92,
   color: (node) => (node.state && node.state.color) || palette[0],
 }};
 
-// ---------- Правое дерево ----------
 if (hasRight) {{
   const rightData = {right_json};
   colorTree(rightData);
@@ -568,68 +533,63 @@ if (hasRight) {{
   setTimeout(() => mmR.fit(), 800);
 }}
 
-// ---------- Левое дерево ----------
-// #mm-left-wrap имеет CSS scaleX(-1) — весь контейнер зеркален,
-// ветви растут влево. Нам нужно исправить только текст (не геометрию).
-//
-// Markmap рендерит текст через <foreignObject><div>...</div></foreignObject>.
-// Мы находим именно <div> внутри <foreignObject> и применяем к нему
-// style.transform = 'scaleX(-1)'. Это переворачивает текст обратно,
-// не затрагивая ни ветви, ни позиции узлов.
 if (hasLeft) {{
   const leftData = {left_json};
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
   const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
 
+  /*
+   * fixLeftText() — исправляет зеркальный текст в левом SVG.
+   *
+   * Проблема: весь контейнер #mm-left-wrap зеркален CSS scaleX(-1),
+   * поэтому SVG-текст (элементы <text>) тоже отображаются.
+   *
+   * Решение: находим каждый <text> элемент, читаем его
+   * атрибут x (горизонтальная позиция центра текста) и применяем:
+   *   transform="scale(-1,1) translate(-2*x, 0)"
+   * Это отражает только текст относительно его оси X.
+   * Ветви (<path>, <g>, <circle>) не трогаются вообще.
+   */
   function fixLeftText(svgEl) {{
-    // Ищем все <div> внутри <foreignObject> — это текстовые контейнеры узлов
-    svgEl.querySelectorAll('foreignObject > div, foreignObject > div > *').forEach(el => {{
-      el.style.transform = 'scaleX(-1)';
-      el.style.transformOrigin = 'center center';
-      el.style.display = el.style.display || 'inline-block';
+    svgEl.querySelectorAll('text').forEach(function(textEl) {{
+      const x = parseFloat(textEl.getAttribute('x') || '0');
+      textEl.setAttribute('transform', 'scale(-1,1) translate(' + (-2 * x) + ',0)');
     }});
   }}
 
   function fitAndFix() {{
     mmL.fit();
-    setTimeout(() => fixLeftText(svgL), 60);
+    setTimeout(() => fixLeftText(svgL), 80);
   }}
 
   requestAnimationFrame(fitAndFix);
-  setTimeout(fitAndFix, 350);
-  setTimeout(fitAndFix, 900);
+  setTimeout(fitAndFix, 400);
+  setTimeout(fitAndFix, 950);
 
-  // Переприменяем после клика (развернуть/свернуть узел)
   svgL.addEventListener('click', () => {{
-    setTimeout(() => fixLeftText(svgL), 600);
+    setTimeout(() => fixLeftText(svgL), 650);
   }});
 }}
 
 window.addEventListener('resize', () => {{
   document.querySelectorAll('svg').forEach(s => {{
-    const mm = s._mm;
-    if (mm) mm.fit();
+    if (s._mm) s._mm.fit();
   }});
 }});
 </script>
 </body>
-</html>"""  
+</html>"""
 
     return html, height_px
 
 
 # ---------------------------------------------------------------------------
-# Markmap Markdown — генерация .md строки (для экспорта файлов)
-# Для рендера в Streamlit используйте build_markmap_html.
+# Markmap Markdown
 # ---------------------------------------------------------------------------
 
 
 def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int = 2) -> str:
-    """
-    Генерирует строку Markdown для экспорта .md-файлов.
-    Для рендера в Streamlit используйте build_markmap_html.
-    """
     if G.number_of_nodes() == 0:
         return f"# {root}"
 
