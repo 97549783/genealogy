@@ -455,10 +455,13 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     width: 100%;
     height: {height_px}px;
   }}
-  /* Левый SVG: зеркально отображаем весь контейнер */
+  /* Левый SVG: зеркально отображаем весь контейнер —
+     ветви растут влево. Текст будет исправлен JS-патчем. */
   #mm-left-wrap {{
     transform: scaleX(-1);
     transform-origin: center center;
+    width: 100%;
+    height: 100%;
   }}
   .mm-side {{
     flex: 1;
@@ -565,45 +568,41 @@ if (hasRight) {{
   setTimeout(() => mmR.fit(), 800);
 }}
 
-// ---------- Левое дерево (макет) ----------
-// markmap-view не имеет direction='bidirectional'.
-// Мы рендерим LR-дерево в #mm-left-wrap, который CSS·scaleX(-1)
-// зеркалит весь контейнер. Результат: ветви растут влево.
-// Текст после рендера возвращается отдельным проходом через SVG-элементы.
+// ---------- Левое дерево ----------
+// #mm-left-wrap имеет CSS scaleX(-1) — весь контейнер зеркален,
+// ветви растут влево. Нам нужно исправить только текст (не геометрию).
+//
+// Markmap рендерит текст через <foreignObject><div>...</div></foreignObject>.
+// Мы находим именно <div> внутри <foreignObject> и применяем к нему
+// style.transform = 'scaleX(-1)'. Это переворачивает текст обратно,
+// не затрагивая ни ветви, ни позиции узлов.
 if (hasLeft) {{
   const leftData = {left_json};
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
   const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
 
-  // После рендера: проходимся по всем узлам SVG и
-  // применяем scaleX(-1) непосредственно к transform-атрибуту
-  // текстовых групп, чтобы текст снова стал читаемым.
-  function mirrorTextNodes(svgEl) {{
-    const nodes = svgEl.querySelectorAll('g.markmap-node');
-    nodes.forEach(g => {{
-      // Текстовые элементы внутри узла
-      g.querySelectorAll('foreignObject, text').forEach(el => {{
-        const cur = el.getAttribute('transform') || '';
-        if (!cur.includes('scaleX(-1)')) {{
-          el.setAttribute('transform', cur + ' scaleX(-1)');
-        }}
-      }});
+  function fixLeftText(svgEl) {{
+    // Ищем все <div> внутри <foreignObject> — это текстовые контейнеры узлов
+    svgEl.querySelectorAll('foreignObject > div, foreignObject > div > *').forEach(el => {{
+      el.style.transform = 'scaleX(-1)';
+      el.style.transformOrigin = 'center center';
+      el.style.display = el.style.display || 'inline-block';
     }});
   }}
 
-  function fitAndMirror() {{
+  function fitAndFix() {{
     mmL.fit();
-    setTimeout(() => mirrorTextNodes(svgL), 50);
+    setTimeout(() => fixLeftText(svgL), 60);
   }}
 
-  requestAnimationFrame(fitAndMirror);
-  setTimeout(fitAndMirror, 350);
-  setTimeout(fitAndMirror, 900);
+  requestAnimationFrame(fitAndFix);
+  setTimeout(fitAndFix, 350);
+  setTimeout(fitAndFix, 900);
 
-  // Переприменяем зеркалирование текста при развертывании/сворачивании узлов
+  // Переприменяем после клика (развернуть/свернуть узел)
   svgL.addEventListener('click', () => {{
-    setTimeout(() => mirrorTextNodes(svgL), 600);
+    setTimeout(() => fixLeftText(svgL), 600);
   }});
 }}
 
@@ -615,7 +614,7 @@ window.addEventListener('resize', () => {{
 }});
 </script>
 </body>
-</html>"""
+</html>"""  
 
     return html, height_px
 
