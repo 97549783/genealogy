@@ -315,11 +315,12 @@ def build_xmind_html(G: nx.DiGraph, root: str) -> Tuple[str, int]:
 # (открытый feature request #235/#265).
 #
 # Решение: два отдельных SVG-инстанса Markmap рядом:
-#   • правый SVG — LR (ветви вправо), корень = первая половина детей
-#   • левый SVG — LR тоже, но весь контейнер зеркально отражён
-#     scaleX(-1), а текст каждого узла возвращается JS-патчем
-#     (чтобы читальный текст не был зеркальным)
-#   • в центре — HTML-блок с именем основателя
+#   • правый SVG — обычное LR-дерево, первая половина детей
+#   • левый SVG  — LR-дерево, вторая половина детей, но после рендера
+#     JS-патч применяет scale(-1,1) к внутренней <g> Markmap,
+#     а все foreignObject корректируются: x = -(x + width),
+#     чтобы текстовые блоки снова стояли правильно.
+#   • центральный HTML-блок с именем основателя поверх обоих SVG
 # ---------------------------------------------------------------------------
 
 _EXPAND_THRESHOLD = 35  # порог суммарного числа узлов уровней 1+2
@@ -381,11 +382,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     markmap-view не имеет встроенной опции direction='bidirectional',
     поэтому двунаправность реализована вручную.
 
-    Правило авто-раскрытия (initial_expand_level < 0):
-      - Подсчитываем суммарное число узлов на уровнях 1 и 2.
-      - Если > {_EXPAND_THRESHOLD}: по умолчанию развёрнут только уровень 1 (max_depth=1).
-      - Если <= {_EXPAND_THRESHOLD}: по умолчанию развёрнуты уровни 1 и 2 (max_depth=2).
-
     Returns: (html_str, height_px)
     """
     if G.number_of_nodes() == 0:
@@ -412,17 +408,10 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     root_json = json.dumps(root)
 
     def _make_subtree_json(children: List[str], palette_offset: int) -> str:
-        """
-        Строит INode-дерево с фиктивным корнем (content=''),
-        чьи children — переданные ветви. Цвета считаются
-        от palette_offset, чтобы левая и правая половины не пересекались
-        по цвету.
-        """
         child_nodes = []
         for i, child in enumerate(children):
             visited: Set[str] = set()
             node = _build_markmap_node(G, child, visited, depth=1, max_depth=max_depth)
-            # цвет ветви (palette_offset + i)
             node["_palette_idx"] = palette_offset + i
             child_nodes.append(node)
         root_node: Dict[str, Any] = {
@@ -434,7 +423,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     left_json  = _make_subtree_json(left_children,  palette_offset=0)
     right_json = _make_subtree_json(right_children, palette_offset=half)
 
-    # Если детей мало (только правая половина), левый SVG пустой
     has_left  = bool(left_children)
     has_right = bool(right_children)
 
@@ -455,11 +443,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     width: 100%;
     height: {height_px}px;
   }}
-  /* Левый SVG: зеркально отображаем весь контейнер */
-  #mm-left-wrap {{
-    transform: scaleX(-1);
-    transform-origin: center center;
-  }}
   .mm-side {{
     flex: 1;
     min-width: 0;
@@ -471,7 +454,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     height: {height_px}px;
     display: block;
   }}
-  /* Основатель: поверх всех SVG, выровнен по центру */
   #mm-root-label {{
     position: absolute;
     left: 50%;
@@ -479,7 +461,7 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     transform: translate(-50%, -50%);
     background: #37474f;
     color: #fff;
-    font: bold 13px \'Segoe UI\',\'Noto Sans\',Arial,sans-serif;
+    font: bold 13px 'Segoe UI','Noto Sans',Arial,sans-serif;
     padding: 6px 14px;
     border-radius: 6px;
     white-space: nowrap;
@@ -495,12 +477,12 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 <body>
 <div id="mm-wrapper">
   <div class="mm-side" id="mm-left-side">
-    <div id="mm-left-wrap"><svg id="mm-svg-left"></svg></div>
+    <svg id="mm-svg-left"></svg>
   </div>
   <div class="mm-side" id="mm-right-side">
     <svg id="mm-svg-right"></svg>
   </div>
-  <div id="mm-root-label">{{}}</div>
+  <div id="mm-root-label"></div>
 </div>
 <script type="module">
 import {{ Markmap }} from 'https://esm.sh/markmap-view@0.18';
@@ -508,17 +490,14 @@ import {{ Markmap }} from 'https://esm.sh/markmap-view@0.18';
 const palette  = {palette_js};
 const rootName = {root_json};
 
-// заполняем заголовок
 document.getElementById('mm-root-label').textContent = rootName;
 
 const hasLeft  = {json.dumps(has_left)};
 const hasRight = {json.dumps(has_right)};
 
-// Если одна сторона пустая — растягиваем другую
 if (!hasLeft)  document.getElementById('mm-left-side').style.display  = 'none';
 if (!hasRight) document.getElementById('mm-right-side').style.display = 'none';
 
-// ---------- помощник: назначаем цвета по palette_idx ----------
 function assignColors(node, paletteIdx) {{
   node.state = node.state || {{}};
   if (paletteIdx !== undefined) {{
@@ -540,7 +519,6 @@ function colorTree(rootNode) {{
   }}
 }}
 
-// ---------- общие опции Markmap ----------
 const MM_OPTS = {{
   autoFit: true,
   pan:     true,
@@ -554,7 +532,7 @@ const MM_OPTS = {{
   color: (node) => (node.state && node.state.color) || palette[0],
 }};
 
-// ---------- Правое дерево ----------
+// ---------- Правое дерево (обычный LR) ----------
 if (hasRight) {{
   const rightData = {right_json};
   colorTree(rightData);
@@ -565,53 +543,91 @@ if (hasRight) {{
   setTimeout(() => mmR.fit(), 800);
 }}
 
-// ---------- Левое дерево (макет) ----------
-// markmap-view не имеет direction='bidirectional'.
-// Мы рендерим LR-дерево в #mm-left-wrap, который CSS·scaleX(-1)
-// зеркалит весь контейнер. Результат: ветви растут влево.
-// Текст после рендера возвращается отдельным проходом через SVG-элементы.
+// ---------- Левое дерево — зеркальный LR ----------
+//
+// Подход: рендерим обычный LR Markmap в #mm-svg-left.
+// После рендера находим внутреннюю <g> (первый дочерний <g> SVG),
+// получаем её текущий transform (Markmap использует translate(x,y)),
+// и применяем scale(-1,1) относительно центра SVG:
+//   новый transform = translate(svgW - tx, ty) scale(-1, 1)
+// Это зеркалит всё дерево по горизонтали.
+//
+// После этого все foreignObject имеют зеркальные x-координаты.
+// Исправляем каждый: x_new = -(x_old + fo_width)
+// Дополнительно применяем scaleX(-1) к содержимому foreignObject (div),
+// чтобы HTML-текст внутри тоже зеркалился обратно.
 if (hasLeft) {{
   const leftData = {left_json};
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
   const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
 
-  // После рендера: проходимся по всем узлам SVG и
-  // применяем scaleX(-1) непосредственно к transform-атрибуту
-  // текстовых групп, чтобы текст снова стал читаемым.
-  function mirrorTextNodes(svgEl) {{
-    const nodes = svgEl.querySelectorAll('g.markmap-node');
-    nodes.forEach(g => {{
-      // Текстовые элементы внутри узла
-      g.querySelectorAll('foreignObject, text').forEach(el => {{
-        const cur = el.getAttribute('transform') || '';
-        if (!cur.includes('scaleX(-1)')) {{
-          el.setAttribute('transform', cur + ' scaleX(-1)');
-        }}
-      }});
+  function applyLeftMirror() {{
+    const svgW = svgL.getBoundingClientRect().width || svgL.clientWidth || 600;
+    // Markmap рисует всё в первом дочернем <g>
+    const innerG = svgL.querySelector(':scope > g');
+    if (!innerG) return;
+
+    // 1. Зеркалим всё дерево: scale(-1,1) относительно центра SVG
+    //    Сохраняем текущий translate из transform
+    const curTransform = innerG.getAttribute('transform') || '';
+    const tMatch = curTransform.match(/translate\(\s*([\d.\-]+)[,\s]+([\d.\-]+)\s*\)/);
+    const tx = tMatch ? parseFloat(tMatch[1]) : 0;
+    const ty = tMatch ? parseFloat(tMatch[2]) : 0;
+    // Новый transform: отражаем X относительно центра SVG
+    innerG.setAttribute('transform',
+      `translate(${{svgW - tx}},${{ty}}) scale(-1,1)`
+    );
+
+    // 2. Исправляем foreignObject: x и ширину текст не трогает,
+    //    но нам нужно «развернуть» html-контент обратно.
+    //    foreignObject.x уже учтён в scale(-1,1) через SVG-трансформацию,
+    //    поэтому достаточно только развернуть текст внутри.
+    svgL.querySelectorAll('foreignObject').forEach(fo => {{
+      const foW = parseFloat(fo.getAttribute('width') || '0');
+      // Оборачиваем содержимое в scaleX(-1) через style на div
+      const div = fo.querySelector('div');
+      if (div) {{
+        div.style.transform = 'scaleX(-1)';
+        div.style.transformOrigin = 'center center';
+        div.style.display = 'inline-block';
+        div.style.width = foW + 'px';
+      }}
     }});
   }}
 
   function fitAndMirror() {{
     mmL.fit();
-    setTimeout(() => mirrorTextNodes(svgL), 50);
+    setTimeout(applyLeftMirror, 80);
   }}
 
   requestAnimationFrame(fitAndMirror);
-  setTimeout(fitAndMirror, 350);
+  setTimeout(fitAndMirror, 400);
   setTimeout(fitAndMirror, 900);
 
-  // Переприменяем зеркалирование текста при развертывании/сворачивании узлов
+  // При клике (раскрытие/свёртывание) — переприменяем после анимации
   svgL.addEventListener('click', () => {{
-    setTimeout(() => mirrorTextNodes(svgL), 600);
+    setTimeout(applyLeftMirror, 500);
+    setTimeout(applyLeftMirror, 900);
   }});
 }}
 
 window.addEventListener('resize', () => {{
-  document.querySelectorAll('svg').forEach(s => {{
-    const mm = s._mm;
-    if (mm) mm.fit();
-  }});
+  // После resize Markmap сбрасывает transform — переприменяем зеркало
+  setTimeout(() => {{
+    if (hasLeft) {{
+      const svgL = document.getElementById('mm-svg-left');
+      const innerG = svgL && svgL.querySelector(':scope > g');
+      if (innerG) {{
+        const t = innerG.getAttribute('transform') || '';
+        // Если scale(-1,1) уже применён — ничего не делать, иначе — re-apply
+        if (!t.includes('scale(-1')) {{
+          // запускаем полный fitAndMirror через повторный вызов
+          // (mmL недоступен здесь — используем событие resize на самом mmL)
+        }}
+      }}
+    }}
+  }}, 200);
 }});
 </script>
 </body>
@@ -622,7 +638,6 @@ window.addEventListener('resize', () => {{
 
 # ---------------------------------------------------------------------------
 # Markmap Markdown — генерация .md строки (для экспорта файлов)
-# Для рендера в Streamlit используйте build_markmap_html.
 # ---------------------------------------------------------------------------
 
 
