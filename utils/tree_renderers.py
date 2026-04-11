@@ -577,7 +577,8 @@ function applyPinnedZoom(mm) {{
       // Сдвигаем корень на 15px к центру, чтобы ветки точно уходили под черную плашку
       const tx = 15; 
       const ty = targetY - (rootY * k);
-      g.attr('transform', `translate(${tx}, ${ty}) scale(${k})`);
+      g.attr('transform', 'translate(' + tx + ', ' + ty + ') scale(' + k + ')');
+
   }}
 
   updateTransform(initialK);
