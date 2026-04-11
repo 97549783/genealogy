@@ -497,7 +497,6 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 <script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.0/dist/browser/index.js"></script>
 <script>
 const {{ Markmap }} = window.markmap;
-';
 
 const palette  = {palette_js};
 const rootName = {root_json};
