@@ -494,7 +494,8 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
   <div id="mm-root-label">{{}}</div>
 </div>
 <script type="module">
-import {{ Markmap }} from 'https://esm.sh/markmap-view@0.18';
+import {{ Markmap }} from 'https://cdn.jsdelivr.net/npm/markmap-view@0.18/+esm';
+';
 
 const palette  = {palette_js};
 const rootName = {root_json};
