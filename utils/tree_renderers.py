@@ -470,11 +470,11 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
     transform: translate(-50%, -50%);
     background: #37474f;
     color: #fff;
-    font: bold 16px 'Segoe UI','Noto Sans',Arial,sans-serif;
+    font: bold 18px 'Segoe UI','Noto Sans',Arial,sans-serif;
     padding: 10px 24px;
     border-radius: 8px;
     white-space: nowrap;
-    max-width: 350px;
+    max-width: 400px;
     overflow: hidden;
     text-overflow: ellipsis;
     z-index: 10;
@@ -530,8 +530,8 @@ function colorTree(rootNode) {{
 
 const MM_OPTS = {{
   autoFit: true,
-  pan: false,   // Отключаем стандартное перетаскивание
-  zoom: false,  // Отключаем стандартный зум (сделаем свой фиксированный)
+  pan: true,
+  zoom: true,
   duration: 400,
   maxWidth: 280,
   nodeMinHeight: 16,
@@ -541,85 +541,29 @@ const MM_OPTS = {{
   color: (node) => (node.state && node.state.color) || palette[0],
 }};
 
-// Функция, которая прячет корень и фиксирует масштабирование
-function applyPinnedZoom(mm) {{
-  if (!mm) return;
-  const d3 = window.d3;
-  const svg = mm.svg;
-  const g = svg.select('g');
-  const svgNode = svg.node();
-
-  // 1. Прячем исходные точки (кружочки корня)
-  const nodes = svgNode.querySelectorAll('.markmap-node');
-  let rootY = 0;
-  nodes.forEach(n => {{
-      if (n.__data__ && n.__data__.depth === 0) {{
-          const circle = n.querySelector('circle');
-          if (circle) circle.style.display = 'none'; // Скрываем саму точку
-          
-          // Запоминаем Y-координату корня, чтобы центрировать строго по ней
-          const nodeTransform = n.getAttribute('transform');
-          if (nodeTransform) {{
-              const match = nodeTransform.match(/translate\(([^,]+),\s*([^\)]+)\)/);
-              if (match) rootY = parseFloat(match[2]);
-          }}
-      }}
-  }});
-
-  // 2. Считываем текущий начальный масштаб
-  const transformStr = g.attr('transform') || '';
-  const matchK = transformStr.match(/scale\((([0-9]*[.])?[0-9]+)\)/);
-  const initialK = matchK ? parseFloat(matchK[1]) : 1;
-
-  // 3. Функция жесткого позиционирования
-  function updateTransform(k) {{
-      const targetY = svgNode.clientHeight / 2;
-      // Сдвигаем корень на 15px к центру, чтобы ветки точно уходили под черную плашку
-      const tx = 15; 
-      const ty = targetY - (rootY * k);
-      g.attr('transform', 'translate(' + tx + ', ' + ty + ') scale(' + k + ')');
-
-  }}
-
-  updateTransform(initialK);
-
-  // 4. Вешаем свой обработчик зума (только масштаб, без панорамирования)
-  const zoom = d3.zoom()
-      .scaleExtent([0.1, 5])
-      .on('zoom', (e) => {{
-          updateTransform(e.transform.k);
-      }});
-
-  svg.call(zoom);
-  svg.call(zoom.transform, d3.zoomIdentity.translate(0, 0).scale(initialK));
-  mm._updateTransform = updateTransform;
-}}
-
-let mmR, mmL;
-
 if (hasRight) {{
   const rightData = {right_json};
   colorTree(rightData);
   const svgR = document.getElementById('mm-svg-right');
-  mmR = Markmap.create(svgR, MM_OPTS, rightData);
-  // Применяем фиксацию корня после небольшой паузы на расчеты Markmap
-  setTimeout(() => applyPinnedZoom(mmR), 500);
+  const mmR  = Markmap.create(svgR, MM_OPTS, rightData);
+  requestAnimationFrame(() => mmR.fit());
+  setTimeout(() => mmR.fit(), 300);
+  setTimeout(() => mmR.fit(), 800);
 }}
 
 if (hasLeft) {{
   const leftData = {left_json};
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
-  mmL = Markmap.create(svgL, MM_OPTS, leftData);
-  setTimeout(() => applyPinnedZoom(mmL), 500);
+  const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
+  requestAnimationFrame(() => mmL.fit());
+  setTimeout(() => mmL.fit(), 300);
+  setTimeout(() => mmL.fit(), 800);
 }}
 
 window.addEventListener('resize', () => {{
-  [mmL, mmR].forEach(mm => {{
-    if (mm && mm._updateTransform) {{
-        const currentK = window.d3.zoomTransform(mm.svg.node()).k || 1;
-        mm._updateTransform(currentK);
-    }}
+  document.querySelectorAll('svg').forEach(s => {{
+    if (s._mm) s._mm.fit();
   }});
 }});
 </script>
