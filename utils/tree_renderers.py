@@ -530,8 +530,8 @@ function colorTree(rootNode) {{
 
 const MM_OPTS = {{
   autoFit: true,
-  pan: true,
-  zoom: true,
+  pan: false,   // Отключаем внутреннее перемещение Markmap
+  zoom: false,  // Отключаем внутренний зум Markmap
   duration: 400,
   maxWidth: 280,
   nodeMinHeight: 16,
@@ -541,31 +541,109 @@ const MM_OPTS = {{
   color: (node) => (node.state && node.state.color) || palette[0],
 }};
 
+let mmR = null;
+let mmL = null;
+
 if (hasRight) {{
   const rightData = {right_json};
   colorTree(rightData);
   const svgR = document.getElementById('mm-svg-right');
-  const mmR  = Markmap.create(svgR, MM_OPTS, rightData);
-  requestAnimationFrame(() => mmR.fit());
-  setTimeout(() => mmR.fit(), 300);
-  setTimeout(() => mmR.fit(), 800);
+  mmR = Markmap.create(svgR, MM_OPTS, rightData);
 }}
 
 if (hasLeft) {{
   const leftData = {left_json};
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
-  const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
-  requestAnimationFrame(() => mmL.fit());
-  setTimeout(() => mmL.fit(), 300);
-  setTimeout(() => mmL.fit(), 800);
+  mmL = Markmap.create(svgL, MM_OPTS, leftData);
 }}
 
-window.addEventListener('resize', () => {{
-  document.querySelectorAll('svg').forEach(s => {{
-    if (s._mm) s._mm.fit();
-  }});
-}});
+// Ждем, пока Markmap отрендерит деревья и рассчитает координаты (800мс)
+setTimeout(() => {{
+    const d3 = window.d3;
+    const wrapper = d3.select('#mm-wrapper');
+    const label = document.getElementById('mm-root-label');
+
+    let rootY_R = 0, rootY_L = 0;
+    let gR = null, gL = null;
+
+    // Считываем позицию правой ветви и прячем точку
+    if (mmR) {{
+        gR = mmR.svg.select('g');
+        const nodesR = mmR.svg.node().querySelectorAll('.markmap-node');
+        nodesR.forEach(n => {{
+            if (n.__data__ && n.__data__.depth === 0) {{
+                const circle = n.querySelector('circle');
+                if (circle) circle.style.display = 'none';
+                const match = (n.getAttribute('transform') || '').match(/translate\(([^,]+),\s*([^\)]+)\)/);
+                if (match) rootY_R = parseFloat(match[2]);
+            }}
+        }});
+    }}
+
+    // Считываем позицию левой ветви и прячем точку
+    if (mmL) {{
+        gL = mmL.svg.select('g');
+        const nodesL = mmL.svg.node().querySelectorAll('.markmap-node');
+        nodesL.forEach(n => {{
+            if (n.__data__ && n.__data__.depth === 0) {{
+                const circle = n.querySelector('circle');
+                if (circle) circle.style.display = 'none';
+                const match = (n.getAttribute('transform') || '').match(/translate\(([^,]+),\s*([^\)]+)\)/);
+                if (match) rootY_L = parseFloat(match[2]);
+            }}
+        }});
+    }}
+
+    // Получаем стартовый масштаб
+    let initialK = 1;
+    if (gR) {{
+        const matchK = (gR.attr('transform') || '').match(/scale\((([0-9]*[.])?[0-9]+)\)/);
+        if (matchK) initialK = parseFloat(matchK[1]);
+    }} else if (gL) {{
+        const matchK = (gL.attr('transform') || '').match(/scale\((([0-9]*[.])?[0-9]+)\)/);
+        if (matchK) initialK = parseFloat(matchK[1]);
+    }}
+
+    const wrapperNode = wrapper.node();
+
+    // ЕДИНАЯ функция синхронного обновления всех элементов
+    function updateAll(t) {{
+        const cx = wrapperNode.clientWidth / 2;
+        const cy = wrapperNode.clientHeight / 2;
+        const txBase = 15; // Насколько глубоко ветки прячутся под плашку
+
+        // Двигаем правую ветвь
+        if (gR) {{
+            const Tx_R = t.x + txBase + cx * (t.k - 1);
+            const Ty_R = t.y + (cy - rootY_R) * t.k;
+            gR.attr('transform', 'translate(' + Tx_R + ', ' + Ty_R + ') scale(' + t.k + ')');
+        }}
+        
+        // Двигаем левую ветвь (математика инвертирована из-за CSS-зеркала)
+        if (gL) {{
+            const Tx_L = -t.x + txBase * t.k - cx * (t.k - 1);
+            const Ty_L = t.y + (cy - rootY_L) * t.k;
+            gL.attr('transform', 'translate(' + Tx_L + ', ' + Ty_L + ') scale(' + t.k + ')');
+        }}
+        
+        // Двигаем плашку руководителя (она сохраняет свой масштаб, но движется вместе с экраном)
+        const offsetX = t.x + cx * (t.k - 1);
+        const offsetY = t.y + cy * (t.k - 1);
+        label.style.transform = 'translate(calc(-50% + ' + offsetX + 'px), calc(-50% + ' + offsetY + 'px))';
+    }}
+
+    // Вешаем контроллер зума/перемещения на весь экран сразу
+    const zoom = d3.zoom()
+        .scaleExtent([0.1, 5])
+        .on('zoom', (e) => {{
+            updateAll(e.transform);
+        }});
+
+    wrapper.call(zoom);
+    wrapper.call(zoom.transform, d3.zoomIdentity.translate(0, 0).scale(initialK));
+
+}}, 800);
 </script>
 </body>
 </html>"""
