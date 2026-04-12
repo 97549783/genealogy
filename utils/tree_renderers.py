@@ -529,10 +529,10 @@ function colorTree(rootNode) {{
 }}
 
 const MM_OPTS = {{
-  autoFit: true,
-  pan: false,   // Отключаем внутреннее перемещение Markmap
-  zoom: false,  // Отключаем внутренний зум Markmap
-  duration: 400,
+  autoFit: false, // Отключаем внутреннюю подгонку, мы сделаем ее сами!
+  pan: false,     // Отключаем внутреннее панорамирование
+  zoom: false,    // Отключаем внутренний зум
+  duration: 0,    // Отключаем анимацию появления, чтобы сразу считать правильные координаты
   maxWidth: 280,
   nodeMinHeight: 16,
   spacingVertical: 5,
@@ -558,92 +558,84 @@ if (hasLeft) {{
   mmL = Markmap.create(svgL, MM_OPTS, leftData);
 }}
 
-// Ждем, пока Markmap отрендерит деревья и рассчитает координаты (800мс)
+// Запускаем нашу логику позиционирования после небольшой паузы
 setTimeout(() => {{
     const d3 = window.d3;
     const wrapper = d3.select('#mm-wrapper');
     const label = document.getElementById('mm-root-label');
-
-    let rootY_R = 0, rootY_L = 0;
-    let gR = null, gL = null;
-
-    // Считываем позицию правой ветви и прячем точку
-    if (mmR) {{
-        gR = mmR.svg.select('g');
-        const nodesR = mmR.svg.node().querySelectorAll('.markmap-node');
-        nodesR.forEach(n => {{
-            if (n.__data__ && n.__data__.depth === 0) {{
-                const circle = n.querySelector('circle');
-                if (circle) circle.style.display = 'none';
-                const match = (n.getAttribute('transform') || '').match(/translate\(([^,]+),\s*([^\)]+)\)/);
-                if (match) rootY_R = parseFloat(match[2]);
-            }}
-        }});
-    }}
-
-    // Считываем позицию левой ветви и прячем точку
-    if (mmL) {{
-        gL = mmL.svg.select('g');
-        const nodesL = mmL.svg.node().querySelectorAll('.markmap-node');
-        nodesL.forEach(n => {{
-            if (n.__data__ && n.__data__.depth === 0) {{
-                const circle = n.querySelector('circle');
-                if (circle) circle.style.display = 'none';
-                const match = (n.getAttribute('transform') || '').match(/translate\(([^,]+),\s*([^\)]+)\)/);
-                if (match) rootY_L = parseFloat(match[2]);
-            }}
-        }});
-    }}
-
-    // Получаем стартовый масштаб
-    let initialK = 1;
-    if (gR) {{
-        const matchK = (gR.attr('transform') || '').match(/scale\((([0-9]*[.])?[0-9]+)\)/);
-        if (matchK) initialK = parseFloat(matchK[1]);
-    }} else if (gL) {{
-        const matchK = (gL.attr('transform') || '').match(/scale\((([0-9]*[.])?[0-9]+)\)/);
-        if (matchK) initialK = parseFloat(matchK[1]);
-    }}
-
     const wrapperNode = wrapper.node();
 
-    // ЕДИНАЯ функция синхронного обновления всех элементов
-    function updateAll(t) {{
-        const cx = wrapperNode.clientWidth / 2;
-        const cy = wrapperNode.clientHeight / 2;
-        const txBase = 15; // Насколько глубоко ветки прячутся под плашку
+    let gR = null, gL = null;
 
-        // Двигаем правую ветвь
-        if (gR) {{
-            const Tx_R = t.x + txBase + cx * (t.k - 1);
-            const Ty_R = t.y + (cy - rootY_R) * t.k;
-            gR.attr('transform', 'translate(' + Tx_R + ', ' + Ty_R + ') scale(' + t.k + ')');
-        }}
-        
-        // Двигаем левую ветвь (математика инвертирована из-за CSS-зеркала)
-        if (gL) {{
-            const Tx_L = -t.x + txBase * t.k - cx * (t.k - 1);
-            const Ty_L = t.y + (cy - rootY_L) * t.k;
-            gL.attr('transform', 'translate(' + Tx_L + ', ' + Ty_L + ') scale(' + t.k + ')');
-        }}
-        
-        // Двигаем плашку руководителя (она сохраняет свой масштаб, но движется вместе с экраном)
-        const offsetX = t.x + cx * (t.k - 1);
-        const offsetY = t.y + cy * (t.k - 1);
-        label.style.transform = 'translate(calc(-50% + ' + offsetX + 'px), calc(-50% + ' + offsetY + 'px))';
+    // Прячем центральные кружочки у корней
+    if (mmR) {{
+        gR = mmR.svg.select('g');
+        const nodes = mmR.svg.node().querySelectorAll('.markmap-node');
+        nodes.forEach(n => {{
+            if (n.__data__ && n.__data__.depth === 0) {{
+                const circle = n.querySelector('circle');
+                if (circle) circle.style.display = 'none';
+            }}
+        }});
     }}
 
-    // Вешаем контроллер зума/перемещения на весь экран сразу
+    if (mmL) {{
+        gL = mmL.svg.select('g');
+        const nodes = mmL.svg.node().querySelectorAll('.markmap-node');
+        nodes.forEach(n => {{
+            if (n.__data__ && n.__data__.depth === 0) {{
+                const circle = n.querySelector('circle');
+                if (circle) circle.style.display = 'none';
+            }}
+        }});
+    }}
+
+    // Функция синхронного зума и перемещения
+    function updateTransform(transform) {{
+        const k = transform.k;
+        const x = transform.x;
+        const y = transform.y;
+        
+        const cx = wrapperNode.clientWidth / 2;
+        const cy = wrapperNode.clientHeight / 2;
+        const txOffset = 15; // Расстояние, на которое ветки прячутся под плашку
+        
+        // Магическая математика D3: 
+        // Мы ставим корень (ветку) ровно в центр экрана (cx, cy) 
+        // и применяем глобальное смещение (x, y) и масштаб (k).
+        
+        if (gR) {{
+            const txR = x + cx + txOffset * k;
+            const tyR = y + cy;
+            gR.attr('transform', 'translate(' + txR + ', ' + tyR + ') scale(' + k + ')');
+        }}
+
+        if (gL) {{
+            // Для левой ветки математика зеркальна по X, так как весь контейнер отзеркален CSS
+            const txL = -x + cx + txOffset * k;
+            const tyL = y + cy;
+            gL.attr('transform', 'translate(' + txL + ', ' + tyL + ') scale(' + k + ')');
+        }}
+
+        // Плашка двигается вместе с экраном, но всегда сохраняет 100% размер
+        label.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px))';
+    }}
+
+    // Создаем единый контроллер D3 Zoom для всего контейнера
     const zoom = d3.zoom()
         .scaleExtent([0.1, 5])
-        .on('zoom', (e) => {{
-            updateAll(e.transform);
+        .on('zoom', (event) => {{
+            updateTransform(event.transform);
         }});
 
+    // Подключаем зум к обертке
     wrapper.call(zoom);
-    wrapper.call(zoom.transform, d3.zoomIdentity.translate(0, 0).scale(initialK));
 
-}}, 800);
+    // Центрируем дерево по умолчанию (сдвиг 0, масштаб 1)
+    const initialTransform = d3.zoomIdentity.translate(0, 0).scale(1);
+    wrapper.call(zoom.transform, initialTransform);
+
+}}, 100);
 </script>
 </body>
 </html>"""
