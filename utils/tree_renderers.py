@@ -596,27 +596,31 @@ setTimeout(() => {{
         const x = transform.x;
         const y = transform.y;
         
+        const cx = wrapperNode.clientWidth / 2;
         const cy = wrapperNode.clientHeight / 2;
-        const txOffset = 15; // Расстояние от центра до начала веток (под плашкой)
         
+        // Увеличиваем зазор (txOffset), чтобы ветки не налезали на плашку
+        // 60-70 — оптимально для длинных ФИО
+        const txOffset = 70; 
+
         // ПРАВАЯ ВЕТВЬ
         if (gR) {{
-            // Убираем cx, так как SVG правой части и так начинается от центра экрана
-            const txR = x + txOffset * k;
+            // Теперь cx используется правильно для наложенных слоев
+            const txR = x + cx + txOffset * k;
             const tyR = y + cy;
             gR.attr('transform', 'translate(' + txR + ', ' + tyR + ') scale(' + k + ')');
         }}
 
         // ЛЕВАЯ ВЕТВЬ
         if (gL) {{
-            // Инвертируем x для зеркального контейнера, чтобы ветка шла за мышкой
-            const txL = -x + txOffset * k;
+            // Инвертируем x для зеркала, но cx остается точкой опоры
+            const txL = -x + cx + txOffset * k;
             const tyL = y + cy;
             gL.attr('transform', 'translate(' + txL + ', ' + tyL + ') scale(' + k + ')');
         }}
 
         // ПЛАШКА (Label)
-        // Двигается за мышкой (x, y), но игнорирует k (масштаб), оставаясь четкой
+        // Она зафиксирована относительно невидимой сетки координат (x, y)
         label.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px))';
     }}
 
@@ -626,9 +630,10 @@ setTimeout(() => {{
             updateTransform(event.transform);
         }});
 
+    // Важно: вешаем зум на wrapper, чтобы он ловил жесты по всей площади
     wrapper.call(zoom);
 
-    // Начальное положение: масштаб 1, смещение 0 (точно по центру)
+    // Сбрасываем в начальное состояние
     wrapper.call(zoom.transform, d3.zoomIdentity);
     
 }}, 100);
