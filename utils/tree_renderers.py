@@ -529,10 +529,10 @@ function colorTree(rootNode) {{
 }}
 
 const MM_OPTS = {{
-  autoFit: false, // Отключаем внутреннюю подгонку, мы сделаем ее сами!
-  pan: false,     // Отключаем внутреннее панорамирование
-  zoom: false,    // Отключаем внутренний зум
-  duration: 0,    // Отключаем анимацию появления, чтобы сразу считать правильные координаты
+  autoFit: true,
+  pan: true,
+  zoom: true,
+  duration: 400,
   maxWidth: 280,
   nodeMinHeight: 16,
   spacingVertical: 5,
@@ -541,102 +541,31 @@ const MM_OPTS = {{
   color: (node) => (node.state && node.state.color) || palette[0],
 }};
 
-let mmR = null;
-let mmL = null;
-
 if (hasRight) {{
   const rightData = {right_json};
   colorTree(rightData);
   const svgR = document.getElementById('mm-svg-right');
-  mmR = Markmap.create(svgR, MM_OPTS, rightData);
+  const mmR  = Markmap.create(svgR, MM_OPTS, rightData);
+  requestAnimationFrame(() => mmR.fit());
+  setTimeout(() => mmR.fit(), 300);
+  setTimeout(() => mmR.fit(), 800);
 }}
 
 if (hasLeft) {{
   const leftData = {left_json};
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
-  mmL = Markmap.create(svgL, MM_OPTS, leftData);
+  const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
+  requestAnimationFrame(() => mmL.fit());
+  setTimeout(() => mmL.fit(), 300);
+  setTimeout(() => mmL.fit(), 800);
 }}
 
-// Запускаем нашу логику позиционирования после небольшой паузы
-setTimeout(() => {{
-    const d3 = window.d3;
-    const wrapper = d3.select('#mm-wrapper');
-    const label = document.getElementById('mm-root-label');
-    const wrapperNode = wrapper.node();
-
-    let gR = null, gL = null;
-
-    // Прячем центральные кружочки у корней
-    if (mmR) {{
-        gR = mmR.svg.select('g');
-        const nodes = mmR.svg.node().querySelectorAll('.markmap-node');
-        nodes.forEach(n => {{
-            if (n.__data__ && n.__data__.depth === 0) {{
-                const circle = n.querySelector('circle');
-                if (circle) circle.style.display = 'none';
-            }}
-        }});
-    }}
-
-    if (mmL) {{
-        gL = mmL.svg.select('g');
-        const nodes = mmL.svg.node().querySelectorAll('.markmap-node');
-        nodes.forEach(n => {{
-            if (n.__data__ && n.__data__.depth === 0) {{
-                const circle = n.querySelector('circle');
-                if (circle) circle.style.display = 'none';
-            }}
-        }});
-    }}
-
-    // Функция синхронного зума и перемещения
-    function updateTransform(transform) {{
-        const k = transform.k;
-        const x = transform.x;
-        const y = transform.y;
-        
-        const cx = wrapperNode.clientWidth / 2;
-        const cy = wrapperNode.clientHeight / 2;
-        
-        // Увеличиваем зазор (txOffset), чтобы ветки не налезали на плашку
-        // 60-70 — оптимально для длинных ФИО
-        const txOffset = 70; 
-
-        // ПРАВАЯ ВЕТВЬ
-        if (gR) {{
-            // Теперь cx используется правильно для наложенных слоев
-            const txR = x + cx + txOffset * k;
-            const tyR = y + cy;
-            gR.attr('transform', 'translate(' + txR + ', ' + tyR + ') scale(' + k + ')');
-        }}
-
-        // ЛЕВАЯ ВЕТВЬ
-        if (gL) {{
-            // Инвертируем x для зеркала, но cx остается точкой опоры
-            const txL = -x + cx + txOffset * k;
-            const tyL = y + cy;
-            gL.attr('transform', 'translate(' + txL + ', ' + tyL + ') scale(' + k + ')');
-        }}
-
-        // ПЛАШКА (Label)
-        // Она зафиксирована относительно невидимой сетки координат (x, y)
-        label.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px))';
-    }}
-
-    const zoom = d3.zoom()
-        .scaleExtent([0.1, 8])
-        .on('zoom', (event) => {{
-            updateTransform(event.transform);
-        }});
-
-    // Важно: вешаем зум на wrapper, чтобы он ловил жесты по всей площади
-    wrapper.call(zoom);
-
-    // Сбрасываем в начальное состояние
-    wrapper.call(zoom.transform, d3.zoomIdentity);
-    
-}}, 100);
+window.addEventListener('resize', () => {{
+  document.querySelectorAll('svg').forEach(s => {{
+    if (s._mm) s._mm.fit();
+  }});
+}});
 </script>
 </body>
 </html>"""
