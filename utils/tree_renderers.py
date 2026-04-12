@@ -590,51 +590,47 @@ setTimeout(() => {{
         }});
     }}
 
-    // Функция синхронного зума и перемещения
+// Функция синхронного зума и перемещения
     function updateTransform(transform) {{
         const k = transform.k;
         const x = transform.x;
         const y = transform.y;
         
-        const cx = wrapperNode.clientWidth / 2;
         const cy = wrapperNode.clientHeight / 2;
-        const txOffset = 15; // Расстояние, на которое ветки прячутся под плашку
+        const txOffset = 15; // Расстояние от центра до начала веток (под плашкой)
         
-        // Магическая математика D3: 
-        // Мы ставим корень (ветку) ровно в центр экрана (cx, cy) 
-        // и применяем глобальное смещение (x, y) и масштаб (k).
-        
+        // ПРАВАЯ ВЕТВЬ
         if (gR) {{
-            const txR = x + cx + txOffset * k;
+            // Убираем cx, так как SVG правой части и так начинается от центра экрана
+            const txR = x + txOffset * k;
             const tyR = y + cy;
             gR.attr('transform', 'translate(' + txR + ', ' + tyR + ') scale(' + k + ')');
         }}
 
+        // ЛЕВАЯ ВЕТВЬ
         if (gL) {{
-            // Для левой ветки математика зеркальна по X, так как весь контейнер отзеркален CSS
-            const txL = -x + cx + txOffset * k;
+            // Инвертируем x для зеркального контейнера, чтобы ветка шла за мышкой
+            const txL = -x + txOffset * k;
             const tyL = y + cy;
             gL.attr('transform', 'translate(' + txL + ', ' + tyL + ') scale(' + k + ')');
         }}
 
-        // Плашка двигается вместе с экраном, но всегда сохраняет 100% размер
+        // ПЛАШКА (Label)
+        // Двигается за мышкой (x, y), но игнорирует k (масштаб), оставаясь четкой
         label.style.transform = 'translate(calc(-50% + ' + x + 'px), calc(-50% + ' + y + 'px))';
     }}
 
-    // Создаем единый контроллер D3 Zoom для всего контейнера
     const zoom = d3.zoom()
-        .scaleExtent([0.1, 5])
+        .scaleExtent([0.1, 8])
         .on('zoom', (event) => {{
             updateTransform(event.transform);
         }});
 
-    // Подключаем зум к обертке
     wrapper.call(zoom);
 
-    // Центрируем дерево по умолчанию (сдвиг 0, масштаб 1)
-    const initialTransform = d3.zoomIdentity.translate(0, 0).scale(1);
-    wrapper.call(zoom.transform, initialTransform);
-
+    // Начальное положение: масштаб 1, смещение 0 (точно по центру)
+    wrapper.call(zoom.transform, d3.zoomIdentity);
+    
 }}, 100);
 </script>
 </body>
