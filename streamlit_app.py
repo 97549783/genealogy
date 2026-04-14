@@ -276,8 +276,8 @@ valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
     tab_school_search,
     tab_intersection,
     tab_school_analysis,
-    tab_schoolcomparison,
-    tab_articles_comparison,
+    #tab_schoolcomparison,
+    #tab_articles_comparison,
 ) = st.tabs([
     "Построение деревьев",
     "Поиск информации о диссертациях",
@@ -285,8 +285,8 @@ valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
     "Поиск научных школ",
     "Взаимосвязи научных школ",
     "Анализ научной школы",
-    "Сравнение научных школ",
-    "Сравнение по статьям",
+    #"Сравнение научных школ",
+    #"Сравнение по статьям",
 ])
 
 # ---------- Вкладка: Построение деревьев ---------------------------------
@@ -489,29 +489,20 @@ with tab_school_analysis:
         scores_folder="basic_scores",
     )
 
-# ---------- Вкладка: Сравнение научных школ ------------------------------
-with tab_schoolcomparison:
-    classifier_labels = {code: title for code, title, _ in THEMATIC_CLASSIFIER}
-    render_school_comparison_tab(
-        df=df,
-        idx=idx,
-        scores_folder="basic_scores",
-        specific_files=None,
-        classifier_labels=classifier_labels,
-    )
+## ---------- Вкладка: Сравнение научных школ ------------------------------
+#with tab_schoolcomparison:
+#    classifier_labels = {code: title for code, title, _ in THEMATIC_CLASSIFIER}
+#    render_school_comparison_tab(
+#        df=df,
+#        idx=idx,
+#        scores_folder="basic_scores",
+#        specific_files=None,
+#        classifier_labels=classifier_labels,
+#    )
 
-# ---------- Вкладка: Сравнение по статьям --------------------------------
-with tab_articles_comparison:
-    render_articles_comparison_tab(
-        df_lineage=df,
-        idx_lineage=idx,
-    )
-
-# ---------- Закомментированные вкладки -----------------------------------
-# with tab_schoolcomparison_new:
-#     render_school_comparison_new_tab(
-#         df=df, idx=idx,
-#         scores_folder="basic_scores",
-#         specific_files=None,
-#         classifier_labels={code: title for code, title, _ in THEMATIC_CLASSIFIER},
-#     )
+## ---------- Вкладка: Сравнение по статьям --------------------------------
+#with tab_articles_comparison:
+#    render_articles_comparison_tab(
+#        df_lineage=df,
+#        idx_lineage=idx,
+#    )
