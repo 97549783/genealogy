@@ -421,7 +421,7 @@ def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
 def render_dissertations_widget(
     subset: pd.DataFrame,
     key: str,
-    title: str = "Список диссертаций в дереве",
+    title: str = "Результаты",
     expanded: bool = False,
     file_name_prefix: str | None = None,
 ) -> None:
@@ -460,7 +460,7 @@ def render_dissertations_widget(
                 st.download_button(
                     label="📊 Скачать Excel",
                     data=buf.getvalue(),
-                    file_name=f"{file_base}.sampling.xlsx",
+                    file_name=f"{file_base}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_xlsx_{key}",
                     use_container_width=True,
@@ -472,7 +472,7 @@ def render_dissertations_widget(
             st.download_button(
                 label="📄 Скачать CSV",
                 data=csv_bytes,
-                file_name=f"{file_base}.sampling.csv",
+                file_name=f"{file_base}.csv",
                 mime="text/csv",
                 key=f"dl_csv_{key}",
                 use_container_width=True,

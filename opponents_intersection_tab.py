@@ -425,7 +425,7 @@ def render_opponents_intersection_tab(
         st.download_button(
             "📥 Скачать Excel",
             data=buf.getvalue(),
-            file_name="opponents_intersection_analysis.xlsx",
+            file_name="взаимосвязи_научных_школ.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="opponents_intersection_download_xlsx",
         )
@@ -434,7 +434,7 @@ def render_opponents_intersection_tab(
         st.download_button(
             "📥 Скачать матрицу (CSV)",
             data=csv_data.encode("utf-8-sig"),
-            file_name="opponents_intersection_matrix.csv",
+            file_name="матрица_взаимосвязей_школ.csv",
             mime="text/csv",
             key="opponents_intersection_download_csv",
         )

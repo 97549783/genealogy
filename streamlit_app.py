@@ -18,8 +18,8 @@ from utils.graph import build_index, TREE_OPTIONS
 from utils.ui import (
     feedback_button,
     show_instruction,
-    download_data_dialog,
 )
+from utils.table_display import render_dissertations_widget
 
 # ---------------------- Вкладки ------------------------------------------
 from school_trees_tab import render_school_trees_tab
@@ -419,40 +419,13 @@ with tab_dissertations:
                 st.warning("По заданным критериям ничего не найдено.")
             else:
                 st.success(f"Найдено диссертаций: {len(result_df)}")
-                display_columns = [
-                    col for col in [
-                        "Code", "candidate_name", "title", "year", "city",
-                        "institution_prepared", "defense_location",
-                        "supervisors_1.name", "supervisors_2.name",
-                        "opponents_1.name", "opponents_2.name", "opponents_3.name",
-                        "leading_organization",
-                        "specialties_1.code", "specialties_1.name",
-                        "specialties_2.code", "specialties_2.name",
-                        "degree.degree_level", "degree.science_field",
-                    ]
-                    if col in result_df.columns
-                ]
-                rename_map = {
-                    "Code": "Код", "candidate_name": "Автор", "title": "Название",
-                    "year": "Год", "city": "Город", "institution_prepared": "Организация",
-                    "defense_location": "Место защиты",
-                    "supervisors_1.name": "Научный руководитель 1",
-                    "supervisors_2.name": "Научный руководитель 2",
-                    "opponents_1.name": "Оппонент 1",
-                    "opponents_2.name": "Оппонент 2",
-                    "opponents_3.name": "Оппонент 3",
-                    "leading_organization": "Ведущая организация",
-                    "specialties_1.code": "Специальность 1 (код)",
-                    "specialties_1.name": "Специальность 1",
-                    "specialties_2.code": "Специальность 2 (код)",
-                    "specialties_2.name": "Специальность 2",
-                    "degree.degree_level": "Степень",
-                    "degree.science_field": "Область науки",
-                }
-                display_df = result_df[display_columns].rename(columns=rename_map)
-                st.dataframe(display_df, use_container_width=True)
-                if st.button("📥 Скачать результаты", key="diss_show_download"):
-                    download_data_dialog(result_df[display_columns], "dissertations_search", "diss")
+                render_dissertations_widget(
+                    subset=result_df,
+                    key="поиск_диссертаций",
+                    title="Результаты",
+                    expanded=False,
+                    file_name_prefix="список_диссертаций_поиск",
+                )
 
 # ---------- Вкладка: Поиск по тематическим профилям ---------------------
 with tab_profiles:
