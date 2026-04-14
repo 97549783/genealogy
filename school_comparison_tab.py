@@ -533,7 +533,7 @@ def render_school_comparison_tab(
         # Кнопки скачивания рендерятся прямо через download_data_dialog (inline, без диалога)
         download_data_dialog(
             df=node_scores_df_full,
-            file_base="school_node_scores",
+            file_base="оценки_узлов_школ",
             key_prefix="school_comp_node_scores",
         )
     else:
@@ -581,7 +581,7 @@ def render_school_comparison_tab(
     st.download_button(
         label="📥 Скачать график силуэта (PNG)",
         data=silhouette_png,
-        file_name="silhouette_plot.png",
+        file_name="график_силуэта.png",
         mime="image/png",
         key="school_comp_download_png"
     )
@@ -596,7 +596,7 @@ def render_school_comparison_tab(
     st.download_button(
         label="📥 Скачать сводку (CSV)",
         data=csv_summary.encode("utf-8-sig"),
-        file_name="school_comparison_summary.csv",
+        file_name="сводка_сравнения_школ.csv",
         mime="text/csv",
         key="school_comp_download_csv"
     )

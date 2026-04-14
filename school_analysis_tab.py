@@ -422,7 +422,7 @@ def render_school_analysis_tab(
     st.download_button(
         label="\U0001f4e5 Скачать полный отчёт (Excel)",
         data=excel_bytes,
-        file_name=f"school_analysis_{safe_name}.xlsx",
+        file_name=f"анализ_научной_школы_{safe_name}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="school_analysis_download_excel",
     )

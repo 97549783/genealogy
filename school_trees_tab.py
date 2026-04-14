@@ -209,7 +209,7 @@ def render_school_trees_tab(
                     st.download_button(
                         "Скачать PNG",
                         data=png_bytes,
-                        file_name=f"{file_prefix}.png",
+                        file_name=f"{file_prefix}.изображение.png",
                         mime="image/png",
                         key=f"png_{file_prefix}",
                     )
@@ -217,7 +217,7 @@ def render_school_trees_tab(
                     st.download_button(
                         f"Скачать HTML ({selected_branching_label})",
                         data=html_bytes,
-                        file_name=f"{file_prefix}.html",
+                        file_name=f"{file_prefix}.интерактивная_схема.html",
                         mime="text/html",
                         key=f"html_{file_prefix}",
                     )
@@ -226,7 +226,7 @@ def render_school_trees_tab(
                         st.download_button(
                             "Скачать оглавление .md",
                             data=md_bytes,
-                            file_name=f"{file_prefix}.xmind.md",
+                            file_name=f"{file_prefix}.оглавление.md",
                             mime="text/markdown",
                             key=f"md_{file_prefix}",
                         )
@@ -235,22 +235,22 @@ def render_school_trees_tab(
 
                 _render_tree_table(subset, key=file_prefix)
 
-                person_entries.append((f"{file_prefix}.png", png_bytes))
-                person_entries.append((f"{file_prefix}.html", html_bytes))
+                person_entries.append((f"{file_prefix}.изображение.png", png_bytes))
+                person_entries.append((f"{file_prefix}.интерактивная_схема.html", html_bytes))
                 try:
                     xlsx_df_zip, csv_df_zip = build_tree_export_df(subset)
                     buf_xlsx = io.BytesIO()
                     with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
                         xlsx_df_zip.to_excel(writer, index=False, sheet_name="Диссертации")
-                    person_entries.append((f"{file_prefix}.sampling.xlsx", buf_xlsx.getvalue()))
+                    person_entries.append((f"{file_prefix}.xlsx", buf_xlsx.getvalue()))
                     person_entries.append((
-                        f"{file_prefix}.sampling.csv",
+                        f"{file_prefix}.csv",
                         csv_df_zip.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
                     ))
                 except Exception:
                     pass
                 if md_bytes is not None:
-                    person_entries.append((f"{file_prefix}.xmind.md", md_bytes))
+                    person_entries.append((f"{file_prefix}.оглавление.md", md_bytes))
 
             if has_content and len(person_entries) > 1:
                 person_zip_buf = io.BytesIO()
@@ -262,7 +262,7 @@ def render_school_trees_tab(
                 st.download_button(
                     "⬇ Скачать всё для этого руководителя (ZIP)",
                     data=person_zip_buf.getvalue(),
-                    file_name=f"{root_slug}.zip",
+                    file_name=f"{root_slug}.архив.zip",
                     mime="application/zip",
                     key=f"zip_{root_slug}",
                 )
@@ -272,7 +272,7 @@ def render_school_trees_tab(
         st.download_button(
             label="⬇ Скачать всё (ZIP)",
             data=all_zip_buf.getvalue(),
-            file_name="trees_bundle.zip",
+            file_name="архив_деревьев.zip",
             mime="application/zip",
             key="dl_zip_all_trees",
         )

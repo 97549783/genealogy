@@ -178,7 +178,7 @@ def _render_results(
         st.download_button(
             label="📥 Скачать результаты (Excel)",
             data=excel_bytes,
-            file_name="school_search_results.xlsx",
+            file_name="поиск_научных_школ.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{key_prefix}_dl_excel",
         )
@@ -637,7 +637,7 @@ def render_school_search_tab(
             render_dissertations_widget(
                 subset=subset,
                 key=f"ss_member_{i}_{slug(author_name)}",
-                title="Результаты",
+                title="Список диссертаций в дереве",
                 expanded=False,
-                file_name_prefix=f"school_search_member_{slug(author_name)}",
+                file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
             )
