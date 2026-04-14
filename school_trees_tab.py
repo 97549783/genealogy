@@ -34,7 +34,7 @@ from utils.urls import share_button
 
 def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     """
-    Отрисовывает скрытый по умолчанию expander «Список диссертаций в дереве».
+    Отрисовывает скрытый по умолчанию expander «Результаты».
 
     Args:
         subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
@@ -43,7 +43,7 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
     render_dissertations_widget(
         subset=subset,
         key=key,
-        title="Список диссертаций в дереве",
+        title="Результаты",
         expanded=False,
         file_name_prefix=key,
     )

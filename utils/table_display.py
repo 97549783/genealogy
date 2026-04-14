@@ -421,7 +421,7 @@ def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
 def render_dissertations_widget(
     subset: pd.DataFrame,
     key: str,
-    title: str = "Список диссертаций в дереве",
+    title: str = "Результаты",
     expanded: bool = False,
     file_name_prefix: str | None = None,
 ) -> None:

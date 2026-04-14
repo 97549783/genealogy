@@ -422,7 +422,7 @@ with tab_dissertations:
                 render_dissertations_widget(
                     subset=result_df,
                     key="поиск_диссертаций",
-                    title="Список диссертаций в дереве",
+                    title="Результаты",
                     expanded=False,
                     file_name_prefix="список_диссертаций_поиск",
                 )
