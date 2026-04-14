@@ -598,6 +598,8 @@ def render_profiles_tab(
         render_entropy_specificity_tab(
             df=df,
             idx=idx,
+            lineage_func=lineage,
+            rows_for_func=rows_for,
             scores_folder=scores_folder,
             specific_files=specific_files,
             classifier_labels=classifier_dict,
