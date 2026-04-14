@@ -382,7 +382,7 @@ def render_school_analysis_tab(
     # =========================================================================
     # 8. Преемственность
     # =========================================================================
-    st.markdown("### 8. Преемственность")
+    st.markdown("### 8. Ученики, ставшие научными руководителями")
     st.caption("Ученики из первого поколения, сами ставшие научными руководителями.")
 
     with st.spinner("Поиск учеников-руководителей..."):
@@ -412,7 +412,7 @@ def render_school_analysis_tab(
             yearly_df=yearly_df if not yearly_df.empty else pd.DataFrame(),
             city_df=city_df if not city_df.empty else pd.DataFrame(),
             institutional=institutional,
-            opponents_df=opponents_df if not opponents_df.empty else pd.DataFrame(),
+            opponents_df=compute_top_opponents(subset, top_n=None),
             education_df=education_df if not education_df.empty else pd.DataFrame(),
             knowledge_df=knowledge_df if not knowledge_df.empty else pd.DataFrame(),
             continuity_df=continuity_df if not continuity_df.empty else pd.DataFrame(),
