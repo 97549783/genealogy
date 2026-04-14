@@ -16,6 +16,10 @@ from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
+from utils.table_display import (
+    make_abstract_download_url_numeric,
+    make_abstract_read_url,
+)
 
 # Безопасные импорты
 try:
@@ -41,6 +45,61 @@ except ImportError:
 DEFAULT_SCORES_FOLDER = "basic_scores"
 DEFAULT_MIN_THRESHOLD = 3.0
 MAX_RESULTS_DISPLAY = 100
+
+
+def _prepare_entropy_export_df(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Готовит таблицы для отображения и скачивания:
+    - для UI: колонки ссылок «Автореферат» и «PDF-файл», без колонки кода;
+    - для экспорта: русские названия колонок и ссылка «Автореферат» вместо кода.
+    """
+    base = results.copy()
+    code_col = "Code" if "Code" in base.columns else None
+    name_col = "candidate.name" if "candidate.name" in base.columns else None
+
+    if code_col:
+        base["Автореферат"] = base[code_col].apply(
+            lambda code: make_abstract_read_url(str(code))
+        )
+        if name_col:
+            base["PDF-файл"] = base.apply(
+                lambda row: make_abstract_download_url_numeric(
+                    str(row.get(code_col, "")),
+                    str(row.get(name_col, "")),
+                ),
+                axis=1,
+            )
+        else:
+            base["PDF-файл"] = ""
+    else:
+        base["Автореферат"] = ""
+        base["PDF-файл"] = ""
+
+    rename_map = {
+        "entropy": "Энтропия",
+        "features_count": "Количество тем",
+        "candidate.name": "Автор",
+        "title": "Название",
+        "year": "Год",
+        "degree.degree_level": "Степень",
+        "institution_prepared": "Организация",
+    }
+
+    export_df = base.rename(columns=rename_map).drop(columns=["Code"], errors="ignore")
+
+    ui_cols = [
+        "Автореферат",
+        "PDF-файл",
+        "Энтропия",
+        "Количество тем",
+        "Интерпретация",
+        "Автор",
+        "Название",
+        "Год",
+        "Степень",
+        "Организация",
+    ]
+    return base, export_df[[c for c in ui_cols if c in export_df.columns]]
 
 # ==============================================================================
 # ИНСТРУКЦИЯ
@@ -657,7 +716,7 @@ def render_entropy_specificity_tab(
             f"Показано {len(filtered_results)} из {len(results)} диссертаций"
         )
 
-        # Подготовка таблицы для отображения
+        # Подготовка таблицы для отображения/экспорта
         display_df = filtered_results.copy()
 
         # Добавляем интерпретацию
@@ -665,32 +724,18 @@ def render_entropy_specificity_tab(
             lambda x: interpret_entropy(x, params.get("use_hierarchical", False))
         )
 
-        # Переименовываем колонки для отображения
-        rename_map = {
-            "Code": "Код диссертации",
-            "entropy": "Энтропия",
-            "features_count": "Количество тем",
-            "candidate.name": "Автор",
-            "title": "Название",
-            "year": "Год",
-            "degree.degree_level": "Степень",
-            "institution_prepared": "Организация"
+        _, export_df = _prepare_entropy_export_df(display_df)
+        col_cfg = {
+            "Автореферат": st.column_config.LinkColumn("Автореферат", display_text="Читать"),
+            "PDF-файл": st.column_config.LinkColumn("PDF-файл", display_text="Скачать"),
         }
-
-        display_df = display_df.rename(columns=rename_map)
-
-        # Выбираем колонки для отображения
-        cols_to_show = [
-            "Код диссертации", "Энтропия", "Количество тем", "Интерпретация",
-            "Автор", "Название", "Год", "Степень", "Организация"
-        ]
-        cols_to_show = [c for c in cols_to_show if c in display_df.columns]
 
         # Отображаем таблицу
         st.dataframe(
-            display_df[cols_to_show].head(MAX_RESULTS_DISPLAY),
+            export_df.head(MAX_RESULTS_DISPLAY),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config=col_cfg,
         )
 
         if len(filtered_results) > MAX_RESULTS_DISPLAY:
@@ -706,11 +751,11 @@ def render_entropy_specificity_tab(
 
         with col_dl1:
             # CSV
-            csv_data = filtered_results.to_csv(index=False, encoding="utf-8-sig")
+            csv_data = export_df.to_csv(index=False, encoding="utf-8-sig")
             st.download_button(
                 label="📄 Скачать CSV",
                 data=csv_data.encode("utf-8-sig"),
-                file_name="entropy_search_results.csv",
+                file_name="поиск_по_энтропии.csv",
                 mime="text/csv",
                 key="entropy_download_csv",
                 use_container_width=True
@@ -721,13 +766,13 @@ def render_entropy_specificity_tab(
             try:
                 buf_xlsx = io.BytesIO()
                 with pd.ExcelWriter(buf_xlsx, engine="openpyxl") as writer:
-                    filtered_results.to_excel(writer, index=False, sheet_name="Results")
+                    export_df.to_excel(writer, index=False, sheet_name="Результаты")
                 data_xlsx = buf_xlsx.getvalue()
 
                 st.download_button(
                     label="📊 Скачать Excel",
                     data=data_xlsx,
-                    file_name="entropy_search_results.xlsx",
+                    file_name="поиск_по_энтропии.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="entropy_download_xlsx",
                     use_container_width=True
