@@ -17,13 +17,13 @@ from typing import Dict, List, Optional, Set
 import pandas as pd
 import streamlit as st
 
-from school_trees import build_pyvis_html, draw_matplotlib
+from school_trees import draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
 from utils.table_display import (
     build_tree_export_df,
     build_tree_st_dataframe_df,
 )
-from utils.tree_renderers import build_markmap_html, build_xmind_html
+from utils.tree_renderers import build_markmap_html
 from utils.ui import show_instruction
 from utils.urls import share_button
 
@@ -84,25 +84,7 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
             )
 
 
-def _render_xmind_widget(G, root: str, key: str) -> None:
-    """
-    Отрисовывает ECharts-дерево в стиле XMind через st.components.v1.html.
-
-    Корень — в центре, ветви расходятся влево и вправо.
-    Каждая ветвь своего цвета. Клик — свернуть/развернуть.
-    Pan + zoom мышью.
-    """
-    with st.expander("🗺️ XMind-стиль (интерактивное дерево)", expanded=False):
-        xmind_html, height_px = build_xmind_html(G, root)
-        st.caption(
-            "💡 Клик на узел — свернуть/развернуть ветвь. "
-            "Колёсико мыши — масштаб; зажмите и тяните — панорама."
-        )
-        # scrolling=False чтобы pan/zoom работал без конфликта со Streamlit
-        st.components.v1.html(xmind_html, height=height_px + 20, scrolling=False)
-
-
-def _render_markmap_widget(G, root: str, key: str) -> None:
+def _render_markmap_widget(G, root: str, key: str) -> tuple[str, bytes]:
     """
     Отрисовывает Markmap mind-карту через st.components.v1.html.
 
@@ -115,13 +97,29 @@ def _render_markmap_widget(G, root: str, key: str) -> None:
     - Клик на узел — свернуть/развернуть
     - Pan + zoom мышью
     """
-    with st.expander("🗺️ Markmap (XMind-стиль)", expanded=False):
-        html_str, height_px = build_markmap_html(G, root)
-        st.caption(
-            "💡 Клик на узел — свернуть/развернуть ветвь. "
-            "Колёсико мыши — масштаб; зажмите и тяните — панорама."
-        )
-        st.components.v1.html(html_str, height=height_px + 20, scrolling=False)
+    branching_labels = {
+        "Одностороннее ветвление": "unidirectional",
+        "Двустороннее ветвление": "bidirectional",
+    }
+    selected_branching = st.radio(
+        "Режим ветвления Markmap",
+        options=list(branching_labels.keys()),
+        index=0,
+        horizontal=True,
+        key=f"markmap_mode_{key}",
+    )
+
+    html_str, height_px = build_markmap_html(
+        G,
+        root,
+        branching_mode=branching_labels[selected_branching],
+    )
+    st.components.v1.html(html_str, height=height_px + 20, scrolling=False)
+    st.caption(
+        "💡 Клик на узел — свернуть/развернуть ветвь. "
+        "Колёсико мыши — масштаб; зажмите и тяните — панорама."
+    )
+    return selected_branching, html_str.encode("utf-8")
 
 
 def render_school_trees_tab(
@@ -226,20 +224,8 @@ def render_school_trees_tab(
 
                 st.image(png_bytes, caption="Миниатюра PNG", width=220)
 
-                html_pyvis = build_pyvis_html(G, root)
-                st.components.v1.html(html_pyvis, height=800, width=2000, scrolling=True)
-                html_bytes = html_pyvis.encode("utf-8")
-
-                # ----------------------------------------------------------------
-                # XMind-стиль ECharts (под pyvis-виджетом, те же данные)
-                # ----------------------------------------------------------------
                 file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
-                _render_xmind_widget(G, root, key=file_prefix)
-
-                # ----------------------------------------------------------------
-                # Markmap через st.components.v1.html (Markmap.js 0.18.12)
-                # ----------------------------------------------------------------
-                _render_markmap_widget(G, root, key=file_prefix)
+                selected_branching_label, html_bytes = _render_markmap_widget(G, root, key=file_prefix)
 
                 md_bytes = None
                 if export_md_outline:
@@ -264,7 +250,7 @@ def render_school_trees_tab(
                     )
                 with c2:
                     st.download_button(
-                        "Скачать HTML",
+                        f"Скачать HTML ({selected_branching_label})",
                         data=html_bytes,
                         file_name=f"{file_prefix}.html",
                         mime="text/html",
