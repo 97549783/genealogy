@@ -445,7 +445,7 @@ def compute_institutional_stats(subset: pd.DataFrame) -> Dict[str, pd.DataFrame]
 # ---------------------------------------------------------------------------
 
 
-def compute_top_opponents(subset: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
+def compute_top_opponents(subset: pd.DataFrame, top_n: Optional[int] = 5) -> pd.DataFrame:
     """
     Возвращает таблицу топ-N оппонентов: Оппонент | Число появлений.
 
@@ -474,7 +474,8 @@ def compute_top_opponents(subset: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
 
     # Для отображения берём самую частую оригинальную форму
     rows = []
-    for key, count in counter.most_common(top_n):
+    most_common = counter.most_common(top_n) if top_n is not None else counter.most_common()
+    for key, count in most_common:
         originals = norm_to_originals[key]
         display_name = Counter(originals).most_common(1)[0][0]
         rows.append({"Оппонент": display_name, "Число появлений": count})
@@ -512,18 +513,18 @@ def compute_thematic_profile(
         group_prefix_knowledge  — префикс группы «Область знания» (1.1.2)
 
     Возвращает:
-        education_df  — таблица: Название | Код | Средний балл  (группа 1.1.1)
-        knowledge_df  — таблица: Название | Код | Средний балл  (группа 1.1.2)
+        education_df  — таблица: Название | Средний балл  (группа 1.1.1)
+        knowledge_df  — таблица: Название | Средний балл  (группа 1.1.2)
     """
     if subset.empty or "Code" not in subset.columns:
-        empty = pd.DataFrame(columns=["Название", "Код", "Средний балл"])
+        empty = pd.DataFrame(columns=["Название", "Средний балл"])
         return empty, empty
 
     # Загружаем оценки
     base = Path(scores_folder).expanduser().resolve()
     files = sorted(base.glob("*.csv"))
     if not files:
-        empty = pd.DataFrame(columns=["Название", "Код", "Средний балл"])
+        empty = pd.DataFrame(columns=["Название", "Средний балл"])
         return empty, empty
 
     frames: List[pd.DataFrame] = []
@@ -536,7 +537,7 @@ def compute_thematic_profile(
             continue
 
     if not frames:
-        empty = pd.DataFrame(columns=["Название", "Код", "Средний балл"])
+        empty = pd.DataFrame(columns=["Название", "Средний балл"])
         return empty, empty
 
     scores = pd.concat(frames, ignore_index=True)
@@ -555,7 +556,7 @@ def compute_thematic_profile(
     school_scores = scores[scores["Code"].isin(school_codes)]
 
     if school_scores.empty:
-        empty = pd.DataFrame(columns=["Название", "Код", "Средний балл"])
+        empty = pd.DataFrame(columns=["Название", "Средний балл"])
         return empty, empty
 
     # Среднее по всем диссертациям школы для каждого признака
@@ -569,11 +570,10 @@ def compute_thematic_profile(
         for col, avg in means.items():
             if _is_child_of(col, prefix) and col != prefix:
                 name = code_to_name.get(col, col)
-                rows.append(
-                    {"Название": name, "Код": col, "Средний балл": round(avg, 2)}
-                )
+                if avg >= 2:
+                    rows.append({"Название": name, "Средний балл": round(avg, 2)})
         if not rows:
-            return pd.DataFrame(columns=["Название", "Код", "Средний балл"])
+            return pd.DataFrame(columns=["Название", "Средний балл"])
         result = pd.DataFrame(rows).sort_values("Средний балл", ascending=False)
         return result.reset_index(drop=True)
 
@@ -691,6 +691,8 @@ def build_excel_report(
             knowledge_df.to_excel(writer, index=False, sheet_name="Тематика_область")
 
         if not continuity_df.empty:
-            continuity_df.to_excel(writer, index=False, sheet_name="Преемственность")
+            continuity_df.to_excel(
+                writer, index=False, sheet_name="Ученики-руководители"
+            )
 
     return buf.getvalue()
