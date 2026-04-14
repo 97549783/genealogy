@@ -758,7 +758,7 @@ def render_school_search_tab(
             render_dissertations_widget(
                 subset=subset,
                 key=f"ss_member_{i}_{slug(author_name)}",
-                title="Список диссертаций в дереве",
+                title="Результаты",
                 expanded=False,
                 file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
             )
