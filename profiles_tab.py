@@ -474,7 +474,7 @@ def render_search_by_topics(
                 st.download_button(
                     label="📄 Скачать CSV",
                     data=csv_data.encode("utf-8-sig"),
-                    file_name=f"profiles_{selection_slug}.csv",
+                    file_name=f"профили_{selection_slug}.csv",
                     mime="text/csv",
                     key="profile_download_csv",
                     use_container_width=True
@@ -495,7 +495,7 @@ def render_search_by_topics(
                     st.download_button(
                         label="📊 Скачать Excel",
                         data=data_xlsx,
-                        file_name=f"profiles_{selection_slug}.xlsx",
+                        file_name=f"профили_{selection_slug}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="profile_download_xlsx",
                         use_container_width=True
