@@ -370,9 +370,20 @@ def _build_markmap_node(
     return result
 
 
-def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1) -> Tuple[str, int]:
+def _resolve_markmap_depth(G: nx.DiGraph, root: str, initial_expand_level: int) -> int:
+    if initial_expand_level >= 0:
+        return initial_expand_level
+    nodes_l1_l2 = _count_levels(G, root, levels=2)
+    return 1 if nodes_l1_l2 > _EXPAND_THRESHOLD else 2
+
+
+def build_markmap_html_bidirectional(
+    G: nx.DiGraph,
+    root: str,
+    initial_expand_level: int = -1,
+) -> Tuple[str, int]:
     """
-    Генерирует самодостаточный HTML (Markmap.js) для st.components.v1.html.
+    Двусторонний Markmap (кастомная версия).
     Returns: (html_str, height_px)
     """
     if G.number_of_nodes() == 0:
@@ -380,12 +391,7 @@ def build_markmap_html(G: nx.DiGraph, root: str, initial_expand_level: int = -1)
 
     n_nodes = G.number_of_nodes()
     height_px = max(600, min(n_nodes * 32, 2000))
-
-    if initial_expand_level < 0:
-        nodes_l1_l2 = _count_levels(G, root, levels=2)
-        max_depth = 1 if nodes_l1_l2 > _EXPAND_THRESHOLD else 2
-    else:
-        max_depth = initial_expand_level
+    max_depth = _resolve_markmap_depth(G, root, initial_expand_level)
 
     all_children: List[str] = list(G.successors(root))
     half = len(all_children) // 2
@@ -571,6 +577,107 @@ window.addEventListener('resize', () => {{
 </html>"""
 
     return html, height_px
+
+
+def build_markmap_html_unidirectional(
+    G: nx.DiGraph,
+    root: str,
+    initial_expand_level: int = -1,
+) -> Tuple[str, int]:
+    """
+    Односторонний Markmap (классическая схема): основатель слева,
+    ветви идут направо.
+    Returns: (html_str, height_px)
+    """
+    if G.number_of_nodes() == 0:
+        return "<p style='color:#888'>Данных нет</p>", 300
+
+    n_nodes = G.number_of_nodes()
+    height_px = max(600, min(n_nodes * 32, 2000))
+    max_depth = _resolve_markmap_depth(G, root, initial_expand_level)
+
+    visited: Set[str] = set()
+    tree_data = _build_markmap_node(G, root, visited, depth=0, max_depth=max_depth)
+    tree_json = json.dumps(tree_data, ensure_ascii=False)
+    palette_js = json.dumps(_BRANCH_PALETTE)
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {{
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: {height_px}px;
+    background: #fff;
+    overflow: hidden;
+  }}
+  #mm {{
+    width: 100%;
+    height: {height_px}px;
+  }}
+</style>
+</head>
+<body>
+<svg id="mm"></svg>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.0/dist/browser/index.js"></script>
+<script>
+const {{ Markmap }} = window.markmap;
+const palette = {palette_js};
+const data = {tree_json};
+
+function assignColors(node, paletteIdx) {{
+  node.state = node.state || {{}};
+  if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
+  if (node.children) {{
+    node.children.forEach(child => {{
+      assignColors(child, node._palette_idx !== undefined ? node._palette_idx : paletteIdx);
+    }});
+  }}
+}}
+
+if (data.children) {{
+  data.children.forEach((child, i) => {{
+    child._palette_idx = i;
+    assignColors(child, i);
+  }});
+}}
+
+const mm = Markmap.create('#mm', {{
+  autoFit: true,
+  pan: true,
+  zoom: true,
+  duration: 400,
+  maxWidth: 280,
+  nodeMinHeight: 16,
+  spacingVertical: 5,
+  spacingHorizontal: 80,
+  fitRatio: 0.92,
+  color: (node) => (node.state && node.state.color) || '#37474f',
+}}, data);
+
+requestAnimationFrame(() => mm.fit());
+setTimeout(() => mm.fit(), 300);
+setTimeout(() => mm.fit(), 800);
+window.addEventListener('resize', () => mm.fit());
+</script>
+</body>
+</html>"""
+    return html, height_px
+
+
+def build_markmap_html(
+    G: nx.DiGraph,
+    root: str,
+    initial_expand_level: int = -1,
+    branching_mode: str = "bidirectional",
+) -> Tuple[str, int]:
+    if branching_mode == "unidirectional":
+        return build_markmap_html_unidirectional(G, root, initial_expand_level=initial_expand_level)
+    return build_markmap_html_bidirectional(G, root, initial_expand_level=initial_expand_level)
 
 
 # ---------------------------------------------------------------------------
