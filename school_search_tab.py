@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-from utils.graph import lineage, rows_for
+from utils.graph import lineage, rows_for, slug
 from school_search import (
     FUZZY_THRESHOLD,
     build_excel_search_results,
@@ -26,13 +26,14 @@ from school_search import (
     search_by_geo_diversity,
     search_by_institution_prepared,
     search_by_leading_organization,
-    search_by_member,
+    search_member_lineage_chains,
     search_by_members_in_period,
     search_by_members_in_year,
     search_by_opponent,
     search_by_supervisor_rate,
     search_by_total_members,
 )
+from utils.table_display import render_dissertations_widget
 
 
 # ==============================================================================
@@ -48,24 +49,24 @@ TOP_N_OPTIONS: List[int] = [5, 10, 20, 50]
 
 # Группы режимов поиска
 SEARCH_MODES: Dict[str, str] = {
-    # Группа 1
-    "total_members":      "📊 1.1 Общее число членов школы",
-    "members_in_period":  "📊 1.2 Число защит за период (год от / год до)",
-    "members_in_year":    "📊 1.3 Число защит за конкретный год",
-    "depth":              "🌳 1.4 Глубина дерева (число поколений)",
-    "supervisor_rate":    "🎓 1.5 Доля учеников, ставших научными руководителями",
-    # Группа 2
-    "city":               "🏙️ 2.1 Число защит в указанном городе",
-    "geo_diversity":      "🗺️ 2.2 Географическое разнообразие (число уникальных городов)",
-    # Группа 3
-    "org_prepared":       "🏢 3.1 По организации выполнения",
-    "org_defense":        "🏩 3.2 По месту (организации) защиты",
-    "org_leading":        "🏦 3.3 По ведущей организации",
-    # Группа 4
-    "classifier_score":   "🔬 4.1 Средний балл по узлу классификатора",
-    # Группа 5
-    "opponent":           "👤 5.1 Школы, где лицо выступает оппонентом",
-    "member":             "👤 5.2 Школы, в которых лицо является учеником",
+    # Группа 1 — по персонам
+    "member":             "👤 1.1 Школы, к которой искомое лицо принадлежит",
+    "opponent":           "👤 1.2 Школы, где лицо выступает оппонентом",
+    # Группа 2 — по размеру школы
+    "total_members":      "📊 2.1 Общее число членов школы",
+    "members_in_period":  "📊 2.2 Число защит за период (год от / год до)",
+    "members_in_year":    "📊 2.3 Число защит за конкретный год",
+    "depth":              "🌳 2.4 Глубина дерева (число поколений)",
+    "supervisor_rate":    "🎓 2.5 Доля учеников, ставших научными руководителями",
+    # Группа 3 — география
+    "city":               "🏙️ 3.1 Число защит в указанном городе",
+    "geo_diversity":      "🗺️ 3.2 Географическое разнообразие (число уникальных городов)",
+    # Группа 4 — организации
+    "org_prepared":       "🏢 4.1 По организации выполнения",
+    "org_defense":        "🏩 4.2 По месту (организации) защиты",
+    "org_leading":        "🏦 4.3 По ведущей организации",
+    # Группа 5 — тематика
+    "classifier_score":   "🔬 5.1 Средний балл по узлу классификатора",
 }
 
 # Режимы, для которых параметр scope не применяется
@@ -350,11 +351,30 @@ def render_school_search_tab(
             "Пробел между инициалами не важен: «Е. А.» и «Е.А.» считаются одинаковыми. "
             f"Порог rapidfuzz: {FUZZY_THRESHOLD}%."
         )
-        person_query = st.text_input(
-            label_map[search_mode],
-            placeholder=placeholder_map[search_mode],
-            key=f"school_search_person_{search_mode}",
-        )
+        if search_mode == "member" and "candidate_name" in df.columns:
+            candidate_options = sorted(
+                set(
+                    df["candidate_name"]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .loc[lambda s: s != ""]
+                    .tolist()
+                )
+            )
+            person_query = st.selectbox(
+                label_map[search_mode],
+                options=[""] + candidate_options,
+                index=0,
+                key=f"school_search_person_{search_mode}_select",
+                placeholder="Начните вводить ФИО и выберите вариант из списка",
+            )
+        else:
+            person_query = st.text_input(
+                label_map[search_mode],
+                placeholder=placeholder_map[search_mode],
+                key=f"school_search_person_{search_mode}",
+            )
         extra_params = {"person_query": person_query}
 
     # ==========================================================================
@@ -592,17 +612,32 @@ def render_school_search_tab(
 
     elif search_mode == "member":
         with st.spinner(spinner_msg):
-            result_df, matched_map = search_by_member(
-                df=df, index=idx,
-                lineage_func=lineage, rows_for_func=rows_for,
+            member_results = search_member_lineage_chains(
+                df=df,
                 person_query=extra_params["person_query"],
-                scope=scope, top_n=top_n,
             )
-        _render_results(
-            result_df, metric_col="Диссертаций автора",
-            chart_title=(
-                f"Топ-{top_n}: школы с учеником «{extra_params['person_query']}»"
-            ),
-            matched_map=matched_map, key_prefix="ss_mem",
-            search_mode=mode_label, search_params=params_for_excel,
+
+        if not member_results:
+            st.warning("По заданным параметрам ничего не найдено.")
+            return
+
+        st.success(f"Найдено вариантов ФИО авторов: {len(member_results)}")
+        st.caption(
+            "Для каждого найденного варианта показана цепочка научных руководителей вверх "
+            "и список диссертаций автора вместе с диссертациями руководителей из цепочки."
         )
+
+        for i, item in enumerate(member_results, start=1):
+            author_name = str(item["author_name"])
+            chain_names = item["chain_names"]
+            subset = item["subset"]
+
+            st.markdown(f"#### {i}. {author_name}")
+            st.caption(" → ".join(chain_names) if chain_names else "Цепочка не найдена.")
+            render_dissertations_widget(
+                subset=subset,
+                key=f"ss_member_{i}_{slug(author_name)}",
+                title="Результаты",
+                expanded=False,
+                file_name_prefix=f"school_search_member_{slug(author_name)}",
+            )

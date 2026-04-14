@@ -21,7 +21,7 @@ from school_trees import draw_matplotlib
 from utils.graph import TREE_OPTIONS, lineage, slug
 from utils.table_display import (
     build_tree_export_df,
-    build_tree_st_dataframe_df,
+    render_dissertations_widget,
 )
 from utils.tree_renderers import build_markmap_html
 from utils.ui import show_instruction
@@ -40,48 +40,13 @@ def _render_tree_table(subset: pd.DataFrame, key: str) -> None:
         subset: Исходный DataFrame с данными о диссертациях (результат lineage()).
         key:    Уникальный строковый ключ Streamlit для expander-а.
     """
-    label = f"📋 Список диссертаций в дереве ({len(subset)})"
-    with st.expander(label, expanded=False):
-        if subset.empty:
-            st.info("Данные отсутствуют.")
-            return
-
-        df_st, col_cfg = build_tree_st_dataframe_df(subset)
-        st.dataframe(
-            df_st,
-            column_config=col_cfg,
-            use_container_width=True,
-            hide_index=True,
-            key=f"df_table_{key}",
-        )
-
-        xlsx_df, csv_df = build_tree_export_df(subset)
-        col_xlsx, col_csv = st.columns(2)
-        with col_xlsx:
-            buf = io.BytesIO()
-            try:
-                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                    xlsx_df.to_excel(writer, index=False, sheet_name="Диссертации")
-                st.download_button(
-                    label="📊 Скачать Excel",
-                    data=buf.getvalue(),
-                    file_name=f"{key}.sampling.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_xlsx_{key}",
-                    use_container_width=True,
-                )
-            except Exception as exc:
-                st.error(f"Ошибка создания Excel: {exc}")
-        with col_csv:
-            csv_bytes = csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-            st.download_button(
-                label="📄 Скачать CSV",
-                data=csv_bytes,
-                file_name=f"{key}.sampling.csv",
-                mime="text/csv",
-                key=f"dl_csv_{key}",
-                use_container_width=True,
-            )
+    render_dissertations_widget(
+        subset=subset,
+        key=key,
+        title="Список диссертаций в дереве",
+        expanded=False,
+        file_name_prefix=key,
+    )
 
 
 def _render_markmap_widget(G, root: str, key: str) -> tuple[str, bytes]:

@@ -932,6 +932,109 @@ def search_by_member(
     return pd.DataFrame(rows[:top_n]), matched_map
 
 
+def search_member_lineage_chains(
+    df: pd.DataFrame,
+    person_query: str,
+    max_depth: int = 25,
+) -> List[Dict[str, object]]:
+    """
+    Ищет всех авторов диссертаций, совпадающих с person_query, и для каждого
+    собирает «цепочку вверх» по научным руководителям.
+
+    Returns:
+        Список словарей формата:
+        {
+            "author_name": str,              # написание ФИО как в колонке автора
+            "chain_names": list[str],        # автор + руководители по цепочке вверх
+            "subset": pd.DataFrame,          # диссертации всех лиц из chain_names
+        }
+    """
+    if AUTHOR_COLUMN not in df.columns:
+        return []
+
+    author_series = df[AUTHOR_COLUMN].fillna("").astype(str)
+    matched_mask = _fuzzy_match(author_series, person_query)
+    if not matched_mask.any():
+        return []
+
+    # Фиксируем варианты написания ровно так, как они стоят у авторов в базе.
+    matched_authors = sorted(
+        set(
+            author_series[matched_mask]
+            .str.strip()
+            .loc[lambda s: s != ""]
+            .tolist()
+        )
+    )
+    if not matched_authors:
+        return []
+
+    # Нормализованное имя автора -> индексы строк с его диссертациями.
+    by_author_norm: Dict[str, Set[int]] = {}
+    for idx, raw in author_series.items():
+        name = str(raw).strip()
+        if not name:
+            continue
+        by_author_norm.setdefault(_norm_initials(name), set()).add(int(idx))
+
+    results: List[Dict[str, object]] = []
+    for start_name in matched_authors:
+        visited: Set[str] = set()
+        queue: deque[Tuple[str, int]] = deque([(start_name, 0)])
+        chain_names: List[str] = []
+
+        while queue:
+            current_name, depth = queue.popleft()
+            cur_key = _norm_initials(current_name)
+            if not cur_key or cur_key in visited or depth > max_depth:
+                continue
+            visited.add(cur_key)
+            chain_names.append(current_name)
+
+            dissertation_rows = df.loc[list(by_author_norm.get(cur_key, set()))]
+            if dissertation_rows.empty:
+                continue
+
+            for sup_col in SUPERVISOR_COLUMNS:
+                if sup_col not in dissertation_rows.columns:
+                    continue
+                sup_vals = (
+                    dissertation_rows[sup_col]
+                    .fillna("")
+                    .astype(str)
+                    .str.strip()
+                    .loc[lambda s: s != ""]
+                    .unique()
+                    .tolist()
+                )
+                for supervisor_name in sup_vals:
+                    sup_key = _norm_initials(supervisor_name)
+                    if sup_key and sup_key not in visited:
+                        queue.append((supervisor_name, depth + 1))
+
+        selected_indices: Set[int] = set()
+        for chain_name in chain_names:
+            selected_indices.update(by_author_norm.get(_norm_initials(chain_name), set()))
+
+        subset = (
+            df.loc[sorted(selected_indices)].copy()
+            if selected_indices
+            else df.iloc[0:0].copy()
+        )
+        if YEAR_COLUMN in subset.columns:
+            subset = subset.sort_values(by=YEAR_COLUMN, na_position="last")
+
+        results.append(
+            {
+                "author_name": start_name,
+                "chain_names": chain_names,
+                "subset": subset,
+            }
+        )
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Excel-отчёт по результатам поиска
 # ---------------------------------------------------------------------------
