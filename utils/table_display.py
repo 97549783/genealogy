@@ -31,6 +31,7 @@ utils/table_display.py — утилиты для отображения табл
 
 from __future__ import annotations
 
+import io
 import re
 from urllib.parse import quote
 
@@ -415,3 +416,64 @@ def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
         rows_csv.append(csv_row)
 
     return pd.DataFrame(rows_xlsx), pd.DataFrame(rows_csv)
+
+
+def render_dissertations_widget(
+    subset: pd.DataFrame,
+    key: str,
+    title: str = "Список диссертаций в дереве",
+    expanded: bool = False,
+    file_name_prefix: str | None = None,
+) -> None:
+    """
+    Универсальный UI-виджет таблицы диссертаций + экспорт (Excel/CSV).
+
+    Используется на разных вкладках (например, «Построение деревьев»
+    и «Поиск научных школ») для единообразного отображения результатов.
+    """
+    import streamlit as st
+
+    file_base = file_name_prefix or key
+    label = f"📋 {title} ({len(subset)})"
+
+    with st.expander(label, expanded=expanded):
+        if subset.empty:
+            st.info("Данные отсутствуют.")
+            return
+
+        df_st, col_cfg = build_tree_st_dataframe_df(subset)
+        st.dataframe(
+            df_st,
+            column_config=col_cfg,
+            use_container_width=True,
+            hide_index=True,
+            key=f"df_table_{key}",
+        )
+
+        xlsx_df, csv_df = build_tree_export_df(subset)
+        col_xlsx, col_csv = st.columns(2)
+        with col_xlsx:
+            buf = io.BytesIO()
+            try:
+                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+                    xlsx_df.to_excel(writer, index=False, sheet_name="Диссертации")
+                st.download_button(
+                    label="📊 Скачать Excel",
+                    data=buf.getvalue(),
+                    file_name=f"{file_base}.sampling.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_xlsx_{key}",
+                    use_container_width=True,
+                )
+            except Exception as exc:
+                st.error(f"Ошибка создания Excel: {exc}")
+        with col_csv:
+            csv_bytes = csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+            st.download_button(
+                label="📄 Скачать CSV",
+                data=csv_bytes,
+                file_name=f"{file_base}.sampling.csv",
+                mime="text/csv",
+                key=f"dl_csv_{key}",
+                use_container_width=True,
+            )
