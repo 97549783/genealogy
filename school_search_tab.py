@@ -10,12 +10,15 @@ from typing import Dict, List, Optional, Set, Tuple
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import networkx as nx
 import pandas as pd
 import streamlit as st
 
 from utils.graph import lineage, rows_for, slug
 from school_search import (
+    AUTHOR_COLUMN,
     FUZZY_THRESHOLD,
+    SUPERVISOR_COLUMNS,
     build_excel_search_results,
     collect_subset,
     get_all_roots,
@@ -34,6 +37,7 @@ from school_search import (
     search_by_total_members,
 )
 from utils.table_display import render_dissertations_widget
+from utils.tree_renderers import build_markmap_html
 
 
 # ==============================================================================
@@ -125,6 +129,80 @@ def _show_matched_variants(
                 use_container_width=True,
                 hide_index=True,
             )
+
+
+def _normalize_name(name: str) -> str:
+    return " ".join(str(name).strip().lower().replace("ё", "е").split())
+
+
+def _build_reverse_lineage_rows(subset: pd.DataFrame) -> pd.DataFrame:
+    if subset.empty or AUTHOR_COLUMN not in subset.columns:
+        return pd.DataFrame(columns=["Диссертант", "Научный руководитель", "Научный руководитель 2"])
+
+    rows: List[Dict[str, str]] = []
+    for _, row in subset.iterrows():
+        dissertation_name = str(row.get(AUTHOR_COLUMN, "")).strip()
+        if not dissertation_name:
+            continue
+        sup_1 = str(row.get(SUPERVISOR_COLUMNS[0], "")).strip() if SUPERVISOR_COLUMNS[0] in subset.columns else ""
+        sup_2 = str(row.get(SUPERVISOR_COLUMNS[1], "")).strip() if SUPERVISOR_COLUMNS[1] in subset.columns else ""
+        if not sup_1 and not sup_2:
+            continue
+        rows.append(
+            {
+                "Диссертант": dissertation_name,
+                "Научный руководитель": sup_1 or "—",
+                "Научный руководитель 2": sup_2 or "—",
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(columns=["Диссертант", "Научный руководитель", "Научный руководитель 2"])
+
+    return pd.DataFrame(rows).drop_duplicates(ignore_index=True)
+
+
+def _build_reverse_lineage_graph(subset: pd.DataFrame, root_name: str) -> nx.DiGraph:
+    graph = nx.DiGraph()
+    root_name = str(root_name).strip()
+    if not root_name:
+        return graph
+
+    graph.add_node(root_name)
+    if subset.empty or AUTHOR_COLUMN not in subset.columns:
+        return graph
+
+    by_author_rows: Dict[str, List[pd.Series]] = {}
+    for _, row in subset.iterrows():
+        author = str(row.get(AUTHOR_COLUMN, "")).strip()
+        if not author:
+            continue
+        by_author_rows.setdefault(_normalize_name(author), []).append(row)
+
+    queue: List[str] = [root_name]
+    visited: Set[str] = set()
+    max_depth = 25
+    depth = 0
+
+    while queue and depth <= max_depth:
+        next_queue: List[str] = []
+        for current_name in queue:
+            cur_norm = _normalize_name(current_name)
+            if not cur_norm or cur_norm in visited:
+                continue
+            visited.add(cur_norm)
+            for row in by_author_rows.get(cur_norm, []):
+                for sup_col in SUPERVISOR_COLUMNS:
+                    supervisor = str(row.get(sup_col, "")).strip()
+                    if not supervisor:
+                        continue
+                    graph.add_edge(current_name, supervisor)
+                    if _normalize_name(supervisor) not in visited:
+                        next_queue.append(supervisor)
+        queue = next_queue
+        depth += 1
+
+    return graph
 
 
 def _render_results(
@@ -631,13 +709,56 @@ def render_school_search_tab(
             author_name = str(item["author_name"])
             chain_names = item["chain_names"]
             subset = item["subset"]
+            reverse_table = _build_reverse_lineage_rows(subset)
+            reverse_graph = _build_reverse_lineage_graph(subset, author_name)
 
             st.markdown(f"#### {i}. {author_name}")
             st.caption(" → ".join(chain_names) if chain_names else "Цепочка не найдена.")
+
+            st.markdown("##### Таблица цепочки научных руководителей")
+            if reverse_table.empty:
+                st.info("Для этого автора не найдено связей «диссертант → научный руководитель».")
+            else:
+                st.markdown(
+                    """
+                    <style>
+                    .reverse-lineage-table table {
+                        font-size: 1.02rem;
+                    }
+                    .reverse-lineage-table th {
+                        font-size: 1.02rem;
+                        font-weight: 700;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.markdown('<div class="reverse-lineage-table">', unsafe_allow_html=True)
+                st.table(reverse_table)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("##### 🌳 Цепь научных руководителей")
+            st.caption(
+                "Это дерево научных руководителей, а не учеников, т.е. это дерево, "
+                "обратное тому, что представлено на вкладке «Построение деревьев»."
+            )
+            if reverse_graph.number_of_edges() == 0:
+                st.info("Для построения обратного дерева недостаточно данных.")
+            else:
+                html_str, height_px = build_markmap_html(
+                    reverse_graph,
+                    author_name,
+                    branching_mode="unidirectional",
+                )
+                st.components.v1.html(html_str, height=height_px + 20, scrolling=False)
+                st.caption(
+                    "💡 Показан только режим «Одностороннее ветвление» для цепочки научных руководителей."
+                )
+
             render_dissertations_widget(
                 subset=subset,
                 key=f"ss_member_{i}_{slug(author_name)}",
-                title="Результаты",
+                title="Список диссертаций в дереве",
                 expanded=False,
                 file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
             )
