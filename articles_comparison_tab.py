@@ -823,6 +823,7 @@ def render_articles_comparison_tab(
 
         share_params_button(
             {
+                "tab": "articles_comparison",
                 "ac_people": selected_options,
                 "ac_scope": scope,
                 "ac_metric": metric_choice,

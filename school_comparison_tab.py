@@ -702,6 +702,7 @@ def render_school_comparison_tab(
 
     share_params_button(
         {
+            "tab": "school_comparison",
             "school_comp_schools": selected_schools,
             "school_comp_scope": selected_scope,
             "school_comp_metric": selected_metric,

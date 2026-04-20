@@ -445,6 +445,7 @@ def render_school_analysis_tab(
 
     share_params_button(
         {
+            "tab": "school_analysis",
             "analysis_root": root,
             "analysis_scope": scope,
         },
