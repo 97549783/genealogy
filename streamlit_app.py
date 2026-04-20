@@ -535,7 +535,7 @@ with tab_school_analysis:
         scores_folder="basic_scores",
     )
 
-## ---------- Вкладка: Сравнение научных школ ------------------------------
+# ---------- Вкладка: Сравнение научных школ ------------------------------
 #with tab_schoolcomparison:
 #    classifier_labels = {code: title for code, title, _ in THEMATIC_CLASSIFIER}
 #    render_school_comparison_tab(
@@ -546,7 +546,7 @@ with tab_school_analysis:
 #        classifier_labels=classifier_labels,
 #    )
 
-## ---------- Вкладка: Сравнение по статьям --------------------------------
+# ---------- Вкладка: Сравнение по статьям --------------------------------
 #with tab_articles_comparison:
 #    render_articles_comparison_tab(
 #        df_lineage=df,
