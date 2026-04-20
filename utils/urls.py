@@ -28,7 +28,7 @@ except Exception:
 # Публичный адрес приложения. Можно переопределить через переменную окружения.
 PUBLIC_APP_URL = os.environ.get(
     "PUBLIC_APP_URL",
-    "https://academic-genealogy.streamlit.app/",
+    "https://academic-genealogy.academyrh.info/",
 ).strip().rstrip("/")
 
 
