@@ -482,9 +482,7 @@ def render_articles_comparison_tab(
     if not st.session_state.get("ac_query_hydrated", False):
         people_q = [p.strip() for p in st.query_params.get_all("ac_people") if str(p).strip()]
         if people_q:
-            st.session_state["ac_selected_options"] = people_q
-            if len(people_q) >= 2:
-                st.session_state["ac_run_state"] = True
+            st.session_state["ac_selected_options_query"] = people_q
 
         scope_q = str(st.query_params.get("ac_scope", "")).strip()
         if scope_q in {"direct", "all"}:
@@ -512,7 +510,7 @@ def render_articles_comparison_tab(
 
         nodes_q = [n.strip() for n in st.query_params.get_all("ac_nodes") if str(n).strip()]
         if nodes_q:
-            st.session_state["ac_selected_nodes"] = nodes_q
+            st.session_state["ac_selected_nodes_query"] = nodes_q
 
         st.session_state["ac_query_hydrated"] = True
 
@@ -554,6 +552,13 @@ def render_articles_comparison_tab(
         st.session_state["ac_selected_options"] = []
         if selected_roots:
             st.session_state["ac_selected_options"] = [r for r in selected_roots if r in options]
+    if "ac_selected_options_query" in st.session_state:
+        raw_people = st.session_state.get("ac_selected_options_query", [])
+        valid_people = [p for p in raw_people if p in options]
+        st.session_state["ac_selected_options"] = valid_people
+        if len(valid_people) >= 2:
+            st.session_state["ac_run_state"] = True
+        st.session_state.pop("ac_selected_options_query", None)
 
     selected_options = st.multiselect(
         "Выберите руководителей научных школ (минимум 2)",
@@ -639,6 +644,12 @@ def render_articles_comparison_tab(
                 "Например, выбрав '1.1 Образовательная среда', вы включите все коды 1.1.1, 1.1.1.1, 1.1.1.2 и т.д."
             ),
         )
+        if "ac_selected_nodes_query" in st.session_state:
+            raw_nodes = st.session_state.get("ac_selected_nodes_query", [])
+            valid_nodes = [n for n in raw_nodes if n in node_options]
+            st.session_state["ac_selected_nodes"] = valid_nodes
+            st.session_state.pop("ac_selected_nodes_query", None)
+            selected_nodes = valid_nodes
 
         run_clicked = st.button("🚀 Запустить сравнительный анализ", type="primary", key="ac_run_btn")
         if run_clicked:

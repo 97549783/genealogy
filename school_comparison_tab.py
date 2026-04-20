@@ -155,9 +155,7 @@ def render_school_comparison_tab(
     if not st.session_state.get("school_comp_query_hydrated", False):
         schools_q = [s.strip() for s in st.query_params.get_all("school_comp_schools") if str(s).strip()]
         if schools_q:
-            st.session_state["school_comp_selection"] = schools_q
-            if len(schools_q) >= 2:
-                st.session_state["school_comp_run_state"] = True
+            st.session_state["school_comp_selection_query"] = schools_q
 
         scope_q = str(st.query_params.get("school_comp_scope", "")).strip()
         if scope_q in SCOPE_LABELS:
@@ -175,7 +173,7 @@ def render_school_comparison_tab(
 
         nodes_q = [n.strip() for n in st.query_params.get_all("school_comp_nodes") if str(n).strip()]
         if nodes_q:
-            st.session_state["school_comp_nodes_prefill"] = nodes_q
+            st.session_state["school_comp_nodes_prefill_query"] = nodes_q
 
         decay_q = str(st.query_params.get("school_comp_decay", "")).strip()
         if decay_q:
@@ -233,6 +231,14 @@ def render_school_comparison_tab(
     if not all_supervisors_sorted:
         st.error("❌ В данных не найдено научных руководителей")
         return
+
+    if "school_comp_selection_query" in st.session_state:
+        requested = st.session_state.get("school_comp_selection_query", [])
+        valid_selected = [s for s in requested if s in all_supervisors_sorted]
+        st.session_state["school_comp_selection"] = valid_selected
+        if len(valid_selected) >= 2:
+            st.session_state["school_comp_run_state"] = True
+        st.session_state.pop("school_comp_selection_query", None)
 
     selected_schools = st.multiselect(
         "Выберите руководителей научных школ (минимум 2)",
@@ -312,6 +318,13 @@ def render_school_comparison_tab(
                 level1_nodes = [n for n in selectable if get_code_depth(n) == 1]
                 level2_nodes = [n for n in selectable if get_code_depth(n) == 2]
                 level3_nodes = [n for n in selectable if get_code_depth(n) == 3]
+                all_selectable_nodes = set(selectable)
+                if "school_comp_nodes_prefill_query" in st.session_state:
+                    raw_nodes = st.session_state.get("school_comp_nodes_prefill_query", [])
+                    st.session_state["school_comp_nodes_prefill"] = [
+                        n for n in raw_nodes if n in all_selectable_nodes
+                    ]
+                    st.session_state.pop("school_comp_nodes_prefill_query", None)
 
                 st.caption("Выберите разделы классификатора:")
                 selected_nodes = []
