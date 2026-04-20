@@ -442,7 +442,6 @@ def render_opponents_intersection_tab(
 
     share_params_button(
         {
-            "tab": "opponents_intersection",
             "schools": selected_schools,
             "scope": selected_scope,
         },

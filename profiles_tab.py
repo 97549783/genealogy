@@ -410,7 +410,6 @@ def render_search_by_topics(
             st.success(f"✅ Найдено диссертаций: {len(display_df)}")
             share_params_button(
                 {
-                    "tab": "profiles",
                     "codes": selected_codes,
                     "min_score": min_score,
                 },

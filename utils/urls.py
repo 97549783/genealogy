@@ -185,7 +185,17 @@ def share_params_button(params: Dict[str, QueryValue], key: str) -> None:
             for q_key, q_vals in grouped.items():
                 st.query_params[q_key] = q_vals if len(q_vals) > 1 else q_vals[0]
         except Exception:
-            pass
+            try:
+                grouped: Dict[str, List[str]] = {}
+                for q_key, q_val in normalized:
+                    grouped.setdefault(q_key, []).append(q_val)
+                exp_params = {
+                    q_key: (q_vals if len(q_vals) > 1 else q_vals[0])
+                    for q_key, q_vals in grouped.items()
+                }
+                st.experimental_set_query_params(**exp_params)  # type: ignore[attr-defined]
+            except Exception:
+                pass
         _show_dialog(build_share_url_from_params(params))
 
 

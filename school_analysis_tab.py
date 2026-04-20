@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.graph import lineage, rows_for
+from utils.urls import share_params_button
 from school_analysis import (
     collect_school_subset,
     compute_overview,
@@ -142,6 +143,18 @@ def render_school_analysis_tab(
         st.error("В данных не найдены научные руководители.")
         return
 
+    if not st.session_state.get("school_analysis_query_hydrated", False):
+        root_q = str(st.query_params.get("analysis_root", "")).strip()
+        if root_q and root_q in all_supervisors:
+            st.session_state["school_analysis_root"] = root_q
+        scope_q = str(st.query_params.get("analysis_scope", "")).strip()
+        scope_keys = list(SCOPE_LABELS.keys())
+        if scope_q in scope_keys:
+            st.session_state["school_analysis_scope"] = scope_keys.index(scope_q)
+        if root_q:
+            st.session_state["school_analysis_run_state"] = True
+        st.session_state["school_analysis_query_hydrated"] = True
+
     col_sel, col_scope = st.columns([2, 1])
 
     with col_sel:
@@ -173,7 +186,10 @@ def render_school_analysis_tab(
             _clear_school_cache(root, scope)
             st.rerun()
 
-    if not run_clicked:
+    if run_clicked:
+        st.session_state["school_analysis_run_state"] = True
+
+    if not st.session_state.get("school_analysis_run_state", False):
         if f"school_subset_{root}_direct" not in st.session_state:
             return
 
@@ -425,4 +441,12 @@ def render_school_analysis_tab(
         file_name=f"анализ_научной_школы_{safe_name}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="school_analysis_download_excel",
+    )
+
+    share_params_button(
+        {
+            "analysis_root": root,
+            "analysis_scope": scope,
+        },
+        key="school_analysis_share",
     )
