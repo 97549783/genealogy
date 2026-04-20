@@ -37,7 +37,7 @@ SUPERVISOR_COLUMNS: List[str] = ["supervisors_1.name", "supervisors_2.name"]
 
 BASIC_SCORES_DIR = "basic_scores"   # тематические профили диссертаций
 
-FEEDBACK_FILE = Path("/app/data/feedback.csv")
+FEEDBACK_FILE = Path("/app/data-nonsynchronized/feedback.csv")
 
 # ---------------------------------------------------------------------------
 # Внутренние загрузчики (CSV-реализация)
