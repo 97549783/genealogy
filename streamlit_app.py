@@ -20,6 +20,7 @@ from utils.ui import (
     show_instruction,
 )
 from utils.table_display import render_dissertations_widget
+from utils.urls import share_params_button
 
 # ---------------------- Вкладки ------------------------------------------
 from school_trees_tab import render_school_trees_tab
@@ -267,6 +268,24 @@ for col in SUPERVISOR_COLUMNS:
 shared_roots = st.query_params.get_all("root")
 valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
 
+if not st.session_state.get("diss_search_query_hydrated", False):
+    criteria_q = [
+        c for c in st.query_params.get_all("diss_criterion")
+        if c in {
+            "title", "candidate_name", "supervisors", "opponents",
+            "institution_prepared", "leading_organization", "defense_location",
+            "city", "year", "specialties",
+        }
+    ]
+    if criteria_q:
+        st.session_state["dissertation_search_criteria"] = criteria_q
+        for criterion in criteria_q:
+            q_val = str(st.query_params.get(f"diss_{criterion}", "")).strip()
+            if q_val:
+                st.session_state[f"diss_search_{criterion}"] = q_val
+        st.session_state["diss_search_should_run"] = True
+    st.session_state["diss_search_query_hydrated"] = True
+
 
 # ---------------------- Вкладки ------------------------------------------
 (
@@ -375,6 +394,9 @@ with tab_dissertations:
         st.markdown("### 3. Результат")
 
         if st.button("Найти", type="primary", key="dissertation_search_button"):
+            st.session_state["diss_search_should_run"] = True
+
+        if st.session_state.get("diss_search_should_run", False):
             result_df = df.copy()
             for criterion, value in search_params.items():
                 if not value or value == "Все":
@@ -419,6 +441,16 @@ with tab_dissertations:
                 st.warning("По заданным критериям ничего не найдено.")
             else:
                 st.success(f"Найдено диссертаций: {len(result_df)}")
+                share_params_button(
+                    {
+                        "diss_criterion": selected_criteria,
+                        **{
+                            f"diss_{criterion}": search_params.get(criterion, "")
+                            for criterion in selected_criteria
+                        },
+                    },
+                    key="diss_search_share",
+                )
                 render_dissertations_widget(
                     subset=result_df,
                     key="поиск_диссертаций",

@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from utils.urls import share_params_button
+
 from utils.graph import lineage, rows_for
 
 # Безопасные импорты с fallback
@@ -200,6 +202,24 @@ def render_search_by_topics(
         thematic_classifier: Список элементов классификатора
         classifier_dict: Словарь {код: название}
     """
+
+    if not st.session_state.get("profile_query_hydrated", False):
+        query_codes = [c.strip() for c in st.query_params.get_all("codes") if str(c).strip()]
+        if query_codes:
+            valid_codes = [c for c in query_codes if c in classifier_dict][:SELECTION_LIMIT]
+            if valid_codes:
+                st.session_state[PROFILE_SELECTION_SESSION_KEY] = valid_codes
+                st.session_state["profile_search_active"] = True
+
+        min_score_q = str(st.query_params.get("min_score", "")).strip()
+        if min_score_q:
+            try:
+                min_score_val = float(min_score_q)
+                if 1.0 <= min_score_val <= 10.0:
+                    st.session_state["profile_min_score"] = min_score_val
+            except ValueError:
+                pass
+        st.session_state["profile_query_hydrated"] = True
 
     # --- Инструкция ---
     if st.button("📖 Инструкция", key="instruction_profiles_topics"):
@@ -406,6 +426,13 @@ def render_search_by_topics(
             st.markdown("## 📊 Результаты поиска")
 
             st.success(f"✅ Найдено диссертаций: {len(display_df)}")
+            share_params_button(
+                {
+                    "codes": selected_codes,
+                    "min_score": min_score,
+                },
+                key="profiles_share_results",
+            )
 
             # Фильтр по таблице
             st.markdown("### 🔍 Фильтр по таблице")

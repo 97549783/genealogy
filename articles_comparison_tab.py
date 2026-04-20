@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.graph import lineage
+from utils.urls import share_params_button
 from articles_comparison import (
     DistanceMetric,
     DISTANCE_METRIC_LABELS,
@@ -478,6 +479,41 @@ def render_articles_comparison_tab(
     if classifier_labels is None:
         classifier_labels = load_articles_classifier()
 
+    if not st.session_state.get("ac_query_hydrated", False):
+        people_q = [p.strip() for p in st.query_params.get_all("ac_people") if str(p).strip()]
+        if people_q:
+            st.session_state["ac_selected_options_query"] = people_q
+
+        scope_q = str(st.query_params.get("ac_scope", "")).strip()
+        if scope_q in {"direct", "all"}:
+            st.session_state["ac_scope"] = scope_q
+
+        metric_q = str(st.query_params.get("ac_metric", "")).strip()
+        metric_options = list(DISTANCE_METRIC_LABELS.keys())
+        if metric_q in metric_options:
+            st.session_state["ac_metric"] = metric_options.index(metric_q)
+
+        decay_q = str(st.query_params.get("ac_decay", "")).strip()
+        if decay_q:
+            try:
+                decay_val = float(decay_q)
+                if 0.0 <= decay_val <= 1.0:
+                    st.session_state["ac_decay_factor"] = decay_val
+            except ValueError:
+                pass
+
+        include_q = str(st.query_params.get("ac_include_without_desc", "")).strip().lower()
+        if include_q in {"true", "1", "yes", "y"}:
+            st.session_state["ac_include_without_desc"] = True
+        elif include_q in {"false", "0", "no", "n"}:
+            st.session_state["ac_include_without_desc"] = False
+
+        nodes_q = [n.strip() for n in st.query_params.get_all("ac_nodes") if str(n).strip()]
+        if nodes_q:
+            st.session_state["ac_selected_nodes_query"] = nodes_q
+
+        st.session_state["ac_query_hydrated"] = True
+
     # Пролог
     top_left, top_right = st.columns([1, 1])
     with top_left:
@@ -516,6 +552,13 @@ def render_articles_comparison_tab(
         st.session_state["ac_selected_options"] = []
         if selected_roots:
             st.session_state["ac_selected_options"] = [r for r in selected_roots if r in options]
+    if "ac_selected_options_query" in st.session_state:
+        raw_people = st.session_state.get("ac_selected_options_query", [])
+        valid_people = [p for p in raw_people if p in options]
+        st.session_state["ac_selected_options"] = valid_people
+        if len(valid_people) >= 2:
+            st.session_state["ac_run_state"] = True
+        st.session_state.pop("ac_selected_options_query", None)
 
     selected_options = st.multiselect(
         "Выберите руководителей научных школ (минимум 2)",
@@ -579,6 +622,12 @@ def render_articles_comparison_tab(
         # Добавляем специальные опции в начало
         node_options = [SPECIAL_OPTION_ALL, SPECIAL_OPTION_YEAR, *codes_for_display]
 
+        if "ac_selected_nodes_query" in st.session_state:
+            raw_nodes = st.session_state.get("ac_selected_nodes_query", [])
+            valid_nodes = [n for n in raw_nodes if n in node_options]
+            st.session_state["ac_selected_nodes"] = valid_nodes
+            st.session_state.pop("ac_selected_nodes_query", None)
+
         # Форматирование опций для отображения
         def format_option(x):
             if x == SPECIAL_OPTION_ALL:
@@ -603,9 +652,11 @@ def render_articles_comparison_tab(
         )
 
         run_clicked = st.button("🚀 Запустить сравнительный анализ", type="primary", key="ac_run_btn")
+        if run_clicked:
+            st.session_state["ac_run_state"] = True
 
     # Проверка неоднозначностей
-    if run_clicked or st.session_state.get("ac_run_after_disambiguation", False):
+    if run_clicked or st.session_state.get("ac_run_after_disambiguation", False) or st.session_state.get("ac_run_state", False):
         st.session_state["ac_run_after_disambiguation"] = False
 
         if st.session_state.get("ac_abort", False):
@@ -769,3 +820,15 @@ def render_articles_comparison_tab(
             rename = {"Article_id": "ID", "school": "Школа/Автор", "Authors": "Авторы", "Title": "Заголовок", "Year": "Год"}
             view_df = view_df.rename(columns=rename)
             st.dataframe(view_df, use_container_width=True, hide_index=True)
+
+        share_params_button(
+            {
+                "ac_people": selected_options,
+                "ac_scope": scope,
+                "ac_metric": metric_choice,
+                "ac_decay": decay_factor,
+                "ac_nodes": selected_nodes,
+                "ac_include_without_desc": include_without_desc,
+            },
+            key="ac_share",
+        )
