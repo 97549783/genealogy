@@ -214,11 +214,12 @@ def _collect_common_dissertations(
     source_school_filter: str = "Все",
 ) -> pd.DataFrame:
     """
-    Возвращает диссертации пересекающихся персон (члены одной школы,
-    выступавшие оппонентами в другой).
+    Возвращает «общие диссертации» для вкладки взаимосвязей школ:
+    диссертации школы B, где оппонентом выступал член школы A.
 
-    Берутся диссертации из «родной» школы человека (школа-источник в persons_df),
-    чтобы в результате показывались именно работы членов школы.
+    Иными словами, берутся именно диссертации-связи между школами
+    (автор одной школы, оппонент из другой), а не диссертации самих
+    пересекающихся персон.
     """
     if persons_df.empty:
         return pd.DataFrame()
@@ -232,23 +233,38 @@ def _collect_common_dissertations(
         return pd.DataFrame()
 
     rows: List[pd.DataFrame] = []
-    for school_name, group in filtered.groupby("Школа, к которой принадлежит человек"):
-        subset = school_subsets.get(school_name)
-        if subset is None or subset.empty or AUTHOR_COLUMN not in subset.columns:
+    for target_school, group in filtered.groupby("Школа, где он выступал оппонентом"):
+        subset = school_subsets.get(target_school)
+        if subset is None or subset.empty:
             continue
 
         persons_norm = {_norm(str(v)) for v in group["Имя"].dropna().astype(str)}
         if not persons_norm:
             continue
 
-        school_df = subset.copy()
-        school_df["_person_norm"] = school_df[AUTHOR_COLUMN].fillna("").astype(str).map(_norm)
-        school_df = school_df[school_df["_person_norm"].isin(persons_norm)].copy()
-        if school_df.empty:
+        target_df = subset.copy()
+        opponent_norm_cols: List[str] = []
+        for col in OPPONENT_COLUMNS:
+            if col in target_df.columns:
+                norm_col = f"__norm_{col}"
+                target_df[norm_col] = target_df[col].fillna("").astype(str).map(_norm)
+                opponent_norm_cols.append(norm_col)
+
+        if not opponent_norm_cols:
             continue
 
-        school_df["Своя школа"] = school_name
-        rows.append(school_df.drop(columns=["_person_norm"], errors="ignore"))
+        mask = pd.Series(False, index=target_df.index)
+        for norm_col in opponent_norm_cols:
+            mask = mask | target_df[norm_col].isin(persons_norm)
+
+        target_df = target_df[mask].copy()
+        if target_df.empty:
+            continue
+
+        target_df["Школа автора диссертации"] = target_school
+        source_schools = sorted(group["Школа, к которой принадлежит человек"].dropna().unique())
+        target_df["Школа оппонента"] = ", ".join(source_schools)
+        rows.append(target_df.drop(columns=opponent_norm_cols, errors="ignore"))
 
     if not rows:
         return pd.DataFrame()
