@@ -1,5 +1,5 @@
 # Файлы, генерируемые в рантайме — не должны перезаписываться при git pull
-feedback.csv
+data-nonsynchronized/
 
 # Python
 __pycache__/
