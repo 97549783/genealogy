@@ -38,6 +38,7 @@ from school_search import (
 )
 from utils.table_display import render_dissertations_widget
 from utils.tree_renderers import build_markmap_html
+from utils.urls import share_params_button
 
 
 # ==============================================================================
@@ -486,6 +487,13 @@ def render_school_search_tab(
     params_for_excel.update({str(k): str(v) for k, v in extra_params.items()})
 
     spinner_msg = f"Поиск по режиму \u00ab{mode_label}\u00bb в базе..."
+    share_params = {
+        "tab": "school_search",
+        "mode": search_mode,
+        "scope": scope,
+        "top_n": top_n,
+        **extra_params,
+    }
 
     # --------------------------------------------------------------------------
     # ГРУППА 1: По размеру школы
@@ -503,6 +511,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_total",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_total")
 
     elif search_mode == "members_in_period":
         with st.spinner(spinner_msg):
@@ -521,6 +531,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_period",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_period")
 
     elif search_mode == "members_in_year":
         year_val = extra_params["year"]
@@ -536,6 +548,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_year",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_year")
 
     elif search_mode == "depth":
         with st.spinner(spinner_msg):
@@ -550,6 +564,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_depth",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_depth")
 
     elif search_mode == "supervisor_rate":
         with st.spinner(spinner_msg):
@@ -564,6 +580,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_suprate",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_suprate")
 
     # --------------------------------------------------------------------------
     # ГРУППА 2: По географии
@@ -582,6 +600,8 @@ def render_school_search_tab(
             matched_map=matched_map, key_prefix="ss_city",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_city")
 
     elif search_mode == "geo_diversity":
         with st.spinner(spinner_msg):
@@ -596,6 +616,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_geo",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_geo")
 
     # --------------------------------------------------------------------------
     # ГРУППА 3: По организациям
@@ -614,6 +636,8 @@ def render_school_search_tab(
             matched_map=matched_map, key_prefix="ss_org_prep",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_org_prep")
 
     elif search_mode == "org_defense":
         with st.spinner(spinner_msg):
@@ -629,6 +653,8 @@ def render_school_search_tab(
             matched_map=matched_map, key_prefix="ss_org_def",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_org_def")
 
     elif search_mode == "org_leading":
         with st.spinner(spinner_msg):
@@ -644,6 +670,8 @@ def render_school_search_tab(
             matched_map=matched_map, key_prefix="ss_org_lead",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_org_lead")
 
     # --------------------------------------------------------------------------
     # ГРУППА 4: По тематике
@@ -667,6 +695,8 @@ def render_school_search_tab(
             matched_map=None, key_prefix="ss_cls",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_cls")
 
     # --------------------------------------------------------------------------
     # ГРУППА 5: По персонам
@@ -687,6 +717,8 @@ def render_school_search_tab(
             matched_map=matched_map, key_prefix="ss_opp",
             search_mode=mode_label, search_params=params_for_excel,
         )
+        if not result_df.empty:
+            share_params_button(share_params, key="school_search_share_opp")
 
     elif search_mode == "member":
         with st.spinner(spinner_msg):
@@ -762,3 +794,4 @@ def render_school_search_tab(
                 expanded=False,
                 file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
             )
+        share_params_button(share_params, key="school_search_share_member")

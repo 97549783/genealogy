@@ -70,6 +70,7 @@ import streamlit as st
 
 from utils.graph import lineage, rows_for
 from utils.names import norm as _norm
+from utils.urls import share_params_button
 
 # ---------------------------------------------------------------------------
 #  Константы
@@ -438,6 +439,15 @@ def render_opponents_intersection_tab(
             mime="text/csv",
             key="opponents_intersection_download_csv",
         )
+
+    share_params_button(
+        {
+            "tab": "opponents_intersection",
+            "schools": selected_schools,
+            "scope": selected_scope,
+        },
+        key="opponents_intersection_share",
+    )
 
 
 def _cache_key(selected_schools: List[str], scope: str) -> str:

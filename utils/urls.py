@@ -15,7 +15,7 @@ utils/urls.py — формирование URL для функции «Поде�
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 from urllib.parse import urlencode, urlsplit
 
 import streamlit as st
@@ -125,6 +125,25 @@ def _base_url_from_options() -> Optional[str]:
 # Публичный API
 # ---------------------------------------------------------------------------
 
+QueryValue = Union[str, int, float, List[Union[str, int, float]], tuple]
+
+
+def _normalize_query_params(params: Dict[str, QueryValue]) -> List[tuple[str, str]]:
+    normalized: List[tuple[str, str]] = []
+    for key, raw_value in params.items():
+        if raw_value is None:
+            continue
+        if isinstance(raw_value, (list, tuple)):
+            values = [str(v).strip() for v in raw_value if str(v).strip()]
+            for value in values:
+                normalized.append((str(key), value))
+            continue
+        value = str(raw_value).strip()
+        if value:
+            normalized.append((str(key), value))
+    return normalized
+
+
 def build_share_url(names: List[str]) -> str:
     """Формирует URL с параметрами ?root=... для функции «Поделиться»."""
     params = urlencode([("root", n) for n in names])
@@ -137,20 +156,39 @@ def build_share_url(names: List[str]) -> str:
     return f"{base_url}{query}" if base_url else query
 
 
-def share_button(names: List[str], key: str) -> None:
-    """Кнопка «🔗 Поделиться» — открывает диалог с URL."""
+def build_share_url_from_params(params: Dict[str, QueryValue]) -> str:
+    """Формирует URL с произвольными query-параметрами для шаринга результатов."""
+    normalized = _normalize_query_params(params)
+    encoded_params = urlencode(normalized)
+    query = f"?{encoded_params}" if encoded_params else ""
+    base_url = (
+        _configured_base_url()
+        or _base_url_from_headers()
+        or _base_url_from_options()
+    )
+    return f"{base_url}{query}" if base_url else query
+
+
+def share_params_button(params: Dict[str, QueryValue], key: str) -> None:
+    """Кнопка «🔗 Поделиться» для произвольных query-параметров."""
     @st.dialog("Ссылка для доступа")
     def _show_dialog(url: str) -> None:
         st.text_input("URL", url, key=f"share_url_{key}")
 
     if st.button("🔗 Поделиться", key=key):
+        normalized = _normalize_query_params(params)
         try:
             st.query_params.clear()
-            st.query_params["root"] = names
+            grouped: Dict[str, List[str]] = {}
+            for q_key, q_val in normalized:
+                grouped.setdefault(q_key, []).append(q_val)
+            for q_key, q_vals in grouped.items():
+                st.query_params[q_key] = q_vals if len(q_vals) > 1 else q_vals[0]
         except Exception:
-            try:
-                st.experimental_set_query_params(root=names)  # type: ignore
-            except Exception:
-                pass
-        url = build_share_url(names)
-        _show_dialog(url)
+            pass
+        _show_dialog(build_share_url_from_params(params))
+
+
+def share_button(names: List[str], key: str) -> None:
+    """Кнопка «🔗 Поделиться» — открывает диалог с URL."""
+    share_params_button({"root": names}, key=key)

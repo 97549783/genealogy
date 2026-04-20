@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
+from utils.urls import share_params_button
+
 from utils.graph import lineage, rows_for
 
 # Безопасные импорты с fallback
@@ -406,6 +408,14 @@ def render_search_by_topics(
             st.markdown("## 📊 Результаты поиска")
 
             st.success(f"✅ Найдено диссертаций: {len(display_df)}")
+            share_params_button(
+                {
+                    "tab": "profiles",
+                    "codes": selected_codes,
+                    "min_score": min_score,
+                },
+                key="profiles_share_results",
+            )
 
             # Фильтр по таблице
             st.markdown("### 🔍 Фильтр по таблице")
