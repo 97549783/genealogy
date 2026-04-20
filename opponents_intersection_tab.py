@@ -70,6 +70,7 @@ import streamlit as st
 
 from utils.graph import lineage, rows_for
 from utils.names import norm as _norm
+from utils.table_display import render_dissertations_widget
 from utils.urls import share_params_button
 
 # ---------------------------------------------------------------------------
@@ -206,6 +207,61 @@ def compute_intersection_analysis(
 
     return raw_df, jaccard_df, m_share_df, o_share_df, stats_df, persons_df
 
+
+def _collect_common_dissertations(
+    school_subsets: Dict[str, pd.DataFrame],
+    persons_df: pd.DataFrame,
+    source_school_filter: str = "Все",
+) -> pd.DataFrame:
+    """
+    Возвращает диссертации пересекающихся персон (члены одной школы,
+    выступавшие оппонентами в другой).
+
+    Берутся диссертации из «родной» школы человека (школа-источник в persons_df),
+    чтобы в результате показывались именно работы членов школы.
+    """
+    if persons_df.empty:
+        return pd.DataFrame()
+
+    filtered = persons_df
+    if source_school_filter != "Все":
+        filtered = filtered[
+            filtered["Школа, к которой принадлежит человек"] == source_school_filter
+        ]
+    if filtered.empty:
+        return pd.DataFrame()
+
+    rows: List[pd.DataFrame] = []
+    for school_name, group in filtered.groupby("Школа, к которой принадлежит человек"):
+        subset = school_subsets.get(school_name)
+        if subset is None or subset.empty or AUTHOR_COLUMN not in subset.columns:
+            continue
+
+        persons_norm = {_norm(str(v)) for v in group["Имя"].dropna().astype(str)}
+        if not persons_norm:
+            continue
+
+        school_df = subset.copy()
+        school_df["_person_norm"] = school_df[AUTHOR_COLUMN].fillna("").astype(str).map(_norm)
+        school_df = school_df[school_df["_person_norm"].isin(persons_norm)].copy()
+        if school_df.empty:
+            continue
+
+        school_df["Своя школа"] = school_name
+        rows.append(school_df.drop(columns=["_person_norm"], errors="ignore"))
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = pd.concat(rows, ignore_index=True)
+    dedup_keys = [c for c in ("Code", "candidate_name", "title", "year") if c in result.columns]
+    if dedup_keys:
+        result = result.drop_duplicates(subset=dedup_keys)
+    else:
+        result = result.drop_duplicates()
+
+    return result.reset_index(drop=True)
+
 # ---------------------------------------------------------------------------
 #  Основная функция вкладки Streamlit
 # ---------------------------------------------------------------------------
@@ -329,6 +385,7 @@ def render_opponents_intersection_tab(
     if run_clicked or st.session_state.get("opponents_intersection_run_state", False) or cache_key not in st.session_state:
         with st.spinner("Собираем множества членов и оппонентов..."):
             school_data: Dict[str, Tuple[Set[str], Set[str]]] = {}
+            school_subsets: Dict[str, pd.DataFrame] = {}
             info_rows = []
             progress = st.progress(0)
             for i, school_name in enumerate(selected_schools):
@@ -337,6 +394,7 @@ def render_opponents_intersection_tab(
                 )
                 opponents = _collect_opponents(subset)
                 school_data[school_name] = (members, opponents)
+                school_subsets[school_name] = subset
                 info_rows.append({
                     "Научная школа": school_name,
                     "Диссертаций в школе": len(subset),
@@ -345,9 +403,14 @@ def render_opponents_intersection_tab(
                 })
                 progress.progress((i + 1) / len(selected_schools))
             progress.empty()
-            st.session_state[cache_key] = (school_data, info_rows)
+            st.session_state[cache_key] = (school_data, info_rows, school_subsets)
 
-    school_data, info_rows = st.session_state[cache_key]
+    cached_value = st.session_state[cache_key]
+    if len(cached_value) == 3:
+        school_data, info_rows, school_subsets = cached_value
+    else:
+        school_data, info_rows = cached_value
+        school_subsets = {}
 
     # Краткая сводка по школам
     st.markdown("### Что входит в каждую школу")
@@ -426,6 +489,19 @@ def render_opponents_intersection_tab(
         if filter_source != "Все":
             display_df = display_df[display_df["Школа, к которой принадлежит человек"] == filter_source]
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        common_dissertations_df = _collect_common_dissertations(
+            school_subsets=school_subsets,
+            persons_df=persons_df,
+            source_school_filter=filter_source,
+        )
+        render_dissertations_widget(
+            subset=common_dissertations_df,
+            key="opponents_intersection_common_dissertations",
+            title="Общие диссертации",
+            expanded=False,
+            file_name_prefix="общие_диссертации_взаимосвязей_школ",
+        )
 
     # --- Скачивание ---
     st.markdown("---")
