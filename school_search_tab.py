@@ -540,6 +540,7 @@ def render_school_search_tab(
 
     spinner_msg = f"Поиск по режиму \u00ab{mode_label}\u00bb в базе..."
     share_params = {
+        "tab": "school_search",
         "mode": search_mode,
         "scope": scope,
         "top_n": top_n,

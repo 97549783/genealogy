@@ -199,6 +199,13 @@ def share_params_button(params: Dict[str, QueryValue], key: str) -> None:
         _show_dialog(build_share_url_from_params(params))
 
 
-def share_button(names: List[str], key: str) -> None:
+def share_button(
+    names: List[str],
+    key: str,
+    extra_params: Optional[Dict[str, QueryValue]] = None,
+) -> None:
     """Кнопка «🔗 Поделиться» — открывает диалог с URL."""
-    share_params_button({"root": names}, key=key)
+    params: Dict[str, QueryValue] = {"root": names}
+    if extra_params:
+        params.update(extra_params)
+    share_params_button(params, key=key)

@@ -278,4 +278,4 @@ def render_school_trees_tab(
         )
 
     st.markdown("---")
-    share_button(roots, key="lineages_share")
+    share_button(roots, key="lineages_share", extra_params={"tab": "lineages"})
