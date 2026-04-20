@@ -1,0 +1,1 @@
+from school_search_tab import render_school_search_tab

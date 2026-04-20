@@ -1,0 +1,1 @@
+from opponents_intersection_tab import render_opponents_intersection_tab

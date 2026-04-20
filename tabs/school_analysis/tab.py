@@ -1,0 +1,1 @@
+from school_analysis_tab import render_school_analysis_tab
