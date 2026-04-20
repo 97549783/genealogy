@@ -14,6 +14,7 @@ import streamlit as st
 
 from utils.graph import lineage, rows_for
 from utils.ui import download_data_dialog
+from utils.urls import share_params_button
 from school_comparison import (
     DistanceMetric,
     ComparisonScope,
@@ -336,6 +337,17 @@ def render_school_comparison_tab(
     st.markdown("---")
 
     ready_to_run = not (basis_choice == "selected" and not selected_nodes)
+    share_params_button(
+        {
+            "school_comp_schools": selected_schools,
+            "school_comp_scope": selected_scope,
+            "school_comp_metric": selected_metric,
+            "school_comp_basis": basis_choice,
+            "school_comp_nodes": selected_nodes,
+            "school_comp_decay": decay_factor,
+        },
+        key="school_comp_share",
+    )
 
     # =========================================================================
     # ЗАПУСК АНАЛИЗА

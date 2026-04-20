@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.graph import lineage
+from utils.urls import share_params_button
 from articles_comparison import (
     DistanceMetric,
     DISTANCE_METRIC_LABELS,
@@ -600,6 +601,18 @@ def render_articles_comparison_tab(
                 "При выборе узла автоматически включаются все его подузлы. "
                 "Например, выбрав '1.1 Образовательная среда', вы включите все коды 1.1.1, 1.1.1.1, 1.1.1.2 и т.д."
             ),
+        )
+
+        share_params_button(
+            {
+                "ac_people": selected_options,
+                "ac_scope": scope,
+                "ac_metric": metric_choice,
+                "ac_decay": decay_factor,
+                "ac_nodes": selected_nodes,
+                "ac_include_without_desc": include_without_desc,
+            },
+            key="ac_share",
         )
 
         run_clicked = st.button("🚀 Запустить сравнительный анализ", type="primary", key="ac_run_btn")

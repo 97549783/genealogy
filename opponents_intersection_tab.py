@@ -261,6 +261,21 @@ def render_opponents_intersection_tab(
         st.error("В данных не найдены научные руководители.")
         return
 
+    if not st.session_state.get("opponents_intersection_query_hydrated", False):
+        schools_q = [s.strip() for s in st.query_params.get_all("schools") if str(s).strip()]
+        if schools_q:
+            valid_schools = [s for s in schools_q if s in all_supervisors_sorted]
+            if len(valid_schools) >= 2:
+                st.session_state["opponents_intersection_schools"] = valid_schools
+                st.session_state["opponents_intersection_run_state"] = True
+
+        scope_q = str(st.query_params.get("scope", "")).strip()
+        scope_options = list(SCOPE_LABELS.keys())
+        if scope_q in scope_options:
+            st.session_state["opponents_intersection_scope"] = scope_options.index(scope_q)
+
+        st.session_state["opponents_intersection_query_hydrated"] = True
+
     selected_schools = st.multiselect(
         "Выберите научных руководителей (≥ 2)",
         options=all_supervisors_sorted,
@@ -303,12 +318,15 @@ def render_opponents_intersection_tab(
                 del st.session_state[cache_key]
             st.rerun()
 
+    if run_clicked:
+        st.session_state["opponents_intersection_run_state"] = True
+
     cache_key = _cache_key(selected_schools, selected_scope)
-    if not run_clicked and cache_key not in st.session_state:
+    if not st.session_state.get("opponents_intersection_run_state", False) and cache_key not in st.session_state:
         return
 
     # --- Сбор данных с кэшированием ---
-    if run_clicked or cache_key not in st.session_state:
+    if run_clicked or st.session_state.get("opponents_intersection_run_state", False) or cache_key not in st.session_state:
         with st.spinner("Собираем множества членов и оппонентов..."):
             school_data: Dict[str, Tuple[Set[str], Set[str]]] = {}
             info_rows = []
