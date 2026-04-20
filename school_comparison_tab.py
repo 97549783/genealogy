@@ -152,6 +152,41 @@ def render_school_comparison_tab(
     if classifier_labels is None:
         classifier_labels = {}
 
+    if not st.session_state.get("school_comp_query_hydrated", False):
+        schools_q = [s.strip() for s in st.query_params.get_all("school_comp_schools") if str(s).strip()]
+        if schools_q:
+            st.session_state["school_comp_selection"] = schools_q
+            if len(schools_q) >= 2:
+                st.session_state["school_comp_run_state"] = True
+
+        scope_q = str(st.query_params.get("school_comp_scope", "")).strip()
+        if scope_q in SCOPE_LABELS:
+            scope_options = list(SCOPE_LABELS.keys())
+            st.session_state["school_comp_scope"] = scope_options.index(scope_q)
+
+        metric_q = str(st.query_params.get("school_comp_metric", "")).strip()
+        metric_options = list(DISTANCE_METRIC_LABELS.keys())
+        if metric_q in metric_options:
+            st.session_state["school_comp_metric"] = metric_options.index(metric_q)
+
+        basis_q = str(st.query_params.get("school_comp_basis", "")).strip()
+        if basis_q in {"full", "selected"}:
+            st.session_state["school_comp_basis_choice"] = basis_q
+
+        nodes_q = [n.strip() for n in st.query_params.get_all("school_comp_nodes") if str(n).strip()]
+        if nodes_q:
+            st.session_state["school_comp_nodes_prefill"] = nodes_q
+
+        decay_q = str(st.query_params.get("school_comp_decay", "")).strip()
+        if decay_q:
+            try:
+                decay_val = float(decay_q)
+                if 0.1 <= decay_val <= 0.9:
+                    st.session_state["school_comp_decay"] = decay_val
+            except ValueError:
+                pass
+        st.session_state["school_comp_query_hydrated"] = True
+
     # --- Кнопка инструкции ---
     if st.button("📖 Инструкция", key="instruction_school_comparison"):
         show_instruction_dialog()
@@ -286,9 +321,13 @@ def render_school_comparison_tab(
                     cols_l1 = st.columns(min(4, len(level1_nodes)))
                     for i, node in enumerate(level1_nodes):
                         with cols_l1[i % len(cols_l1)]:
+                            node_prefill = st.session_state.get("school_comp_nodes_prefill", [])
+                            node_key = f"node_l1_{node}"
+                            if node in node_prefill and node_key not in st.session_state:
+                                st.session_state[node_key] = True
                             label = classifier_labels.get(node, "")
                             display = f"{node}" + (f" — {label}" if label else "")
-                            if st.checkbox(display, key=f"node_l1_{node}"):
+                            if st.checkbox(display, key=node_key):
                                 selected_nodes.append(node)
 
                 if level2_nodes:
@@ -296,9 +335,13 @@ def render_school_comparison_tab(
                         cols_l2 = st.columns(3)
                         for i, node in enumerate(level2_nodes):
                             with cols_l2[i % 3]:
+                                node_prefill = st.session_state.get("school_comp_nodes_prefill", [])
+                                node_key = f"node_l2_{node}"
+                                if node in node_prefill and node_key not in st.session_state:
+                                    st.session_state[node_key] = True
                                 label = classifier_labels.get(node, "")
                                 display = f"{node}" + (f" ({label})" if label else "")
-                                if st.checkbox(display, key=f"node_l2_{node}"):
+                                if st.checkbox(display, key=node_key):
                                     selected_nodes.append(node)
 
                 if level3_nodes:
@@ -306,9 +349,13 @@ def render_school_comparison_tab(
                         cols_l3 = st.columns(3)
                         for i, node in enumerate(level3_nodes):
                             with cols_l3[i % 3]:
+                                node_prefill = st.session_state.get("school_comp_nodes_prefill", [])
+                                node_key = f"node_l3_{node}"
+                                if node in node_prefill and node_key not in st.session_state:
+                                    st.session_state[node_key] = True
                                 label = classifier_labels.get(node, "")
                                 display = f"{node}" + (f" ({label})" if label else "")
-                                if st.checkbox(display, key=f"node_l3_{node}"):
+                                if st.checkbox(display, key=node_key):
                                     selected_nodes.append(node)
 
                 if selected_nodes:
@@ -337,27 +384,25 @@ def render_school_comparison_tab(
     st.markdown("---")
 
     ready_to_run = not (basis_choice == "selected" and not selected_nodes)
-    share_params_button(
-        {
-            "school_comp_schools": selected_schools,
-            "school_comp_scope": selected_scope,
-            "school_comp_metric": selected_metric,
-            "school_comp_basis": basis_choice,
-            "school_comp_nodes": selected_nodes,
-            "school_comp_decay": decay_factor,
-        },
-        key="school_comp_share",
-    )
 
     # =========================================================================
     # ЗАПУСК АНАЛИЗА
     # =========================================================================
-    if st.button(
+    run_clicked = st.button(
         "🚀 Запустить анализ",
         key="school_comp_run",
         type="primary",
         disabled=not ready_to_run
-    ):
+    )
+    if run_clicked:
+        st.session_state["school_comp_run_state"] = True
+
+    run_requested = run_clicked or (
+        st.session_state.get("school_comp_run_state", False)
+        and st.session_state.get(_RESULTS_KEY) is None
+    )
+
+    if run_requested:
         datasets: Dict[str, pd.DataFrame] = {}
         missing_info_all: Dict[str, pd.DataFrame] = {}
         stats_info = []
@@ -641,3 +686,15 @@ def render_school_comparison_tab(
                 st.dataframe(show_df, use_container_width=True, hide_index=True)
                 if len(missing_df) > 20:
                     st.caption(f"… и ещё {len(missing_df) - 20}")
+
+    share_params_button(
+        {
+            "school_comp_schools": selected_schools,
+            "school_comp_scope": selected_scope,
+            "school_comp_metric": selected_metric,
+            "school_comp_basis": basis_choice,
+            "school_comp_nodes": selected_nodes or [],
+            "school_comp_decay": decay_factor,
+        },
+        key="school_comp_share",
+    )

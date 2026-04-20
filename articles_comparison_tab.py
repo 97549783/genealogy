@@ -479,6 +479,43 @@ def render_articles_comparison_tab(
     if classifier_labels is None:
         classifier_labels = load_articles_classifier()
 
+    if not st.session_state.get("ac_query_hydrated", False):
+        people_q = [p.strip() for p in st.query_params.get_all("ac_people") if str(p).strip()]
+        if people_q:
+            st.session_state["ac_selected_options"] = people_q
+            if len(people_q) >= 2:
+                st.session_state["ac_run_state"] = True
+
+        scope_q = str(st.query_params.get("ac_scope", "")).strip()
+        if scope_q in {"direct", "all"}:
+            st.session_state["ac_scope"] = scope_q
+
+        metric_q = str(st.query_params.get("ac_metric", "")).strip()
+        metric_options = list(DISTANCE_METRIC_LABELS.keys())
+        if metric_q in metric_options:
+            st.session_state["ac_metric"] = metric_options.index(metric_q)
+
+        decay_q = str(st.query_params.get("ac_decay", "")).strip()
+        if decay_q:
+            try:
+                decay_val = float(decay_q)
+                if 0.0 <= decay_val <= 1.0:
+                    st.session_state["ac_decay_factor"] = decay_val
+            except ValueError:
+                pass
+
+        include_q = str(st.query_params.get("ac_include_without_desc", "")).strip().lower()
+        if include_q in {"true", "1", "yes", "y"}:
+            st.session_state["ac_include_without_desc"] = True
+        elif include_q in {"false", "0", "no", "n"}:
+            st.session_state["ac_include_without_desc"] = False
+
+        nodes_q = [n.strip() for n in st.query_params.get_all("ac_nodes") if str(n).strip()]
+        if nodes_q:
+            st.session_state["ac_selected_nodes"] = nodes_q
+
+        st.session_state["ac_query_hydrated"] = True
+
     # Пролог
     top_left, top_right = st.columns([1, 1])
     with top_left:
@@ -603,22 +640,12 @@ def render_articles_comparison_tab(
             ),
         )
 
-        share_params_button(
-            {
-                "ac_people": selected_options,
-                "ac_scope": scope,
-                "ac_metric": metric_choice,
-                "ac_decay": decay_factor,
-                "ac_nodes": selected_nodes,
-                "ac_include_without_desc": include_without_desc,
-            },
-            key="ac_share",
-        )
-
         run_clicked = st.button("🚀 Запустить сравнительный анализ", type="primary", key="ac_run_btn")
+        if run_clicked:
+            st.session_state["ac_run_state"] = True
 
     # Проверка неоднозначностей
-    if run_clicked or st.session_state.get("ac_run_after_disambiguation", False):
+    if run_clicked or st.session_state.get("ac_run_after_disambiguation", False) or st.session_state.get("ac_run_state", False):
         st.session_state["ac_run_after_disambiguation"] = False
 
         if st.session_state.get("ac_abort", False):
@@ -782,3 +809,15 @@ def render_articles_comparison_tab(
             rename = {"Article_id": "ID", "school": "Школа/Автор", "Authors": "Авторы", "Title": "Заголовок", "Year": "Год"}
             view_df = view_df.rename(columns=rename)
             st.dataframe(view_df, use_container_width=True, hide_index=True)
+
+        share_params_button(
+            {
+                "ac_people": selected_options,
+                "ac_scope": scope,
+                "ac_metric": metric_choice,
+                "ac_decay": decay_factor,
+                "ac_nodes": selected_nodes,
+                "ac_include_without_desc": include_without_desc,
+            },
+            key="ac_share",
+        )
