@@ -46,28 +46,6 @@ TAB_SPECS: List[Tuple[str, str]] = [
 TAB_ID_TO_LABEL: Dict[str, str] = dict(TAB_SPECS)
 TAB_LABEL_TO_ID: Dict[str, str] = {label: tab_id for tab_id, label in TAB_SPECS}
 DEFAULT_TAB_ID = "lineages"
-MAIN_TABS_STATE_KEY = "main_tabs"
-
-
-def _resolve_active_tab_label(fallback_label: str) -> str:
-    state = st.session_state.get(MAIN_TABS_STATE_KEY)
-    if isinstance(state, str) and state in TAB_LABEL_TO_ID:
-        return state
-    if isinstance(state, int) and 0 <= state < len(TAB_SPECS):
-        return TAB_SPECS[state][1]
-    if isinstance(state, dict):
-        selected = state.get("selected") or state.get("value") or state.get("label")
-        if isinstance(selected, str) and selected in TAB_LABEL_TO_ID:
-            return selected
-        if isinstance(selected, int) and 0 <= selected < len(TAB_SPECS):
-            return TAB_SPECS[selected][1]
-    return fallback_label
-
-
-def _sync_active_tab_query_param(active_label: str) -> None:
-    active_tab_id = TAB_LABEL_TO_ID.get(active_label, DEFAULT_TAB_ID)
-    if st.query_params.get("tab") != active_tab_id:
-        st.query_params["tab"] = active_tab_id
 
 # ---------------------- Тематический классификатор -----------------------
 # (остаётся здесь, т.к. используется в нескольких вкладках напрямую и
@@ -341,12 +319,8 @@ requested_tab_label = TAB_ID_TO_LABEL[requested_tab_id]
 ) = st.tabs(
     [label for _, label in TAB_SPECS],
     default=requested_tab_label,
-    key=MAIN_TABS_STATE_KEY,
-    on_change="rerun",
 )
 
-active_tab_label = _resolve_active_tab_label(requested_tab_label)
-_sync_active_tab_query_param(active_tab_label)
 
 # ---------- Вкладка: Построение деревьев ---------------------------------
 with tab_lineages:
