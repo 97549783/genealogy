@@ -622,6 +622,12 @@ def render_articles_comparison_tab(
         # Добавляем специальные опции в начало
         node_options = [SPECIAL_OPTION_ALL, SPECIAL_OPTION_YEAR, *codes_for_display]
 
+        if "ac_selected_nodes_query" in st.session_state:
+            raw_nodes = st.session_state.get("ac_selected_nodes_query", [])
+            valid_nodes = [n for n in raw_nodes if n in node_options]
+            st.session_state["ac_selected_nodes"] = valid_nodes
+            st.session_state.pop("ac_selected_nodes_query", None)
+
         # Форматирование опций для отображения
         def format_option(x):
             if x == SPECIAL_OPTION_ALL:
@@ -644,12 +650,6 @@ def render_articles_comparison_tab(
                 "Например, выбрав '1.1 Образовательная среда', вы включите все коды 1.1.1, 1.1.1.1, 1.1.1.2 и т.д."
             ),
         )
-        if "ac_selected_nodes_query" in st.session_state:
-            raw_nodes = st.session_state.get("ac_selected_nodes_query", [])
-            valid_nodes = [n for n in raw_nodes if n in node_options]
-            st.session_state["ac_selected_nodes"] = valid_nodes
-            st.session_state.pop("ac_selected_nodes_query", None)
-            selected_nodes = valid_nodes
 
         run_clicked = st.button("🚀 Запустить сравнительный анализ", type="primary", key="ac_run_btn")
         if run_clicked:
