@@ -1,4 +1,4 @@
-"""Compatibility shim for legacy imports."""
+"""Совместимый модуль-обёртка для старых импортов."""
 
 from tabs.profiles.search import (
     DEFAULT_MIN_SCORE,

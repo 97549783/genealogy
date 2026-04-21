@@ -24,6 +24,7 @@ from typing import List
 
 import pandas as pd
 import streamlit as st
+from core.db import load_scores_from_folder
 
 # ---------------------------------------------------------------------------
 # Константы путей и колонок
@@ -62,37 +63,6 @@ def _load_from_csv() -> pd.DataFrame:
         for f in files
     ]
     return pd.concat(frames, ignore_index=True)
-
-
-def _load_basic_scores_from_csv() -> pd.DataFrame:
-    """Читает CSV с тематическими профилями из BASIC_SCORES_DIR."""
-    base = Path(BASIC_SCORES_DIR).expanduser().resolve()
-    files = sorted(base.glob("*.csv"))
-    if not files:
-        raise FileNotFoundError(
-            f"В {base} не найдено CSV с тематическими профилями"
-        )
-    frames = []
-    for file in files:
-        frame = pd.read_csv(file)
-        if "Code" not in frame.columns:
-            raise KeyError(f"В файле {file.name} нет столбца 'Code'")
-        frames.append(frame)
-
-    scores = pd.concat(frames, ignore_index=True)
-    scores = scores.dropna(subset=["Code"])
-    scores["Code"] = scores["Code"].astype(str).str.strip()
-    scores = scores[scores["Code"].str.len() > 0]
-    scores = scores.drop_duplicates(subset="Code", keep="first")
-
-    feature_columns = [c for c in scores.columns if c != "Code"]
-    if not feature_columns:
-        raise ValueError("Не найдены столбцы с тематическими компонентами")
-    scores[feature_columns] = scores[feature_columns].apply(
-        pd.to_numeric, errors="coerce"
-    )
-    scores[feature_columns] = scores[feature_columns].fillna(0.0)
-    return scores
 
 
 # ---------------------------------------------------------------------------
@@ -151,4 +121,4 @@ def load_basic_scores() -> pd.DataFrame:
     if _USE_SQLITE:
         # return _load_basic_scores_from_sqlite()  # раскомментировать после миграции
         raise NotImplementedError("SQLite-загрузчик ещё не реализован")
-    return _load_basic_scores_from_csv()
+    return load_scores_from_folder(BASIC_SCORES_DIR)
