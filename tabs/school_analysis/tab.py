@@ -13,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+from core.people import get_unique_supervisors
 
 from utils.graph import lineage, rows_for
 from utils.urls import share_params_button
@@ -55,13 +56,7 @@ def _get_all_supervisors(df: pd.DataFrame) -> List[str]:
         col for col in df.columns
         if "supervisor" in col.lower() and "name" in col.lower()
     ]
-    all_supervisors: Set[str] = set()
-    for col in supervisor_cols:
-        if col in df.columns:
-            all_supervisors.update(
-                str(v).strip() for v in df[col].dropna().unique() if str(v).strip()
-            )
-    return sorted(all_supervisors)
+    return get_unique_supervisors(df, supervisor_columns=supervisor_cols)
 
 
 def _scores_folder_available(scores_folder: str) -> bool:

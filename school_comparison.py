@@ -1,4 +1,4 @@
-"""Compatibility shim for legacy imports."""
+"""Совместимый модуль-обёртка для старых импортов."""
 
 from tabs.school_comparison.comparison import (
     DistanceMetric,

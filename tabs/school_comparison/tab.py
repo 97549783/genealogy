@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Set
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+from core.people import get_unique_supervisors
 
 from utils.graph import lineage, rows_for
 from utils.ui import download_data_dialog
@@ -109,15 +110,7 @@ def get_all_supervisors(df: pd.DataFrame) -> List[str]:
         col for col in df.columns
         if "supervisor" in col.lower() and "name" in col.lower()
     ]
-
-    all_supervisors: Set[str] = set()
-    for col in supervisor_cols:
-        all_supervisors.update(
-            str(v).strip() for v in df[col].dropna().unique()
-            if str(v).strip()
-        )
-
-    return sorted(all_supervisors)
+    return get_unique_supervisors(df, supervisor_columns=supervisor_cols)
 
 
 def show_instruction_dialog() -> None:
@@ -139,16 +132,7 @@ def render_school_comparison_tab(
     specific_files: Optional[List[str]] = None,
     classifier_labels: Optional[Dict[str, str]] = None,
 ) -> None:
-    """
-    Отрисовывает вкладку сравнения научных школ.
-
-    Args:
-        df: Основной DataFrame с диссертациями
-        idx: Индекс для поиска по именам
-        scores_folder: Папка с CSV-профилями
-        specific_files: Список конкретных CSV-файлов (None = все из папки)
-        classifier_labels: Словарь {код: название} для подписей узлов
-    """
+    """Отрисовывает вкладку сравнения научных школ."""
     if classifier_labels is None:
         classifier_labels = {}
 
