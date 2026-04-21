@@ -15,8 +15,6 @@ from core.classifier.helpers import classifier_format
 from utils.urls import share_params_button
 
 from .search import (
-    DEFAULT_MIN_SCORE,
-    SELECTION_LIMIT,
     build_export_df,
     classifier_label,
     format_results_for_display,
@@ -104,9 +102,9 @@ def render_search_by_topics(
 
     st.subheader("🔍 Поиск по конкретным темам")
     st.write(
-        f"Выберите до {SELECTION_LIMIT} пунктов классификатора. "
+        f"Выберите до {PROFILE_SELECTION_LIMIT} пунктов классификатора. "
         f"Поиск найдет диссертации, где каждая выбранная тема оценена не менее "
-        f"чем на {DEFAULT_MIN_SCORE} баллов (по 10-балльной шкале)."
+        f"чем на {PROFILE_MIN_SCORE} баллов (по 10-балльной шкале)."
     )
 
     if PROFILE_SELECTION_SESSION_KEY not in st.session_state:
@@ -181,7 +179,7 @@ def render_search_by_topics(
         "Минимальный балл для каждой темы",
         min_value=1.0,
         max_value=10.0,
-        value=DEFAULT_MIN_SCORE,
+        value=PROFILE_MIN_SCORE,
         step=0.5,
         key="profile_min_score",
         help="Диссертации с баллом ниже этого порога по любой из выбранных тем будут исключены",
