@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
 
-from utils.graph import lineage, rows_for
-from utils.ui import download_data_dialog
-from utils.urls import share_params_button
+from core.lineage.graph import lineage, rows_for
+from core.ui.chrome import download_data_dialog
+from core.ui.links import share_params_button
 from .comparison import (
     DistanceMetric,
     ComparisonScope,

@@ -12,7 +12,7 @@ from core.classifier import (
     PROFILE_SELECTION_SESSION_KEY,
 )
 from core.classifier.helpers import classifier_format
-from utils.urls import share_params_button
+from core.ui.links import share_params_button
 
 from .search import (
     build_export_df,

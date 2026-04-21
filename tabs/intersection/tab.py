@@ -68,10 +68,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from utils.graph import lineage, rows_for
+from core.lineage.graph import lineage, rows_for
 from utils.names import norm as _norm
-from utils.table_display import render_dissertations_widget
-from utils.urls import share_params_button
+from core.ui.table_display import render_dissertations_widget
+from core.ui.links import share_params_button
 
 # ---------------------------------------------------------------------------
 #  Константы
