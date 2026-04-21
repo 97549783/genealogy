@@ -1,0 +1,22 @@
+"""Шапка приложения."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from core.ui.chrome import feedback_button
+
+
+def render_app_header() -> None:
+    """Отрисовывает заголовок, описание и кнопку обратной связи."""
+    header_left, header_right = st.columns([0.78, 0.22])
+    with header_left:
+        st.title("📚 Академическая генеалогия")
+        st.caption(
+            "Платформа для построения деревьев научного руководства, поиска и сравнения "
+            "диссертаций по содержательным и формальным критериям. В настоящий момент "
+            "основу базы данных составляют авторефераты диссертационных исследований "
+            "по педагогическим наукам с 1995 года."
+        )
+    with header_right:
+        feedback_button()

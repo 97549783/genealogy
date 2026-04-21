@@ -3,7 +3,6 @@ from .graph import (
     build_index,
     gather_school_dataset,
     lineage,
-    multiline,
     rows_for,
-    slug,
 )
+from .names import norm, variants

@@ -69,7 +69,7 @@ import pandas as pd
 import streamlit as st
 
 from core.lineage.graph import lineage, rows_for
-from utils.names import norm as _norm
+from core.lineage.names import norm as _norm
 from core.ui.table_display import render_dissertations_widget
 from core.ui.links import share_params_button
 

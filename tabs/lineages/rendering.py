@@ -1,5 +1,5 @@
 """
-school_trees.py — функции отрисовки деревьев научного руководства.
+tabs/lineages/rendering.py — функции отрисовки деревьев научного руководства.
 
 Публичный API:
     draw_matplotlib(G, root)   -> plt.Figure
@@ -25,7 +25,7 @@ import networkx as nx
 
 from pyvis.network import Network
 
-from utils.graph import multiline, slug  # noqa: F401  (re-exported for convenience)
+from core.lineage.graph import multiline, slug
 
 
 # ---------------------------------------------------------------------------
