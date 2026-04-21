@@ -1,3 +1,9 @@
+from .dissertations import (
+    AUTHOR_COLUMN,
+    FEEDBACK_FILE,
+    SUPERVISOR_COLUMNS,
+    load_data,
+)
 from .scores import (
     DEFAULT_SCORES_FOLDER,
     get_all_feature_columns,

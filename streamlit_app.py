@@ -12,10 +12,10 @@ from typing import List, Optional, Set, Tuple
 import pandas as pd
 import streamlit as st
 
-# ---------------------- Утилиты (utils/) ----------------------------------
-from utils.db import load_data, AUTHOR_COLUMN, SUPERVISOR_COLUMNS, FEEDBACK_FILE
-from utils.graph import build_index, TREE_OPTIONS
-from utils.ui import (
+# ---------------------- Общие модули (core/) ----------------------------------
+from core.db import load_data, AUTHOR_COLUMN, SUPERVISOR_COLUMNS, FEEDBACK_FILE
+from core.lineage.graph import build_index, TREE_OPTIONS
+from core.ui.chrome import (
     feedback_button,
 )
 

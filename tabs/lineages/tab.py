@@ -18,14 +18,14 @@ import pandas as pd
 import streamlit as st
 
 from school_trees import draw_matplotlib
-from utils.graph import TREE_OPTIONS, lineage, slug
-from utils.table_display import (
+from core.lineage.graph import TREE_OPTIONS, lineage, slug
+from core.ui.table_display import (
     build_tree_export_df,
     render_dissertations_widget,
 )
 from utils.tree_renderers import build_markmap_html
-from utils.ui import show_instruction
-from utils.urls import share_button
+from core.ui.chrome import show_instruction
+from core.ui.links import share_button
 
 
 # ---------------------------------------------------------------------------

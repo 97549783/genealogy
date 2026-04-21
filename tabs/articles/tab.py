@@ -13,8 +13,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import pandas as pd
 import streamlit as st
 
-from utils.graph import lineage
-from utils.urls import share_params_button
+from core.lineage.graph import lineage
+from core.ui.links import share_params_button
 from .comparison import (
     DistanceMetric,
     DISTANCE_METRIC_LABELS,

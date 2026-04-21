@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import streamlit as st
 
-from utils.graph import lineage, rows_for
+from core.lineage.graph import lineage, rows_for
 
 from .entropy_mode import render_entropy_specificity_tab
 from .search import DEFAULT_SCORES_FOLDER, get_feature_columns, load_basic_scores

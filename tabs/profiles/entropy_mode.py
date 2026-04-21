@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 from core.db import get_all_feature_columns, load_scores_from_folder as load_scores_from_folder_core
 from core.people import get_unique_supervisors as get_unique_supervisors_core
-from utils.table_display import (
+from core.ui.table_display import (
     make_abstract_download_url_numeric,
     make_abstract_read_url,
 )

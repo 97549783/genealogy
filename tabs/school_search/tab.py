@@ -14,7 +14,7 @@ import networkx as nx
 import pandas as pd
 import streamlit as st
 
-from utils.graph import lineage, rows_for, slug
+from core.lineage.graph import lineage, rows_for, slug
 from school_search import (
     AUTHOR_COLUMN,
     FUZZY_THRESHOLD,
@@ -36,9 +36,9 @@ from school_search import (
     search_by_supervisor_rate,
     search_by_total_members,
 )
-from utils.table_display import render_dissertations_widget
+from core.ui.table_display import render_dissertations_widget
 from utils.tree_renderers import build_markmap_html
-from utils.urls import share_params_button
+from core.ui.links import share_params_button
 
 
 # ==============================================================================

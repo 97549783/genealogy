@@ -5,9 +5,9 @@ from typing import Dict
 import pandas as pd
 import streamlit as st
 
-from utils.table_display import render_dissertations_widget
-from utils.ui import show_instruction
-from utils.urls import share_params_button
+from core.ui.table_display import render_dissertations_widget
+from core.ui.chrome import show_instruction
+from core.ui.links import share_params_button
 
 from .search import build_filter_options, filter_dissertations, get_available_criteria
 from .state import hydrate_dissertations_query_params, request_search
