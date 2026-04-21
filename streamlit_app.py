@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -17,10 +17,7 @@ from utils.db import load_data, AUTHOR_COLUMN, SUPERVISOR_COLUMNS, FEEDBACK_FILE
 from utils.graph import build_index, TREE_OPTIONS
 from utils.ui import (
     feedback_button,
-    show_instruction,
 )
-from utils.table_display import render_dissertations_widget
-from utils.urls import share_params_button
 
 # ---------------------- Вкладки ------------------------------------------
 from core.classifier import THEMATIC_CLASSIFIER
@@ -31,6 +28,7 @@ from tabs.registry import (
     TAB_SPECS,
 )
 from tabs.articles.tab import render_articles_comparison_tab
+from tabs.dissertations.tab import render_dissertations_tab
 from tabs.intersection.tab import render_opponents_intersection_tab
 from tabs.lineages.tab import render_school_trees_tab
 from tabs.profiles.tab import render_profiles_tab
@@ -102,24 +100,6 @@ for col in SUPERVISOR_COLUMNS:
 shared_roots = st.query_params.get_all("root")
 valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
 
-if not st.session_state.get("diss_search_query_hydrated", False):
-    criteria_q = [
-        c for c in st.query_params.get_all("diss_criterion")
-        if c in {
-            "title", "candidate_name", "supervisors", "opponents",
-            "institution_prepared", "leading_organization", "defense_location",
-            "city", "year", "specialties",
-        }
-    ]
-    if criteria_q:
-        st.session_state["dissertation_search_criteria"] = criteria_q
-        for criterion in criteria_q:
-            q_val = str(st.query_params.get(f"diss_{criterion}", "")).strip()
-            if q_val:
-                st.session_state[f"diss_search_{criterion}"] = q_val
-        st.session_state["diss_search_should_run"] = True
-    st.session_state["diss_search_query_hydrated"] = True
-
 
 # ---------------------- Вкладки ------------------------------------------
 tab_q = str(st.query_params.get("tab", DEFAULT_TAB_ID)).strip()
@@ -152,146 +132,7 @@ with tab_lineages:
 
 # ---------- Вкладка: Поиск информации о диссертациях ---------------------
 with tab_dissertations:
-    if st.button("📖 Инструкция", key="instruction_dissertations"):
-        show_instruction("dissertations")
-
-    st.subheader("Поиск информации о диссертациях")
-    st.write("На этой вкладке доступен поиск диссертаций по формальным критериям.")
-
-    all_years = sorted(
-        [str(y) for y in df["year"].dropna().unique() if str(y).strip()], reverse=True
-    )
-    all_cities = sorted(
-        [str(c) for c in df["city"].dropna().unique() if str(c).strip()]
-    )
-    all_specialties: Set[str] = set()
-    for col in ["specialties_1.code", "specialties_1.name", "specialties_2.code", "specialties_2.name"]:
-        if col in df.columns:
-            all_specialties.update([str(v).strip() for v in df[col].dropna().unique() if str(v).strip()])
-    all_specialties_sorted = sorted(all_specialties)
-
-    available_criteria = {
-        "title": "Название диссертации",
-        "candidate_name": "ФИО автора",
-        "supervisors": "ФИО научного руководителя",
-        "opponents": "ФИО оппонента",
-        "institution_prepared": "Организация выполнения",
-        "leading_organization": "Ведущая организация",
-        "defense_location": "Место защиты",
-        "city": "Город защиты",
-        "year": "Год защиты",
-        "specialties": "Специальность",
-    }
-
-    st.markdown("### 1. Выбор критериев поиска")
-    selected_criteria = st.multiselect(
-        "Выберите критерии поиска (максимум 5 одновременно)",
-        options=list(available_criteria.keys()),
-        format_func=lambda x: available_criteria[x],
-        max_selections=5,
-        key="dissertation_search_criteria",
-    )
-
-    if not selected_criteria:
-        st.info("Выберите хотя бы один критерий для поиска.")
-    else:
-        st.markdown("### 2. Ввод данных")
-        search_params: Dict[str, str] = {}
-
-        for criterion in selected_criteria:
-            if criterion == "year":
-                search_params[criterion] = st.selectbox(
-                    available_criteria[criterion],
-                    options=["Все"] + all_years,
-                    key=f"diss_search_{criterion}",
-                )
-            elif criterion == "city":
-                search_params[criterion] = st.selectbox(
-                    available_criteria[criterion],
-                    options=["Все"] + all_cities,
-                    key=f"diss_search_{criterion}",
-                )
-            elif criterion == "specialties":
-                search_params[criterion] = st.selectbox(
-                    available_criteria[criterion],
-                    options=["Все"] + all_specialties_sorted,
-                    key=f"diss_search_{criterion}",
-                )
-            else:
-                search_params[criterion] = st.text_input(
-                    available_criteria[criterion],
-                    placeholder=f"Введите {available_criteria[criterion].lower()}...",
-                    key=f"diss_search_{criterion}",
-                )
-
-        st.markdown("### 3. Результат")
-
-        if st.button("Найти", type="primary", key="dissertation_search_button"):
-            st.session_state["diss_search_should_run"] = True
-
-        if st.session_state.get("diss_search_should_run", False):
-            result_df = df.copy()
-            for criterion, value in search_params.items():
-                if not value or value == "Все":
-                    continue
-                if criterion in [
-                    "title", "candidate_name", "institution_prepared",
-                    "leading_organization", "defense_location",
-                ]:
-                    result_df = result_df[
-                        result_df[criterion].astype(str).str.contains(value, case=False, na=False)
-                    ]
-                elif criterion == "supervisors":
-                    mask = pd.Series([False] * len(result_df), index=result_df.index)
-                    for col in ["supervisors_1.name", "supervisors_2.name"]:
-                        if col in result_df.columns:
-                            mask |= result_df[col].astype(str).str.contains(value, case=False, na=False)
-                    result_df = result_df[mask]
-                elif criterion == "opponents":
-                    mask = pd.Series([False] * len(result_df), index=result_df.index)
-                    for col in ["opponents_1.name", "opponents_2.name", "opponents_3.name"]:
-                        if col in result_df.columns:
-                            mask |= result_df[col].astype(str).str.contains(value, case=False, na=False)
-                    result_df = result_df[mask]
-                elif criterion in ["city", "year"]:
-                    result_df = result_df[
-                        result_df[criterion].astype(str).str.contains(value, case=False, na=False)
-                    ]
-                elif criterion == "specialties":
-                    mask = pd.Series([False] * len(result_df), index=result_df.index)
-                    for col in [
-                        "specialties_1.code", "specialties_1.name",
-                        "specialties_2.code", "specialties_2.name",
-                    ]:
-                        if col in result_df.columns:
-                            mask |= result_df[col].astype(str).str.contains(value, case=False, na=False)
-                    result_df = result_df[mask]
-            st.session_state["diss_search_result"] = result_df
-
-        if "diss_search_result" in st.session_state:
-            result_df = st.session_state["diss_search_result"]
-            if result_df.empty:
-                st.warning("По заданным критериям ничего не найдено.")
-            else:
-                st.success(f"Найдено диссертаций: {len(result_df)}")
-                share_params_button(
-                    {
-                        "tab": "dissertations",
-                        "diss_criterion": selected_criteria,
-                        **{
-                            f"diss_{criterion}": search_params.get(criterion, "")
-                            for criterion in selected_criteria
-                        },
-                    },
-                    key="diss_search_share",
-                )
-                render_dissertations_widget(
-                    subset=result_df,
-                    key="поиск_диссертаций",
-                    title="Результаты",
-                    expanded=False,
-                    file_name_prefix="список_диссертаций_поиск",
-                )
+    render_dissertations_tab(df=df)
 
 # ---------- Вкладка: Поиск по тематическим профилям ---------------------
 with tab_profiles:
