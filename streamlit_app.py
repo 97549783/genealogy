@@ -106,23 +106,16 @@ tab_q = str(st.query_params.get("tab", DEFAULT_TAB_ID)).strip()
 requested_tab_id = tab_q if tab_q in TAB_ID_TO_LABEL else DEFAULT_TAB_ID
 requested_tab_label = TAB_ID_TO_LABEL[requested_tab_id]
 
-(
-    tab_lineages,
-    tab_dissertations,
-    tab_profiles,
-    tab_school_search,
-    tab_intersection,
-    tab_school_analysis,
-    #tab_schoolcomparison,
-    #tab_articles_comparison,
-) = st.tabs(
-    [label for _, label in TAB_SPECS],
-    default=requested_tab_label,
-)
+tab_labels = [label for _, label in TAB_SPECS]
+tab_objects = st.tabs(tab_labels, default=requested_tab_label)
+tab_by_id = {
+    tab_id: tab
+    for (tab_id, _), tab in zip(TAB_SPECS, tab_objects)
+}
 
 
 # ---------- Вкладка: Построение деревьев ---------------------------------
-with tab_lineages:
+with tab_by_id["lineages"]:
     render_school_trees_tab(
         df=df,
         idx=idx,
@@ -131,11 +124,11 @@ with tab_lineages:
     )
 
 # ---------- Вкладка: Поиск информации о диссертациях ---------------------
-with tab_dissertations:
+with tab_by_id["dissertations"]:
     render_dissertations_tab(df=df)
 
 # ---------- Вкладка: Поиск по тематическим профилям ---------------------
-with tab_profiles:
+with tab_by_id["profiles"]:
     render_profiles_tab(
         df=df,
         idx=idx,
@@ -145,7 +138,7 @@ with tab_profiles:
     )
 
 # ---------- Вкладка: Поиск научных школ ---------------------------------
-with tab_school_search:
+with tab_by_id["school_search"]:
     render_school_search_tab(
         df=df,
         idx=idx,
@@ -154,14 +147,14 @@ with tab_school_search:
     )
 
 # ---------- Вкладка: Взаимосвязи научных школ ----------------------------
-with tab_intersection:
+with tab_by_id["intersection"]:
     render_opponents_intersection_tab(
         df=df,
         idx=idx,
     )
 
 # ---------- Вкладка: Анализ научной школы --------------------------------
-with tab_school_analysis:
+with tab_by_id["school_analysis"]:
     render_school_analysis_tab(
         df=df,
         idx=idx,
@@ -170,19 +163,19 @@ with tab_school_analysis:
     )
 
 # ---------- Вкладка: Сравнение научных школ ------------------------------
-#with tab_schoolcomparison:
-#    classifier_labels = {code: title for code, title, _ in THEMATIC_CLASSIFIER}
-#    render_school_comparison_tab(
-#        df=df,
-#        idx=idx,
-#        scores_folder="basic_scores",
-#        specific_files=None,
-#        classifier_labels=classifier_labels,
-#    )
+with tab_by_id["school_comparison"]:
+    classifier_labels = {code: title for code, title, _ in THEMATIC_CLASSIFIER}
+    render_school_comparison_tab(
+        df=df,
+        idx=idx,
+        scores_folder="basic_scores",
+        specific_files=None,
+        classifier_labels=classifier_labels,
+    )
 
 # ---------- Вкладка: Сравнение по статьям --------------------------------
-#with tab_articles_comparison:
-#    render_articles_comparison_tab(
-#        df_lineage=df,
-#        idx_lineage=idx,
-#    )
+with tab_by_id["articles_comparison"]:
+    render_articles_comparison_tab(
+        df_lineage=df,
+        idx_lineage=idx,
+    )
