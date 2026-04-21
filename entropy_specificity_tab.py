@@ -1,4 +1,4 @@
-"""Compatibility shim for legacy imports."""
+"""Совместимый модуль-обёртка для старых импортов."""
 
 from tabs.profiles.entropy_mode import (
     DEFAULT_MIN_THRESHOLD,

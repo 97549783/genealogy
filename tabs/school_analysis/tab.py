@@ -1,12 +1,12 @@
 """
-Модуль Streamlit-вкладки «Анализ научной школы».
+Модуль вкладки интерфейса «Анализ научной школы».
 Импортируйте и вызывайте render_school_analysis_tab() в основном приложении.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib
 matplotlib.use("Agg")
@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from core.people import get_unique_supervisors
 from utils.graph import lineage, rows_for
 from utils.urls import share_params_button
 from .analysis import (
@@ -55,13 +56,7 @@ def _get_all_supervisors(df: pd.DataFrame) -> List[str]:
         col for col in df.columns
         if "supervisor" in col.lower() and "name" in col.lower()
     ]
-    all_supervisors: Set[str] = set()
-    for col in supervisor_cols:
-        if col in df.columns:
-            all_supervisors.update(
-                str(v).strip() for v in df[col].dropna().unique() if str(v).strip()
-            )
-    return sorted(all_supervisors)
+    return get_unique_supervisors(df=df, supervisor_columns=supervisor_cols)
 
 
 def _scores_folder_available(scores_folder: str) -> bool:
@@ -69,7 +64,7 @@ def _scores_folder_available(scores_folder: str) -> bool:
     Проверяет наличие папки basic_scores с CSV-файлами.
 
     Проверяет оба варианта расположения:
-    1. Текущая рабочая директория (CWD) — работает локально и на Streamlit Cloud.
+    1. Текущая рабочая директория (CWD) — работает локально и в облачном развёртывании.
     2. Рядом с файлом самого модуля — запасной вариант.
     """
     p1 = Path(scores_folder)

@@ -1,5 +1,5 @@
 """
-Модуль Streamlit-вкладки поиска по мере общности/специфичности.
+Модуль вкладки интерфейса поиска по мере общности/специфичности.
 
 Реализует поиск диссертаций на основе энтропии Шеннона с возможностью:
 - Выбора одного или нескольких научных руководителей
@@ -11,11 +11,12 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
+from core.db import get_all_feature_columns as core_get_all_feature_columns, load_scores_from_folder as core_load_scores_from_folder
+from core.people import get_unique_supervisors as core_get_unique_supervisors
 from utils.table_display import (
     make_abstract_download_url_numeric,
     make_abstract_read_url,
@@ -178,49 +179,13 @@ def load_scores_from_folder(
     folder_path: str = DEFAULT_SCORES_FOLDER,
     specific_files: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Загружает данные тематических профилей из CSV файлов."""
-    base = Path(folder_path).expanduser().resolve()
-
-    if specific_files:
-        files = [base / f for f in specific_files if (base / f).exists()]
-    else:
-        files = sorted(base.glob("*.csv"))
-
-    if not files:
-        raise FileNotFoundError(f"CSV файлы не найдены в {base}")
-
-    frames: List[pd.DataFrame] = []
-    for file in files:
-        try:
-            frame = pd.read_csv(file)
-            if "Code" not in frame.columns:
-                raise KeyError(f"Файл {file.name} не содержит колонку 'Code'")
-            frames.append(frame)
-        except Exception as e:
-            print(f"Ошибка при загрузке {file}: {e}")
-            continue
-
-    if not frames:
-        raise ValueError("Не удалось загрузить ни один файл")
-
-    scores = pd.concat(frames, ignore_index=True)
-    scores = scores.dropna(subset=["Code"])
-    scores["Code"] = scores["Code"].astype(str).str.strip()
-    scores = scores[scores["Code"].str.len() > 0]
-    scores = scores.drop_duplicates(subset=["Code"], keep="first")
-
-    feature_columns = [c for c in scores.columns if c != "Code"]
-    scores[feature_columns] = scores[feature_columns].apply(
-        pd.to_numeric, errors="coerce"
-    )
-    scores[feature_columns] = scores[feature_columns].fillna(0.0)
-
-    return scores
+    """Загружает данные тематических профилей через общий модуль core.db."""
+    return core_load_scores_from_folder(folder_path=folder_path, specific_files=specific_files)
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:
     """Возвращает список колонок с признаками."""
-    return [c for c in scores.columns if c != "Code"]
+    return core_get_all_feature_columns(scores)
 
 
 def get_all_nodes_of_branch(
@@ -230,11 +195,11 @@ def get_all_nodes_of_branch(
     """
     Возвращает все узлы, относящиеся к ветке (сам узел + все потомки).
 
-    Args:
+    Параметры:
         node_code: Код узла (например, "1.1")
         all_codes: Список всех доступных кодов
 
-    Returns:
+    Возвращает:
         Список кодов узлов ветки
     """
     result = []
@@ -246,28 +211,8 @@ def get_all_nodes_of_branch(
 
 
 def get_unique_supervisors(df: pd.DataFrame, supervisor_columns: List[str]) -> List[str]:
-    """
-    Извлекает уникальный отсортированный список научных руководителей.
-
-    Args:
-        df: DataFrame с данными о диссертациях
-        supervisor_columns: Список колонок с руководителями
-
-    Returns:
-        Отсортированный список уникальных имен
-    """
-    supervisors = set()
-
-    for col in supervisor_columns:
-        if col in df.columns:
-            # Извлекаем уникальные значения, исключая пропуски
-            values = df[col].dropna().unique()
-            for val in values:
-                clean = str(val).strip()
-                if clean and clean.lower() not in ["nan", "none", ""]:
-                    supervisors.add(clean)
-
-    return sorted(list(supervisors))
+    """Возвращает уникальный список руководителей через общий модуль core.people."""
+    return core_get_unique_supervisors(df=df, supervisor_columns=supervisor_columns)
 
 
 # ==============================================================================
@@ -288,7 +233,7 @@ def render_entropy_specificity_tab(
     """
     Отрисовывает вкладку поиска по мере общности/специфичности.
 
-    Args:
+    Параметры:
         df: Основной DataFrame с диссертациями
         idx: Индекс для поиска по именам
         lineage_func: Функция построения дерева

@@ -1,11 +1,10 @@
 """
 Модуль сравнения научных школ по тематическим профилям.
-Основная метрика - коэффициент силуэта (Silhouette Score).
+Основная метрика — коэффициент силуэта.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Set, Tuple
 
 import numpy as np
@@ -13,6 +12,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances, cosine_distances
+
+from core.db import (
+    get_numeric_code_feature_columns,
+    load_scores_from_folder as core_load_scores_from_folder,
+)
 
 
 # ==============================================================================
@@ -194,67 +198,13 @@ def load_scores_from_folder(
     folder_path: str = "basic_scores",
     specific_files: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Загружает данные тематических профилей из CSV файлов.
-
-    Сначала ищет папку относительно CWD, при неудаче — относительно
-    директории данного модуля (актуально для Streamlit Cloud).
-    """
-    base = Path(folder_path).expanduser()
-    if not base.is_absolute():
-        resolved = base.resolve()
-        if not resolved.exists():
-            resolved = Path(__file__).parent / folder_path
-        base = resolved
-    else:
-        base = base.resolve()
-
-    if specific_files:
-        files = [base / f for f in specific_files if (base / f).exists()]
-    else:
-        files = sorted(base.glob("*.csv"))
-
-    if not files:
-        raise FileNotFoundError(f"CSV файлы не найдены в {base}")
-
-    frames: List[pd.DataFrame] = []
-    for file in files:
-        try:
-            frame = pd.read_csv(file)
-            if "Code" not in frame.columns:
-                raise KeyError(f"Файл {file.name} не содержит колонку 'Code'")
-            frames.append(frame)
-        except Exception as e:
-            print(f"Ошибка при загрузке {file}: {e}")
-            continue
-
-    if not frames:
-        raise ValueError("Не удалось загрузить ни один файл")
-
-    scores = pd.concat(frames, ignore_index=True)
-    scores = scores.dropna(subset=["Code"])
-    scores["Code"] = scores["Code"].astype(str).str.strip()
-    scores = scores[scores["Code"].str.len() > 0]
-    scores = scores.drop_duplicates(subset=["Code"], keep="first")
-
-    feature_columns = get_feature_columns(scores)
-    scores[feature_columns] = scores[feature_columns].apply(
-        pd.to_numeric, errors="coerce"
-    )
-    scores[feature_columns] = scores[feature_columns].fillna(0.0)
-
-    return scores
+    """Загружает данные тематических профилей через общий модуль core.db."""
+    return core_load_scores_from_folder(folder_path=folder_path, specific_files=specific_files)
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:
-    """Возвращает список колонок-узлов классификатора.
-
-    Узлы классификатора начинаются с цифры (1., 2., 3. и т.д.).
-    Прочие колонки исключаются явно, даже если попадут в CSV.
-    """
-    return [
-        c for c in scores.columns
-        if c != "Code" and len(c) > 0 and c[0].isdigit()
-    ]
+    """Возвращает список колонок-узлов классификатора."""
+    return get_numeric_code_feature_columns(scores)
 
 
 # ==============================================================================
@@ -497,7 +447,7 @@ def create_node_scores_table(
     Столбцы — сравниваемые научные школы.
     Значения — среднее по потомкам узла, усреднённое по диссертациям школы.
 
-    Args:
+    Параметры:
         datasets: словарь {название школы: DataFrame с профилями}
         feature_columns: список всех колонок-признаков классификатора
         school_order: порядок школ в таблице

@@ -1,11 +1,7 @@
-"""
-articles_comparison_tab.py
+"""Вкладка сравнения научных школ по публикациям.
 
-Изменения:
-1. Добавлена опция "Весь базис" для анализа по всем тематическим кодам
-2. В multiselect показываются только коды до 3-го уровня (макс 2 точки)
-3. При выборе узла автоматически включаются все его потомки
-4. Используется правильный классификатор для статей
+Модуль объединяет пользовательский интерфейс, гидратацию параметров из URL,
+формирование выборок статей и визуализацию метрик сравнения.
 """
 
 from __future__ import annotations
@@ -613,7 +609,7 @@ def render_articles_comparison_tab(
     with col_params2:
         st.markdown("### 🎯 Тематический базис")
 
-        # ОБНОВЛЕНИЕ: Фильтруем только коды до 3-го уровня (максимум 2 точки)
+        # Фильтруем только коды до 3-го уровня (максимум 2 точки)
         codes_for_display = sorted(
             [c for c in classifier_labels.keys() if re.match(r"^[\d\.]+$", c) and c.count('.') <= 2],
             key=lambda x: (get_code_depth(x), x),
@@ -724,7 +720,7 @@ def render_articles_comparison_tab(
         classifier_cols = [c for c in all_cols if c not in meta_cols and re.match(r"^[\d\.]+$", str(c))]
         all_feature_cols = [*classifier_cols, "Year_num"]
 
-        # ОБНОВЛЕНИЕ: Используем обновленную функцию фильтрации с поддержкой "Весь базис"
+        # Используем функцию фильтрации с поддержкой «Весь базис»
         if selected_nodes:
             feature_cols = _filter_feature_columns(all_feature_cols, selected_nodes)
         else:

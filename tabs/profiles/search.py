@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import urllib.parse
 import pandas as pd
+
+from core.db import get_all_feature_columns, load_scores_from_folder
 
 
 # ==============================================================================
@@ -45,65 +46,13 @@ def _build_abstract_url(code: str, author: str) -> str:
 # ==============================================================================
 
 def load_basic_scores(folder_path: str = DEFAULT_SCORES_FOLDER) -> pd.DataFrame:
-    """
-    Загружает тематические профили диссертаций из CSV файлов.
-
-    Args:
-        folder_path: Путь к папке с CSV файлами профилей
-
-    Returns:
-        DataFrame с профилями (колонка Code + колонки с кодами классификатора)
-
-    Raises:
-        FileNotFoundError: Если папка не найдена или нет CSV файлов
-        KeyError: Если в файлах отсутствует колонка Code
-        ValueError: Если нет колонок с признаками
-    """
-    base = Path(folder_path).expanduser().resolve()
-    files = sorted(base.glob("*.csv"))
-
-    if not files:
-        raise FileNotFoundError(f"CSV файлы не найдены в {base}")
-
-    frames: List[pd.DataFrame] = []
-    for file in files:
-        frame = pd.read_csv(file)
-        if "Code" not in frame.columns:
-            raise KeyError(f"Файл {file.name} не содержит колонку 'Code'")
-        frames.append(frame)
-
-    scores = pd.concat(frames, ignore_index=True)
-
-    # Очистка
-    scores = scores.dropna(subset=["Code"])
-    scores["Code"] = scores["Code"].astype(str).str.strip()
-    scores = scores[scores["Code"].str.len() > 0]
-    scores = scores.drop_duplicates(subset=["Code"], keep="first")
-
-    # Обработка числовых колонок
-    feature_columns = [c for c in scores.columns if c != "Code"]
-    if not feature_columns:
-        raise ValueError("Нет колонок с признаками в профилях")
-
-    scores[feature_columns] = scores[feature_columns].apply(
-        pd.to_numeric, errors="coerce"
-    )
-    scores[feature_columns] = scores[feature_columns].fillna(0.0)
-
-    return scores
+    """Загружает тематические профили через общий загрузчик core.db."""
+    return load_scores_from_folder(folder_path=folder_path)
 
 
 def get_feature_columns(scores_df: pd.DataFrame) -> List[str]:
-    """
-    Возвращает список колонок с признаками (все кроме Code).
-
-    Args:
-        scores_df: DataFrame с профилями
-
-    Returns:
-        Список названий колонок с признаками
-    """
-    return [c for c in scores_df.columns if c != "Code"]
+    """Возвращает список колонок-признаков (все, кроме Code)."""
+    return get_all_feature_columns(scores_df)
 
 
 # ==============================================================================
@@ -118,12 +67,12 @@ def search_by_codes(
     """
     Ищет диссертации, соответствующие всем выбранным кодам классификатора.
 
-    Args:
+    Параметры:
         scores_df: DataFrame с тематическими профилями
         selected_codes: Список кодов классификатора для поиска
         min_score: Минимальный балл для каждого кода
 
-    Returns:
+    Возвращает:
         DataFrame с результатами, отсортированный по сумме баллов
     """
     if not selected_codes:
@@ -164,12 +113,12 @@ def merge_with_dissertation_info(
     """
     Объединяет результаты поиска с метаданными диссертаций.
 
-    Args:
+    Параметры:
         search_results: Результаты поиска (Code + баллы + profile_total)
         dissertations_df: Основной DataFrame с информацией о диссертациях
         selected_codes: Список выбранных кодов (для округления баллов)
 
-    Returns:
+    Возвращает:
         DataFrame с полной информацией о найденных диссертациях
     """
     # Определяем имя колонки автора: поддерживаем оба варианта
@@ -247,12 +196,12 @@ def format_results_for_display(
         10. Сумма баллов
         11. Баллы по выбранным темам
 
-    Args:
+    Параметры:
         results: DataFrame с результатами поиска и метаданными
         selected_codes: Список выбранных кодов классификатора
         classifier_labels: Словарь {код: название} для красивых названий
 
-    Returns:
+    Возвращает:
         Tuple из:
           - отформатированный DataFrame для UI (display_df)
           - словарь переименований колонок (rename_map)
@@ -371,14 +320,14 @@ def build_export_df(
 
     Колонка со ссылкой идёт первой.
 
-    Args:
+    Параметры:
         results: исходный DataFrame (до rename_map, содержит Code и candidate.name).
                  Должен иметь согласованный индекс с display_df (обеспечивается
                  через reset_index в format_results_for_display).
         display_df: уже переименованный DataFrame для UI
         for_excel: если True — готовим XLSX-версию с Excel-формулой гиперссылки
 
-    Returns:
+    Возвращает:
         DataFrame готовый для экспорта
     """
     # Убираем колонку «Скачать» из display_df, если она попала туда
@@ -419,11 +368,11 @@ def validate_code_selection(
     """
     Проверяет корректность выбранных кодов.
 
-    Args:
+    Параметры:
         selected_codes: Список выбранных кодов
         available_codes: Список доступных кодов в профилях
 
-    Returns:
+    Возвращает:
         Tuple (валидно: bool, сообщение об ошибке: Optional[str])
     """
     if not selected_codes:
@@ -443,11 +392,11 @@ def classifier_label(code: str, classifier_dict: Dict[str, str]) -> str:
     """
     Возвращает полную подпись для кода классификатора.
 
-    Args:
+    Параметры:
         code: Код классификатора
         classifier_dict: Словарь {код: название}
 
-    Returns:
+    Возвращает:
         Строка вида "код · название" или просто код, если название не найдено
     """
     title = classifier_dict.get(code)

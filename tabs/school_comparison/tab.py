@@ -1,5 +1,5 @@
 """
-Модуль Streamlit-вкладки сравнения научных школ.
+Модуль вкладки интерфейса сравнения научных школ.
 Импортируйте и вызывайте render_school_comparison_tab() в основном приложении.
 """
 
@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+from core.people import get_unique_supervisors
 from utils.graph import lineage, rows_for
 from utils.ui import download_data_dialog
 from utils.urls import share_params_button
@@ -109,15 +110,7 @@ def get_all_supervisors(df: pd.DataFrame) -> List[str]:
         col for col in df.columns
         if "supervisor" in col.lower() and "name" in col.lower()
     ]
-
-    all_supervisors: Set[str] = set()
-    for col in supervisor_cols:
-        all_supervisors.update(
-            str(v).strip() for v in df[col].dropna().unique()
-            if str(v).strip()
-        )
-
-    return sorted(all_supervisors)
+    return get_unique_supervisors(df=df, supervisor_columns=supervisor_cols)
 
 
 def show_instruction_dialog() -> None:
@@ -142,7 +135,7 @@ def render_school_comparison_tab(
     """
     Отрисовывает вкладку сравнения научных школ.
 
-    Args:
+    Параметры:
         df: Основной DataFrame с диссертациями
         idx: Индекс для поиска по именам
         scores_folder: Папка с CSV-профилями
