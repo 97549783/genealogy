@@ -15,7 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from core.lineage.graph import lineage, rows_for, slug
-from school_search import (
+from .search import (
     AUTHOR_COLUMN,
     FUZZY_THRESHOLD,
     SUPERVISOR_COLUMNS,
@@ -37,7 +37,7 @@ from school_search import (
     search_by_total_members,
 )
 from core.ui.table_display import render_dissertations_widget
-from utils.tree_renderers import build_markmap_html
+from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
 
 

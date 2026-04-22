@@ -5,7 +5,7 @@ school_trees_tab.py — интерфейс вкладки «Построение
     render_school_trees_tab(df, idx, all_supervisor_names, shared_roots)
 
 Модуль отвечает только за UI. Вся логика отрисовки деревьев
-находится в school_trees.py, алгоритмы обхода графа — в utils/graph.py.
+находится в tabs/lineages/rendering.py, алгоритмы обхода графа — в core/lineage/graph.py.
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ from typing import Dict, List, Optional, Set
 import pandas as pd
 import streamlit as st
 
-from school_trees import draw_matplotlib
+from .rendering import draw_matplotlib
 from core.lineage.graph import TREE_OPTIONS, lineage, slug
 from core.ui.table_display import (
     build_tree_export_df,
     render_dissertations_widget,
 )
-from utils.tree_renderers import build_markmap_html
+from core.ui.tree_renderers import build_markmap_html
 from core.ui.chrome import show_instruction
 from core.ui.links import share_button
 

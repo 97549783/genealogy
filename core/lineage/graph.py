@@ -24,7 +24,7 @@ from typing import Callable, Dict, List, Literal, Optional, Set, Tuple
 import networkx as nx
 import pandas as pd
 
-from utils.names import norm, variants
+from core.lineage.names import norm, variants
 from core.db import AUTHOR_COLUMN, SUPERVISOR_COLUMNS
 
 
