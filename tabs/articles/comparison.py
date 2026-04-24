@@ -56,6 +56,7 @@ SILHOUETTE_COLORS = ["#FF8C42", "#FFD166", "#F77F00", "#FCBF49", "#EF476F", "#06
 
 # Пути к файлу классификатора ДЛЯ СТАТЕЙ
 CLASSIFIER_PATHS = [
+    "core/classifier/articles_classifier.json",
     "articles_classifier.json",
     "db_articles/articles_classifier.json",
 ]
@@ -87,7 +88,7 @@ ARTICLES_HELP_TEXT = """
 """
 
 CLASSIFIER_LIST_TEXT = """
-Классификатор загружается из `articles_classifier.json`.
+Классификатор загружается из `core/classifier/articles_classifier.json`.
 """
 
 # ==============================================================================
@@ -105,7 +106,7 @@ def load_articles_classifier() -> Dict[str, str]:
             except Exception as e:
                 print(f"Ошибка загрузки классификатора из {path}: {e}")
                 continue
-    print("⚠️ Файл articles_classifier.json не найден, классификатор будет пустым")
+    print("⚠️ Файл core/classifier/articles_classifier.json не найден, классификатор будет пустым")
     return {}
 
 # ==============================================================================
