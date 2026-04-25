@@ -9,6 +9,8 @@ LEGACY_PATHS = [
     "utils/__init__.py",
     "utils/names.py",
     "utils/tree_renderers.py",
+    "entropy_specificity.py",
+    "articles_classifier.json",
 ]
 
 

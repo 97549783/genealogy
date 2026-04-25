@@ -22,7 +22,7 @@ from core.ui.table_display import (
     make_abstract_read_url,
 )
 
-from entropy_specificity import interpret_entropy, search_by_entropy
+from .entropy import interpret_entropy, search_by_entropy
 
 # ==============================================================================
 # КОНСТАНТЫ
