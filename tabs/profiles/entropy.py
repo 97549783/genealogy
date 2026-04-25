@@ -29,11 +29,11 @@ def calculate_entropy_shannon(
     Формула: H = -∑ p_i · log₂(p_i)
     где p_i = балл_i / сумма_баллов (нормализованное значение)
 
-    Args:
+    Параметры:
         profile: Series с баллами по темам (индекс = коды тем, значения = баллы)
         min_threshold: Минимальный порог для учета темы
 
-    Returns:
+    Возвращает:
         Значение энтропии (float)
     """
     # Фильтруем по порогу
@@ -65,12 +65,12 @@ def calculate_entropy_hierarchical(
     Формула: H = -∑ Z_i · p_i · log₂(p_i)
     где Z_i учитывает положение темы в иерархии классификатора
 
-    Args:
+    Параметры:
         profile: Series с баллами по темам
         classifier_hierarchy: Словарь {код: список родительских кодов}
         min_threshold: Минимальный порог для учета темы
 
-    Returns:
+    Возвращает:
         Значение энтропии (float)
     """
     # Фильтруем по порогу
@@ -108,11 +108,11 @@ def calculate_z_coefficient(
     Формула: Z_i = ∏ (1 / log₂(k_d))
     где k_d = количество дочерних узлов у предка d
 
-    Args:
+    Параметры:
         code: Код темы в классификаторе
         classifier_hierarchy: Словарь {код: список родительских кодов}
 
-    Returns:
+    Возвращает:
         Коэффициент Z (float)
     """
     if code not in classifier_hierarchy:
@@ -138,11 +138,11 @@ def count_children(parent_code: str, classifier_hierarchy: Dict[str, List[str]])
     """
     Подсчитывает количество непосредственных дочерних узлов.
 
-    Args:
+    Параметры:
         parent_code: Код родительского узла
         classifier_hierarchy: Словарь иерархии
 
-    Returns:
+    Возвращает:
         Количество дочерних узлов
     """
     count = 0
@@ -164,10 +164,10 @@ def build_hierarchy_from_codes(codes: List[str]) -> Dict[str, List[str]]:
     Для каждого кода определяет список его предков на основе структуры кода.
     Например, для "1.1.2.3" предками будут ["1", "1.1", "1.1.2"]
 
-    Args:
+    Параметры:
         codes: Список кодов классификатора
 
-    Returns:
+    Возвращает:
         Словарь {код: [список предков]}
     """
     hierarchy = {}
@@ -190,10 +190,10 @@ def get_code_depth(code: str) -> int:
     """
     Возвращает глубину кода в иерархии (количество уровней).
 
-    Args:
+    Параметры:
         code: Код классификатора
 
-    Returns:
+    Возвращает:
         Глубина (количество точек + 1)
     """
     return code.count(".") + 1 if code else 0
@@ -207,11 +207,11 @@ def interpret_entropy(entropy: float, hierarchical: bool = False) -> str:
     """
     Возвращает текстовую интерпретацию значения энтропии.
 
-    Args:
+    Параметры:
         entropy: Значение энтропии
         hierarchical: Была ли использована иерархическая формула
 
-    Returns:
+    Возвращает:
         Текстовое описание
     """
     if entropy < 1.0:
@@ -240,14 +240,14 @@ def search_by_entropy(
     """
     Выполняет поиск диссертаций по энтропии их тематических профилей.
 
-    Args:
+    Параметры:
         scores_df: DataFrame с профилями (Code + колонки с баллами)
         feature_columns: Список колонок-признаков для анализа
         use_hierarchical: Использовать ли иерархическую формулу с Z
         min_threshold: Минимальный порог для учета темы
         ascending: Сортировка по возрастанию (True) или убыванию (False)
 
-    Returns:
+    Возвращает:
         DataFrame с результатами (Code, entropy, features_count)
     """
     results = []
