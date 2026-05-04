@@ -2,22 +2,76 @@
 
 Единственный рабочий источник данных сайта — файл SQLite `genealogy.db` в корне репозитория.
 
-## Переопределение пути
+Runtime-код приложения получает данные через слой `core/db/`. Вкладки и аналитические модули должны работать с `pandas.DataFrame` и не должны напрямую читать исходные файлы данных.
 
-Можно задать переменную окружения:
+## Путь к базе данных
+
+По умолчанию используется файл:
+
+```text
+genealogy.db
+```
+
+Для локального запуска или деплоя путь можно переопределить переменной окружения:
 
 ```bash
 SQLITE_DB_PATH=/путь/к/genealogy.db
 ```
 
-По умолчанию используется `genealogy.db`.
+Пример запуска:
+
+```bash
+SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
+```
+
+Если файл базы не найден, приложение должно показывать явную ошибку. Нельзя случайно создавать пустую SQLite-базу вместо отсутствующей рабочей базы.
 
 ## Обязательные таблицы
 
-- `diss_metadata`
-- `diss_scores_5_8`
-- `articles_metadata`
-- `articles_scores_inf_edu`
+### `diss_metadata`
+
+Метаданные диссертаций.
+
+Обязательные поля:
+
+- `Code` — ключ диссертации;
+- `candidate_name` — имя автора диссертации.
+
+Остальные поля используются вкладками поиска, анализа научных школ и отображения карточек диссертаций, если присутствуют в таблице.
+
+### `diss_scores_5_8`
+
+Тематические профили диссертаций.
+
+Обязательное поле:
+
+- `Code` — ключ диссертации, связывающий профиль с `diss_metadata`.
+
+Остальные поля — числовые признаки тематического классификатора. Служебные или метаданные поля не должны использоваться как тематические признаки.
+
+### `articles_metadata`
+
+Метаданные статей.
+
+Обязательные поля:
+
+- `Article_id`;
+- `Authors`;
+- `Title`;
+- `Journal`;
+- `Volume`;
+- `Issue`;
+- `Year`.
+
+### `articles_scores_inf_edu`
+
+Тематические профили статей журнала по информатике и образованию.
+
+Обязательное поле:
+
+- `Article_id` — ключ статьи, связывающий профиль с `articles_metadata`.
+
+Остальные поля — числовые признаки тематического классификатора статей.
 
 ## Проверка структуры базы
 
@@ -25,11 +79,45 @@ SQLITE_DB_PATH=/путь/к/genealogy.db
 
 ```python
 import sqlite3
-conn = sqlite3.connect('genealogy.db')
-print(conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall())
+
+conn = sqlite3.connect("genealogy.db")
+tables = conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+).fetchall()
+print(tables)
 conn.close()
 ```
 
-## Важно
+Минимальная проверка обязательных таблиц:
 
-CSV-папки `db_lineages/`, `basic_scores/`, `articles_scores/` больше не используются runtime-кодом сайта.
+```python
+import sqlite3
+
+required = {
+    "diss_metadata",
+    "diss_scores_5_8",
+    "articles_metadata",
+    "articles_scores_inf_edu",
+}
+
+conn = sqlite3.connect("genealogy.db")
+actual = {
+    row[0]
+    for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+}
+conn.close()
+
+missing = required - actual
+if missing:
+    raise RuntimeError(f"Не найдены таблицы: {sorted(missing)}")
+```
+
+## CSV и экспорт
+
+CSV-папки `db_lineages/`, `basic_scores/`, `articles_scores/` больше не используются runtime-кодом сайта как источник данных.
+
+Это не запрещает пользовательский экспорт результатов в CSV или XLSX. Экспорт — это формат выгрузки результатов интерфейса, а не источник данных приложения.
+
+## Правило для новых вкладок и аналитики
+
+Новый код должен получать данные через функции из `core/db/` и не должен напрямую обращаться к файлам исходных данных. Если нужна новая таблица или новый набор тематических профилей, сначала следует добавить загрузчик в `core/db/`, а затем использовать его во вкладке.
