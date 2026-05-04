@@ -21,7 +21,7 @@ from .comparison import (
     ComparisonScope,
     DISTANCE_METRIC_LABELS,
     SCOPE_LABELS,
-    load_scores_from_folder,
+    load_scores_from_db,
     get_feature_columns,
     get_nodes_at_level,
     get_selectable_nodes,
@@ -184,7 +184,7 @@ def render_school_comparison_tab(
     # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
     # =========================================================================
     try:
-        scores_df = load_scores_from_folder(
+        scores_df = load_scores_from_db(
             folder_path=scores_folder,
             specific_files=specific_files
         )

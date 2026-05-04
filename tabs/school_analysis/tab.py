@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib
@@ -60,20 +59,8 @@ def _get_all_supervisors(df: pd.DataFrame) -> List[str]:
 
 
 def _scores_folder_available(scores_folder: str) -> bool:
-    """
-    Проверяет наличие папки basic_scores с CSV-файлами.
-
-    Проверяет оба варианта расположения:
-    1. Текущая рабочая директория (CWD) — работает локально и на Streamlit Cloud.
-    2. Рядом с файлом самого модуля — запасной вариант.
-    """
-    p1 = Path(scores_folder)
-    if p1.exists() and any(p1.glob("*.csv")):
-        return True
-    p2 = Path(__file__).parent / scores_folder
-    if p2.exists() and any(p2.glob("*.csv")):
-        return True
-    return False
+    """Проверка оставлена для совместимости параметров интерфейса."""
+    return True
 
 
 def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figure:

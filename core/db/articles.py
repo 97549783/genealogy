@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
-import sqlite3
-
 import pandas as pd
 
+from .connection import get_sqlite_connection
 from .scores import load_article_scores
 
-DB_PATH = os.environ.get("SQLITE_DB_PATH", "genealogy.db")
 REQUIRED_ARTICLE_METADATA_COLUMNS = {
     "Article_id",
     "Authors",
@@ -17,19 +14,13 @@ REQUIRED_ARTICLE_METADATA_COLUMNS = {
     "Journal",
     "Volume",
     "Issue",
-    "school",
     "Year",
 }
 
 
-def _connect_sqlite() -> sqlite3.Connection:
-    """Создаёт подключение к SQLite базе со статьями."""
-    return sqlite3.connect(DB_PATH)
-
-
 def load_articles_metadata() -> pd.DataFrame:
     """Загружает метаданные статей и проверяет обязательные поля."""
-    with _connect_sqlite() as conn:
+    with get_sqlite_connection() as conn:
         metadata = pd.read_sql_query("SELECT * FROM articles_metadata", conn)
 
     if "Article_id" not in metadata.columns:
@@ -68,5 +59,5 @@ def load_articles_data() -> pd.DataFrame:
     metadata = load_articles_metadata()
     scores = load_articles_scores()
 
-    merged = metadata.merge(scores, on="Article_id", how="left", validate="one_to_one")
+    merged = metadata.merge(scores, on="Article_id", how="inner", validate="one_to_one")
     return merged

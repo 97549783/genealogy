@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-import os
-import sqlite3
-from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
-DEFAULT_SCORES_FOLDER = "basic_scores"
-DB_PATH = os.environ.get("SQLITE_DB_PATH", "genealogy.db")
+from .connection import get_sqlite_connection
 
-
-def _connect_sqlite() -> sqlite3.Connection:
-    """Создаёт подключение к SQLite базе с профилями."""
-    return sqlite3.connect(DB_PATH)
+NON_SCORE_COLUMNS = {
+    "Code",
+    "Article_id",
+    "title",
+    "supervisor",
+    "institution_prepared",
+    "year",
+}
 
 
 def load_scores_from_sqlite(table_name: str, key_column: str = "Code") -> pd.DataFrame:
     """Загружает и нормализует профили из таблицы SQLite."""
-    with _connect_sqlite() as conn:
+    with get_sqlite_connection() as conn:
         scores = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
 
     if key_column not in scores.columns:
@@ -31,7 +31,7 @@ def load_scores_from_sqlite(table_name: str, key_column: str = "Code") -> pd.Dat
     scores = scores[scores[key_column].str.len() > 0]
     scores = scores.drop_duplicates(subset=[key_column], keep="first")
 
-    feature_columns = get_all_feature_columns(scores)
+    feature_columns = get_all_feature_columns(scores, key_column=key_column)
     if not feature_columns:
         raise ValueError("Не найдены столбцы с тематическими компонентами")
 
@@ -50,60 +50,11 @@ def load_article_scores() -> pd.DataFrame:
     return load_scores_from_sqlite("articles_scores_inf_edu", key_column="Article_id")
 
 
-def _resolve_scores_base(folder_path: str) -> Path:
-    """Возвращает устойчиво разрешённый путь к папке с CSV-профилями."""
-    base = Path(folder_path).expanduser()
-    if base.is_absolute():
-        return base.resolve()
-
-    cwd_candidate = base.resolve()
-    if cwd_candidate.exists():
-        return cwd_candidate
-
-    repo_candidate = Path(__file__).resolve().parents[2] / folder_path
-    return repo_candidate.resolve()
-
-
-def load_scores_from_folder(
-    folder_path: str = DEFAULT_SCORES_FOLDER,
-    specific_files: Optional[list[str]] = None,
-) -> pd.DataFrame:
-    """Загружает и нормализует тематические профили из CSV-файлов."""
-    base = _resolve_scores_base(folder_path)
-
-    if specific_files:
-        files = [base / file_name for file_name in specific_files if (base / file_name).exists()]
-    else:
-        files = sorted(base.glob("*.csv"))
-
-    if not files:
-        raise FileNotFoundError(f"CSV файлы не найдены в {base}")
-
-    frames: list[pd.DataFrame] = []
-    for file in files:
-        frame = pd.read_csv(file)
-        if "Code" not in frame.columns:
-            raise KeyError(f"Файл {file.name} не содержит колонку 'Code'")
-        frames.append(frame)
-
-    scores = pd.concat(frames, ignore_index=True)
-    scores = scores.dropna(subset=["Code"])
-    scores["Code"] = scores["Code"].astype(str).str.strip()
-    scores = scores[scores["Code"].str.len() > 0]
-    scores = scores.drop_duplicates(subset=["Code"], keep="first")
-
-    feature_columns = get_all_feature_columns(scores)
-    if not feature_columns:
-        raise ValueError("Не найдены столбцы с тематическими компонентами")
-
-    scores[feature_columns] = scores[feature_columns].apply(pd.to_numeric, errors="coerce")
-    scores[feature_columns] = scores[feature_columns].fillna(0.0)
-    return scores
-
-
-def get_all_feature_columns(scores_df: pd.DataFrame) -> list[str]:
+def get_all_feature_columns(scores_df: pd.DataFrame, key_column: str = "Code") -> list[str]:
     """Возвращает все столбцы признаков, кроме служебного Code."""
-    return [column for column in scores_df.columns if column != "Code"]
+    excluded = set(NON_SCORE_COLUMNS)
+    excluded.add(key_column)
+    return [column for column in scores_df.columns if column not in excluded]
 
 
 def get_numeric_code_feature_columns(scores_df: pd.DataFrame) -> list[str]:

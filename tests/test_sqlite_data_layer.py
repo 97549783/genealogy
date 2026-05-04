@@ -1,0 +1,67 @@
+import sqlite3
+import importlib
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+
+def _create_db(path: Path):
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE diss_metadata (Code TEXT, candidate_name TEXT, title TEXT)")
+    conn.execute("INSERT INTO diss_metadata VALUES (' 123 ', 'Иванов И.И.', 'Тест')")
+    conn.execute("INSERT INTO diss_metadata VALUES ('', 'Пустой', 'bad')")
+
+    conn.execute("CREATE TABLE diss_scores_5_8 (Code TEXT, title TEXT, year TEXT, `1.1` TEXT)")
+    conn.execute("INSERT INTO diss_scores_5_8 VALUES ('123', 'meta', '2020', '4.5')")
+
+    conn.execute("CREATE TABLE articles_metadata (Article_id TEXT, Authors TEXT, Title TEXT, Journal TEXT, Volume TEXT, Issue TEXT, Year TEXT, school TEXT)")
+    conn.execute("INSERT INTO articles_metadata VALUES ('A1','Автор','Статья','Журнал','1','1','2024','Школа')")
+
+    conn.execute("CREATE TABLE articles_scores_inf_edu (Article_id TEXT, `1.1` TEXT)")
+    conn.execute("INSERT INTO articles_scores_inf_edu VALUES ('A1','3.2')")
+    conn.commit()
+    conn.close()
+
+
+def test_sqlite_loaders(tmp_path, monkeypatch):
+    db_path = tmp_path / "genealogy.db"
+    _create_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
+    import core.db.connection as connection
+    import core.db.dissertations as dissertations
+    import core.db.scores as scores
+    import core.db.articles as articles
+
+    importlib.reload(connection)
+    importlib.reload(scores)
+    importlib.reload(dissertations)
+    importlib.reload(articles)
+
+    dissertations.load_dissertation_metadata.clear()
+    dissertations.load_data.clear()
+    meta = dissertations.load_dissertation_metadata()
+    assert "Code" in meta.columns and "candidate_name" in meta.columns
+    assert set(meta["Code"].tolist()) == {"123"}
+
+    diss_scores = scores.load_dissertation_scores()
+    assert diss_scores["Code"].dtype == object
+    assert pd.api.types.is_numeric_dtype(diss_scores["1.1"])
+    assert "title" not in scores.get_all_feature_columns(diss_scores)
+
+    merged = articles.load_articles_data()
+    assert merged["Article_id"].dtype == object
+    assert pd.api.types.is_numeric_dtype(merged["1.1"])
+
+
+def test_runtime_modules_without_csv_patterns():
+    banned = ["pd.read_csv", 'glob("*.csv")', "load_scores_from_folder", ]
+    allowed_roots = ("scripts/", "tests/", "docs/")
+
+    for path in Path("tabs").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if any(str(path).startswith(root) for root in allowed_roots):
+            continue
+        for pattern in banned:
+            assert pattern not in text, f"Найден запрещённый паттерн {pattern} в {path}"

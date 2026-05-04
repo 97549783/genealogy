@@ -40,10 +40,10 @@ from __future__ import annotations
 import io
 import re
 from collections import deque
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
+from core.db import load_dissertation_scores
 
 # ---------------------------------------------------------------------------
 # Константы (должны совпадать с именами колонок в db_lineages)
@@ -749,24 +749,7 @@ def search_by_classifier_score(
     """
     Топ-N школ по среднему баллу по узлу классификатора.
     """
-    base = Path(scores_folder).expanduser().resolve()
-    files = sorted(base.glob("*.csv"))
-    if not files:
-        return pd.DataFrame()
-
-    frames = []
-    for f in files:
-        try:
-            frame = pd.read_csv(f)
-            if SCORES_CODE_COLUMN in frame.columns:
-                frames.append(frame)
-        except Exception:
-            continue
-
-    if not frames:
-        return pd.DataFrame()
-
-    scores = pd.concat(frames, ignore_index=True)
+    scores = load_dissertation_scores()
     scores = scores.dropna(subset=[SCORES_CODE_COLUMN])
     scores[SCORES_CODE_COLUMN] = scores[SCORES_CODE_COLUMN].astype(str).str.strip()
     scores = scores[scores[SCORES_CODE_COLUMN].str.len() > 0]

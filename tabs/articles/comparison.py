@@ -242,11 +242,7 @@ def normalize_authors_set(authors_str: str) -> Set[str]:
 
 def load_articles_data() -> pd.DataFrame:
     """Загружает объединённые данные статей через DB-слой."""
-    try:
-        return load_articles_data_from_db()
-    except Exception as e:
-        print(f"Ошибка загрузки статей из SQLite: {e}")
-        return pd.DataFrame()
+    return load_articles_data_from_db()
 
 # ==============================================================================
 # АНАЛИЗ (ВЫЧИСЛЕНИЯ)

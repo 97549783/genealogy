@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
-from core.db import get_all_feature_columns, load_scores_from_folder as load_scores_from_folder_core
+from core.db import get_all_feature_columns, load_dissertation_scores as load_dissertation_scores_core
 from core.people import get_unique_supervisors as get_unique_supervisors_core
 from core.ui.table_display import (
     make_abstract_download_url_numeric,
@@ -175,12 +175,12 @@ def show_instruction_dialog() -> None:
     _show()
 
 
-def load_scores_from_folder(
+def load_scores_from_db(
     folder_path: str = DEFAULT_SCORES_FOLDER,
     specific_files: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Совместимая обёртка над общим загрузчиком тематических профилей."""
-    return load_scores_from_folder_core(folder_path=folder_path, specific_files=specific_files)
+    """Совместимая обёртка над загрузчиком профилей из SQLite."""
+    return load_dissertation_scores_core()
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:
@@ -249,10 +249,7 @@ def render_entropy_specificity_tab(
     # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
     # =========================================================================
     try:
-        scores_df = load_scores_from_folder(
-            folder_path=scores_folder,
-            specific_files=specific_files
-        )
+        scores_df = load_scores_from_db(folder_path=scores_folder, specific_files=specific_files)
 
         all_feature_columns = get_feature_columns(scores_df)
         st.success(

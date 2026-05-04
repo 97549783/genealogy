@@ -12,7 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from core.db import (
     get_numeric_code_feature_columns,
-    load_scores_from_folder as load_scores_from_folder_core,
+    load_dissertation_scores as load_dissertation_scores_core,
 )
 from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances, cosine_distances
@@ -193,12 +193,12 @@ def compute_distance_matrix(
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_scores_from_folder(
+def load_scores_from_db(
     folder_path: str = "basic_scores",
     specific_files: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Совместимая обёртка над общим загрузчиком тематических профилей."""
-    return load_scores_from_folder_core(folder_path=folder_path, specific_files=specific_files)
+    """Совместимая обёртка над загрузчиком профилей из SQLite."""
+    return load_dissertation_scores_core()
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:

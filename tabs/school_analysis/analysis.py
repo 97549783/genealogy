@@ -19,11 +19,11 @@ from __future__ import annotations
 import io
 import re
 from collections import Counter, deque
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
+from core.db import load_dissertation_scores
 
 # ---------------------------------------------------------------------------
 # Константы (должны совпадать с именами колонок в db_lineages)
@@ -520,27 +520,8 @@ def compute_thematic_profile(
         empty = pd.DataFrame(columns=["Название", "Средний балл"])
         return empty, empty
 
-    # Загружаем оценки
-    base = Path(scores_folder).expanduser().resolve()
-    files = sorted(base.glob("*.csv"))
-    if not files:
-        empty = pd.DataFrame(columns=["Название", "Средний балл"])
-        return empty, empty
-
-    frames: List[pd.DataFrame] = []
-    for f in files:
-        try:
-            frame = pd.read_csv(f)
-            if "Code" in frame.columns:
-                frames.append(frame)
-        except Exception:
-            continue
-
-    if not frames:
-        empty = pd.DataFrame(columns=["Название", "Средний балл"])
-        return empty, empty
-
-    scores = pd.concat(frames, ignore_index=True)
+    # Загружаем оценки из SQLite
+    scores = load_dissertation_scores()
     scores = scores.dropna(subset=["Code"])
     scores["Code"] = scores["Code"].astype(str).str.strip()
     scores = scores[scores["Code"].str.len() > 0]
