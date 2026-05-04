@@ -550,6 +550,32 @@ def render_school_search_tab(
         **extra_params,
     }
 
+    current_signature = {
+        "mode": search_mode,
+        "scope": scope,
+        "top_n": top_n,
+        "extra_params": extra_params,
+        "db_signature": get_db_signature(),
+    }
+    if (
+        st.session_state.get("school_search_last_signature") == current_signature
+        and "school_search_last_payload" in st.session_state
+    ):
+        payload = st.session_state["school_search_last_payload"]
+        if payload.get("kind") == "table":
+            _render_results(
+                payload["result_df"],
+                metric_col=payload["metric_col"],
+                chart_title=payload["chart_title"],
+                matched_map=payload.get("matched_map"),
+                key_prefix=payload["key_prefix"],
+                search_mode=mode_label,
+                search_params=params_for_excel,
+            )
+            if not payload["result_df"].empty:
+                share_params_button(share_params, key=f"school_search_share_cached_{search_mode}")
+            return
+
     # --------------------------------------------------------------------------
     # ГРУППА 1: По размеру школы
     # --------------------------------------------------------------------------
@@ -568,6 +594,11 @@ def render_school_search_tab(
         )
         if not result_df.empty:
             share_params_button(share_params, key="school_search_share_total")
+        st.session_state["school_search_last_signature"] = current_signature
+        st.session_state["school_search_last_payload"] = {
+            "kind": "table", "result_df": result_df, "metric_col": "Число членов",
+            "chart_title": f"Топ-{top_n} школ по числу членов", "matched_map": None, "key_prefix": "ss_total",
+        }
 
     elif search_mode == "members_in_period":
         with st.spinner(spinner_msg):

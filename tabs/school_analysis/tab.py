@@ -392,6 +392,7 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### \U0001f4e5 Скачать полный отчёт")
 
+    excel_signature = f"{db_sig}::{root}::{scope}"
     if st.button("Сформировать Excel-отчёт", key="school_analysis_build_excel"):
         with st.spinner("Формируем Excel-файл..."):
             excel_bytes = build_excel_report(
@@ -406,8 +407,12 @@ def render_school_analysis_tab(
                 continuity_df=continuity_df if not continuity_df.empty else pd.DataFrame(),
             )
         st.session_state["school_analysis_excel_bytes"] = excel_bytes
+        st.session_state["school_analysis_excel_signature"] = excel_signature
 
-    if "school_analysis_excel_bytes" in st.session_state:
+    if (
+        "school_analysis_excel_bytes" in st.session_state
+        and st.session_state.get("school_analysis_excel_signature") == excel_signature
+    ):
         safe_name = root.replace(" ", "_").replace("/", "-")[:60]
         st.download_button(
             label="\U0001f4e5 Скачать полный отчёт (Excel)",
