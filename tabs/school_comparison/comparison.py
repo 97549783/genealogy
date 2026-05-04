@@ -193,10 +193,7 @@ def compute_distance_matrix(
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_scores_from_db(
-    folder_path: str = "basic_scores",
-    specific_files: Optional[List[str]] = None
-) -> pd.DataFrame:
+def load_scores_from_db() -> pd.DataFrame:
     """Совместимая обёртка над загрузчиком профилей из SQLite."""
     return load_dissertation_scores_core()
 

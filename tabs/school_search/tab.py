@@ -274,7 +274,6 @@ def render_school_search_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
     classifier: Optional[List[Tuple[str, str, bool]]] = None,
-    scores_folder: str = "basic_scores",
 ) -> None:
     """
     Отрисовывает вкладку «Поиск научных школ».
@@ -283,7 +282,6 @@ def render_school_search_tab(
         df            — основной DataFrame с диссертациями
         idx           — индекс имён
         classifier    — THEMATIC_CLASSIFIER из streamlit_app.py
-        scores_folder — путь к basic_scores
     """
     st.subheader("Поиск научных школ")
 
@@ -735,7 +733,6 @@ def render_school_search_tab(
                 df=df, index=idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 classifier_node=classifier_node,
-                scores_folder=scores_folder,
                 scope=scope, top_n=top_n,
             )
         _render_results(

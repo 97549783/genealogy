@@ -8,7 +8,7 @@ import streamlit as st
 from core.lineage.graph import lineage, rows_for
 
 from .entropy_mode import render_entropy_specificity_tab
-from .search import DEFAULT_SCORES_FOLDER, get_feature_columns, load_basic_scores
+from .search import get_feature_columns, load_basic_scores
 from .topics_mode import render_search_by_topics
 
 
@@ -16,9 +16,7 @@ def render_profiles_tab(
     df: pd.DataFrame,
     idx: Dict[str, set],
     thematic_classifier: List[Tuple[str, str, bool]],
-    scores_folder: str = DEFAULT_SCORES_FOLDER,
-    specific_files: Optional[List[str]] = None,
-    supervisor_columns: Optional[List[str]] = None,
+        supervisor_columns: Optional[List[str]] = None,
 ) -> None:
     if supervisor_columns is None:
         supervisor_columns = ["supervisors_1.name", "supervisors_2.name"]
@@ -26,18 +24,15 @@ def render_profiles_tab(
     classifier_dict = {code: title for code, title, _ in thematic_classifier}
 
     try:
-        scores_df = load_basic_scores(folder_path=scores_folder)
+        scores_df = load_basic_scores()
         all_feature_columns = get_feature_columns(scores_df)
         st.success(
             f"✅ Загружено {len(scores_df)} профилей, "
             f"{len(all_feature_columns)} признаков классификатора"
         )
     except FileNotFoundError as e:
-        st.error(f"❌ Папка или файлы не найдены: {e}")
-        st.info(
-            f"Убедитесь, что папка '{scores_folder}' существует и содержит CSV-файлы "
-            "с тематическими профилями."
-        )
+        st.error(f"❌ Не удалось загрузить SQLite-базу: {e}")
+        st.info("Проверьте, что файл genealogy.db доступен или задана переменная SQLITE_DB_PATH.")
         return
     except Exception as e:
         st.error(f"❌ Ошибка загрузки данных: {e}")
@@ -76,8 +71,6 @@ def render_profiles_tab(
             idx=idx,
             lineage_func=lineage,
             rows_for_func=rows_for,
-            scores_folder=scores_folder,
-            specific_files=specific_files,
             classifier_labels=classifier_dict,
             thematic_classifier=thematic_classifier,
             supervisor_columns=supervisor_columns,

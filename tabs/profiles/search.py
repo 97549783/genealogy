@@ -17,7 +17,6 @@ from core.db import get_all_feature_columns, load_dissertation_scores
 # КОНСТАНТЫ
 # ==============================================================================
 
-DEFAULT_SCORES_FOLDER = "basic_scores"
 DEFAULT_MIN_SCORE = 4.0
 SELECTION_LIMIT = 5
 
@@ -44,7 +43,7 @@ def _build_abstract_url(code: str, author: str) -> str:
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_basic_scores(folder_path: str = DEFAULT_SCORES_FOLDER) -> pd.DataFrame:
+def load_basic_scores() -> pd.DataFrame:
     """Совместимая обёртка над общим загрузчиком тематических профилей."""
     return load_dissertation_scores()
 

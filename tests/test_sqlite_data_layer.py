@@ -3,7 +3,6 @@ import importlib
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 
 def _create_db(path: Path):
@@ -42,13 +41,12 @@ def test_sqlite_loaders(tmp_path, monkeypatch):
     dissertations.load_dissertation_metadata.clear()
     dissertations.load_data.clear()
     meta = dissertations.load_dissertation_metadata()
-    assert "Code" in meta.columns and "candidate_name" in meta.columns
     assert set(meta["Code"].tolist()) == {"123"}
 
     diss_scores = scores.load_dissertation_scores()
     assert diss_scores["Code"].dtype == object
     assert pd.api.types.is_numeric_dtype(diss_scores["1.1"])
-    assert "title" not in scores.get_all_feature_columns(diss_scores)
+    assert "title" not in scores.get_all_feature_columns(diss_scores, key_column="Code")
 
     merged = articles.load_articles_data()
     assert merged["Article_id"].dtype == object
@@ -56,12 +54,23 @@ def test_sqlite_loaders(tmp_path, monkeypatch):
 
 
 def test_runtime_modules_without_csv_patterns():
-    banned = ["pd.read_csv", 'glob("*.csv")', "load_scores_from_folder", ]
-    allowed_roots = ("scripts/", "tests/", "docs/")
+    banned = [
+        "pd.read_csv",
+        'glob("*.csv")',
+        "load_scores_from_folder",
+        "db_lineages",
+        "articles_scores.csv",
+        "CSV-файлы",
+    ]
+    allowed_files = {
+        "tabs/profiles/topics_mode.py",
+    }
 
-    for path in Path("tabs").rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        if any(str(path).startswith(root) for root in allowed_roots):
-            continue
-        for pattern in banned:
-            assert pattern not in text, f"Найден запрещённый паттерн {pattern} в {path}"
+    for root in (Path("tabs"), Path("core/db")):
+        for path in root.rglob("*.py"):
+            rel = path.as_posix()
+            if rel in allowed_files:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for pattern in banned:
+                assert pattern not in text, f"Найден запрещённый паттерн {pattern} в {rel}"

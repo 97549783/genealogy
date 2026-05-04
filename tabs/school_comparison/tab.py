@@ -128,8 +128,6 @@ def show_instruction_dialog() -> None:
 def render_school_comparison_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    scores_folder: str = DEFAULT_SCORES_FOLDER,
-    specific_files: Optional[List[str]] = None,
     classifier_labels: Optional[Dict[str, str]] = None,
 ) -> None:
     """Отрисовывает вкладку сравнения научных школ."""
@@ -185,8 +183,6 @@ def render_school_comparison_tab(
     # =========================================================================
     try:
         scores_df = load_scores_from_db(
-            folder_path=scores_folder,
-            specific_files=specific_files
         )
         all_feature_columns = get_feature_columns(scores_df)
         st.success(
@@ -194,11 +190,8 @@ def render_school_comparison_tab(
             f"{len(all_feature_columns)} признаков"
         )
     except FileNotFoundError as e:
-        st.error(f"❌ Папка или файлы не найдены: {e}")
-        st.info(
-            f"Убедитесь, что папка '{scores_folder}' существует и содержит CSV-файлы "
-            "с тематическими профилями."
-        )
+        st.error(f"❌ Не удалось загрузить SQLite-базу: {e}")
+        st.info("Проверьте, что файл genealogy.db доступен или задана переменная SQLITE_DB_PATH.")
         return
     except Exception as e:
         st.error(f"❌ Ошибка загрузки данных: {e}")

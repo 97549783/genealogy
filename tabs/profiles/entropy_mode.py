@@ -175,10 +175,7 @@ def show_instruction_dialog() -> None:
     _show()
 
 
-def load_scores_from_db(
-    folder_path: str = DEFAULT_SCORES_FOLDER,
-    specific_files: Optional[List[str]] = None
-) -> pd.DataFrame:
+def load_scores_from_db() -> pd.DataFrame:
     """Совместимая обёртка над загрузчиком профилей из SQLite."""
     return load_dissertation_scores_core()
 
@@ -218,8 +215,6 @@ def render_entropy_specificity_tab(
     idx: Dict[str, Set[int]],
     lineage_func,
     rows_for_func,
-    scores_folder: str = DEFAULT_SCORES_FOLDER,
-    specific_files: Optional[List[str]] = None,
     classifier_labels: Optional[Dict[str, str]] = None,
     thematic_classifier: Optional[List[tuple]] = None,
     supervisor_columns: Optional[List[str]] = None,
@@ -249,7 +244,7 @@ def render_entropy_specificity_tab(
     # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
     # =========================================================================
     try:
-        scores_df = load_scores_from_db(folder_path=scores_folder, specific_files=specific_files)
+        scores_df = load_scores_from_db()
 
         all_feature_columns = get_feature_columns(scores_df)
         st.success(
@@ -258,11 +253,8 @@ def render_entropy_specificity_tab(
         )
 
     except FileNotFoundError as e:
-        st.error(f"❌ Папка или файлы не найдены: {e}")
-        st.info(
-            f"Убедитесь, что папка '{scores_folder}' существует и содержит CSV-файлы "
-            "с тематическими профилями."
-        )
+        st.error(f"❌ Не удалось загрузить SQLite-базу: {e}")
+        st.info("Проверьте, что файл genealogy.db доступен или задана переменная SQLITE_DB_PATH.")
         return
     except Exception as e:
         st.error(f"❌ Ошибка загрузки данных: {e}")
