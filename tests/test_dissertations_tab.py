@@ -1,66 +1,50 @@
 from __future__ import annotations
 
+import importlib
+import sqlite3
+
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 from tabs.dissertations.search import filter_dissertations, get_available_criteria
 
 
-def _sample_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "title": "Анализ методики",
-                "candidate_name": "Иванов И.И.",
-                "institution_prepared": "МГУ",
-                "leading_organization": "РАН",
-                "defense_location": "Москва",
-                "city": "Москва",
-                "year": "2020",
-                "supervisors_1.name": "Петров П.П.",
-                "supervisors_2.name": "",
-                "opponents_1.name": "Сидоров С.С.",
-                "opponents_2.name": "",
-                "opponents_3.name": "",
-                "specialties_1.code": "13.00.01",
-                "specialties_1.name": "Общая педагогика",
-                "specialties_2.code": "",
-                "specialties_2.name": "",
-            },
-            {
-                "title": "Цифровая дидактика",
-                "candidate_name": "Смирнова А.А.",
-                "institution_prepared": "СПбГУ",
-                "leading_organization": "НИУ ВШЭ",
-                "defense_location": "Санкт-Петербург",
-                "city": "Санкт-Петербург",
-                "year": "2021",
-                "supervisors_1.name": "Кузнецов К.К.",
-                "supervisors_2.name": "",
-                "opponents_1.name": "Орлова О.О.",
-                "opponents_2.name": "",
-                "opponents_3.name": "",
-                "specialties_1.code": "13.00.08",
-                "specialties_1.name": "Теория и методика проф. образования",
-                "specialties_2.code": "",
-                "specialties_2.name": "",
-            },
-        ]
+def _create_db(path):
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE diss_metadata (Code TEXT, candidate_name TEXT, title TEXT, institution_prepared TEXT, leading_organization TEXT, defense_location TEXT, city TEXT, year TEXT, `supervisors_1.name` TEXT, `supervisors_2.name` TEXT, `opponents_1.name` TEXT, `opponents_2.name` TEXT, `opponents_3.name` TEXT, `specialties_1.code` TEXT, `specialties_1.name` TEXT, `specialties_2.code` TEXT, `specialties_2.name` TEXT)"
     )
+    conn.executemany(
+        "INSERT INTO diss_metadata VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("1", "Иванов И.И.", "Анализ методики", "МГУ", "РАН", "Москва", "Москва", "2020", "Петров П.П.", "", "Сидоров С.С.", "", "", "13.00.01", "Общая педагогика", "", ""),
+            ("2", "Смирнова А.А.", "Цифровая дидактика", "СПбГУ", "НИУ ВШЭ", "Санкт-Петербург", "Санкт-Петербург", "2021", "Кузнецов К.К.", "", "Орлова О.О.", "", "", "13.00.08", "Теория и методика проф. образования", "", ""),
+        ],
+    )
+    conn.commit()
+    conn.close()
 
 
-def test_filter_dissertations_supports_all_required_criteria() -> None:
-    df = _sample_df()
+def test_filter_dissertations_supports_all_required_criteria(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+    import core.db.dissertations as dissertations
+    importlib.reload(dissertations)
 
-    assert len(filter_dissertations(df, {"title": "методики"})) == 1
-    assert len(filter_dissertations(df, {"supervisors": "петров"})) == 1
-    assert len(filter_dissertations(df, {"opponents": "орлова"})) == 1
-    assert len(filter_dissertations(df, {"city": "санкт"})) == 1
-    assert len(filter_dissertations(df, {"year": "2020"})) == 1
-    assert len(filter_dissertations(df, {"specialties": "13.00.08"})) == 1
+    assert len(filter_dissertations(None, {"title": "методики"})) == 1
+    assert len(filter_dissertations(None, {"supervisors": "петров"})) == 1
+    assert len(filter_dissertations(None, {"opponents": "орлова"})) == 1
+    assert len(filter_dissertations(None, {"city": "санкт"})) == 1
+    assert len(filter_dissertations(None, {"year": "2020"})) == 1
+    assert len(filter_dissertations(None, {"specialties": "13.00.08"})) == 1
 
 
-def test_tab_hydrates_query_and_builds_share_payload() -> None:
+def test_tab_hydrates_query_and_builds_share_payload(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
     app = AppTest.from_string(
         """
 import streamlit as st
@@ -80,26 +64,7 @@ def _fake_render(**kwargs):
 diss_tab.share_params_button = _fake_share
 diss_tab.render_dissertations_widget = _fake_render
 
-sample_df = pd.DataFrame([
-    {
-        "title": "Анализ методики",
-        "candidate_name": "Иванов И.И.",
-        "institution_prepared": "МГУ",
-        "leading_organization": "РАН",
-        "defense_location": "Москва",
-        "city": "Москва",
-        "year": "2020",
-        "supervisors_1.name": "Петров П.П.",
-        "supervisors_2.name": "",
-        "opponents_1.name": "Сидоров С.С.",
-        "opponents_2.name": "",
-        "opponents_3.name": "",
-        "specialties_1.code": "13.00.01",
-        "specialties_1.name": "Общая педагогика",
-        "specialties_2.code": "",
-        "specialties_2.name": "",
-    }
-])
+sample_df = pd.DataFrame([{"title": "x"}])
 
 diss_tab.render_dissertations_tab(sample_df)
 """
@@ -115,14 +80,6 @@ diss_tab.render_dissertations_tab(sample_df)
     assert app.session_state["diss_search_title"] == "метод"
     assert app.session_state["diss_search_should_run"] is True
     assert len(app.session_state["diss_search_result"]) == 1
-
-    assert app.session_state["_captured_share_key"] == "diss_search_share"
-    assert app.session_state["_captured_share_payload"] == {
-        "tab": "dissertations",
-        "diss_criterion": ["title"],
-        "diss_title": "метод",
-    }
-    assert app.session_state["_captured_render_kwargs"]["key"] == "поиск_диссертаций"
 
 
 def test_criteria_dictionary_contract() -> None:

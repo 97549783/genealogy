@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pandas as pd
+import streamlit as st
 
-from .connection import get_sqlite_connection
+from .connection import get_db_signature, get_sqlite_connection
 from .scores import load_article_scores
 
 REQUIRED_ARTICLE_METADATA_COLUMNS = {
@@ -20,6 +21,13 @@ REQUIRED_ARTICLE_METADATA_COLUMNS = {
 
 def load_articles_metadata() -> pd.DataFrame:
     """Загружает метаданные статей и проверяет обязательные поля."""
+    return _load_articles_metadata_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_articles_metadata_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает метаданные статей из SQLite с кэшированием."""
+    _ = db_signature
     with get_sqlite_connection() as conn:
         metadata = pd.read_sql_query("SELECT * FROM articles_metadata", conn)
 
@@ -38,6 +46,13 @@ def load_articles_metadata() -> pd.DataFrame:
 
 def load_articles_scores() -> pd.DataFrame:
     """Загружает тематические профили статей из SQLite."""
+    return _load_articles_scores_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_articles_scores_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает тематические профили статей с кэшированием."""
+    _ = db_signature
     scores = load_article_scores()
     if "Article_id" not in scores.columns:
         raise KeyError("В таблице articles_scores_inf_edu отсутствует столбец 'Article_id'")
@@ -56,8 +71,13 @@ def load_articles_scores() -> pd.DataFrame:
 
 def load_articles_data() -> pd.DataFrame:
     """Возвращает объединённый датафрейм статей для аналитики вкладки."""
+    return _load_articles_data_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_articles_data_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Возвращает объединённые данные статей с кэшированием."""
+    _ = db_signature
     metadata = load_articles_metadata()
     scores = load_articles_scores()
-
-    merged = metadata.merge(scores, on="Article_id", how="inner", validate="one_to_one")
-    return merged
+    return metadata.merge(scores, on="Article_id", how="inner", validate="one_to_one")

@@ -4,7 +4,9 @@ from .dissertations import (
     SUPERVISOR_COLUMNS,
     load_basic_scores,
     load_data,
+    load_dissertation_filter_options,
     load_dissertation_metadata,
+    search_dissertation_metadata,
 )
 from .scores import (
     get_all_feature_columns,

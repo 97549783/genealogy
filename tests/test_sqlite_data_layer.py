@@ -38,7 +38,7 @@ def test_sqlite_loaders(tmp_path, monkeypatch):
     importlib.reload(dissertations)
     importlib.reload(articles)
 
-    dissertations.load_dissertation_metadata.clear()
+    dissertations._load_dissertation_metadata_cached.clear()
     dissertations.load_data.clear()
     meta = dissertations.load_dissertation_metadata()
     assert set(meta["Code"].tolist()) == {"123"}
