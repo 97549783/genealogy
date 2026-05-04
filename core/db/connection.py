@@ -14,6 +14,15 @@ def _resolve_db_path() -> Path:
     return Path(os.environ.get("SQLITE_DB_PATH", DB_PATH)).expanduser()
 
 
+def get_db_signature() -> tuple[str, float, int]:
+    """Возвращает сигнатуру SQLite-файла для инвалидации кэша."""
+    db_path = _resolve_db_path()
+    if not db_path.exists():
+        raise FileNotFoundError(f"SQLite-база не найдена: {db_path.resolve()}")
+    stat = db_path.stat()
+    return str(db_path.resolve()), stat.st_mtime, stat.st_size
+
+
 def get_sqlite_connection() -> sqlite3.Connection:
     """Создаёт подключение к SQLite-базе проекта."""
     db_path = _resolve_db_path()

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import pandas as pd
+import streamlit as st
 
-from .connection import get_sqlite_connection
+from .connection import get_db_signature, get_sqlite_connection
 
 NON_SCORE_COLUMNS = {
     "Code",
@@ -17,11 +16,35 @@ NON_SCORE_COLUMNS = {
     "year",
 }
 
+_ALLOWED_SCORE_TABLES = {
+    "diss_scores_5_8",
+    "articles_scores_inf_edu",
+}
+
+
+def _validate_table_name(table_name: str) -> str:
+    """Проверяет имя таблицы перед подстановкой в SQL-запрос."""
+    if table_name not in _ALLOWED_SCORE_TABLES:
+        raise ValueError(f"Недопустимое имя таблицы профилей: {table_name}")
+    return table_name
+
 
 def load_scores_from_sqlite(table_name: str, key_column: str = "Code") -> pd.DataFrame:
     """Загружает и нормализует профили из таблицы SQLite."""
+    return _load_scores_from_sqlite_cached(table_name, key_column, get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_scores_from_sqlite_cached(
+    table_name: str,
+    key_column: str,
+    db_signature: tuple[str, float, int],
+) -> pd.DataFrame:
+    """Загружает и нормализует профили из таблицы SQLite с кэшированием."""
+    _ = db_signature
+    safe_table = _validate_table_name(table_name)
     with get_sqlite_connection() as conn:
-        scores = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        scores = pd.read_sql_query(f'SELECT * FROM "{safe_table}"', conn)
 
     if key_column not in scores.columns:
         raise KeyError(f"В таблице профилей отсутствует столбец '{key_column}'")
