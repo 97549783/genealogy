@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List, Set, Dict, Tuple, Optional, Callable, Any, Literal
+from core.db.articles import load_articles_data as load_articles_data_from_db
 
 from sklearn.metrics import (
     silhouette_samples,
@@ -26,12 +27,6 @@ from scipy.spatial.distance import cdist
 # ==============================================================================
 # КОНСТАНТЫ И ТИПЫ
 # ==============================================================================
-
-POSSIBLE_PATHS = [
-    "articles_scores.csv",
-    "articles_scores/articles_scores.csv",
-    "db_articles/articles_scores.csv"
-]
 
 METADATA_COLS = {
     "Article_id", "Authors", "Title", "Journal",
@@ -246,19 +241,12 @@ def normalize_authors_set(authors_str: str) -> Set[str]:
     return res
 
 def load_articles_data() -> pd.DataFrame:
-    """Загружает CSV со статьями."""
-    for path_str in POSSIBLE_PATHS:
-        path = Path(path_str)
-        if path.exists():
-            try:
-                df = pd.read_csv(path, sep=';', dtype={'Year': str, 'Article_id': str})
-                if df.shape[1] < 2:
-                    df = pd.read_csv(path, sep=',', dtype={'Year': str, 'Article_id': str})
-                return df
-            except Exception as e:
-                print(f"Ошибка чтения {path}: {e}")
-                continue
-    return pd.DataFrame()
+    """Загружает объединённые данные статей через DB-слой."""
+    try:
+        return load_articles_data_from_db()
+    except Exception as e:
+        print(f"Ошибка загрузки статей из SQLite: {e}")
+        return pd.DataFrame()
 
 # ==============================================================================
 # АНАЛИЗ (ВЫЧИСЛЕНИЯ)
