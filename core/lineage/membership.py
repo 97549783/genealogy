@@ -11,8 +11,13 @@ from core.lineage.names import norm, variants
 
 
 def _norm_initials(s: str) -> str:
-    s = str(s).lower().replace('ё', 'е')
-    return " ".join(s.split())
+    s = str(s).lower().replace("ё", "е")
+    s = " ".join(s.split())
+    prev = None
+    while prev != s:
+        prev = s
+        s = __import__("re").sub(r"([а-яеa-z])\. ([а-яеa-z]\.)", r"\1.\2", s)
+    return s
 
 
 @st.cache_data(show_spinner=False)

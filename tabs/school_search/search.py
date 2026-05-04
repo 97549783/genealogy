@@ -44,7 +44,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from core.db import get_all_feature_columns, load_dissertation_scores, get_db_signature
-from core.lineage.membership import get_cached_roots, get_school_subset
+from core.lineage.membership import get_cached_roots, get_school_subset, get_school_lineage
 
 # ---------------------------------------------------------------------------
 # Константы основных колонок данных диссертаций
@@ -417,7 +417,7 @@ def search_by_depth(
     rows: List[SearchRow] = []
 
     for root in roots:
-        graph, subset = lineage_func(df, index, root)
+        graph, subset = get_school_lineage(df, index, root, None, get_db_signature())
         if graph.number_of_nodes() < 2:
             continue
 

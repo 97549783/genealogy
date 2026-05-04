@@ -321,7 +321,10 @@ def render_school_search_tab(
 
         person_q = str(st.query_params.get("person_query", "")).strip()
         if person_q:
-            st.session_state["school_search_person_opponent"] = person_q
+            if mode_q == "member":
+                st.session_state["school_search_person_member_select"] = person_q
+            elif mode_q == "opponent":
+                st.session_state["school_search_person_opponent"] = person_q
 
         classifier_node_q = str(st.query_params.get("classifier_node", "")).strip()
         if classifier_node_q:
@@ -509,7 +512,8 @@ def render_school_search_tab(
     # ==========================================================================
     st.markdown("---")
 
-    run_btn = st.button("🔍 Найти", key="school_search_run", type="primary")
+    with st.form("school_search_form", clear_on_submit=False):
+        run_btn = st.form_submit_button("🔍 Найти", type="primary")
     if run_btn:
         st.session_state["school_search_run_state"] = True
     if not st.session_state.get("school_search_run_state", False):

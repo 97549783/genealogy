@@ -150,6 +150,8 @@ def search_dissertation_scores_by_codes_threshold(
     return_columns: list[str] | None = None,
 ) -> pd.DataFrame:
     """Ищет диссертации по порогу выбранных тематических признаков."""
+    if not selected_score_columns:
+        raise ValueError("Нужно выбрать хотя бы один тематический признак.")
     table_name = "diss_scores_5_8"
     all_columns = _table_columns(table_name)
     feature_columns = [c for c in all_columns if c not in NON_SCORE_COLUMNS and c != "Code"]

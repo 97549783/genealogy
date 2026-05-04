@@ -24,6 +24,8 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 from core.db import get_all_feature_columns, load_dissertation_scores
+from core.db import get_db_signature
+from core.lineage.membership import get_school_subset, get_school_lineage
 
 # ---------------------------------------------------------------------------
 # Константы основных колонок данных диссертаций
@@ -101,11 +103,8 @@ def collect_school_subset(
     scope='direct' — только прямые ученики руководителя;
     scope='all'    — все поколения (полное дерево).
     """
-    if scope == "direct":
-        return rows_for_func(df, index, root)
-    else:
-        _graph, subset = lineage_func(df, index, root)
-        return subset
+    _ = lineage_func, rows_for_func
+    return get_school_subset(df, index, root, scope, get_db_signature())
 
 
 # ---------------------------------------------------------------------------
