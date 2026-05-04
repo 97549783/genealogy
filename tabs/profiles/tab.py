@@ -23,24 +23,6 @@ def render_profiles_tab(
 
     classifier_dict = {code: title for code, title, _ in thematic_classifier}
 
-    try:
-        scores_df = load_basic_scores()
-        all_feature_columns = get_feature_columns(scores_df)
-        st.success(
-            f"✅ Загружено {len(scores_df)} профилей, "
-            f"{len(all_feature_columns)} признаков классификатора"
-        )
-    except FileNotFoundError as e:
-        st.error(f"❌ Не удалось загрузить SQLite-базу: {e}")
-        st.info("Проверьте, что файл genealogy.db доступен или задана переменная SQLITE_DB_PATH.")
-        return
-    except Exception as e:
-        st.error(f"❌ Ошибка загрузки данных: {e}")
-        import traceback
-
-        st.code(traceback.format_exc())
-        return
-
     st.markdown("---")
     st.markdown("## 🔍 Режим поиска")
 
@@ -59,6 +41,22 @@ def render_profiles_tab(
     st.markdown("---")
 
     if search_mode == "По конкретным темам":
+        try:
+            scores_df = load_basic_scores()
+            all_feature_columns = get_feature_columns(scores_df)
+            st.success(
+                f"✅ Загружено {len(scores_df)} профилей, "
+                f"{len(all_feature_columns)} признаков классификатора"
+            )
+        except FileNotFoundError as e:
+            st.error(f"❌ Не удалось загрузить SQLite-базу: {e}")
+            st.info("Проверьте, что файл genealogy.db доступен или задана переменная SQLITE_DB_PATH.")
+            return
+        except Exception as e:
+            st.error(f"❌ Ошибка загрузки данных: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+            return
         render_search_by_topics(
             df=df,
             scores_df=scores_df,

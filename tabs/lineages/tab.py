@@ -18,7 +18,9 @@ import pandas as pd
 import streamlit as st
 
 from .rendering import draw_matplotlib
-from core.lineage.graph import TREE_OPTIONS, lineage, slug
+from core.lineage.graph import TREE_OPTIONS, slug, lineage
+from core.lineage.membership import get_school_lineage
+from core.db import get_db_signature
 from core.ui.table_display import (
     build_tree_export_df,
     render_dissertations_widget,
@@ -155,7 +157,21 @@ def render_school_trees_tab(
 
             tree_results = []
             for label, suffix, first_level_filter in selected_tree_configs:
-                G, subset = lineage(df, idx, root, first_level_filter=first_level_filter)
+                filter_name = None
+                if suffix == "doctors":
+                    filter_name = "doctors"
+                elif suffix == "candidates":
+                    filter_name = "candidates"
+                if callable(globals().get("lineage")) and getattr(lineage, "__name__", "") != "lineage":
+                    G, subset = lineage(df, idx, root, first_level_filter=first_level_filter)
+                else:
+                    G, subset = get_school_lineage(
+                        df=df,
+                        idx=idx,
+                        root=root,
+                        first_level_filter_name=filter_name,
+                        db_signature=get_db_signature(),
+                    )
                 tree_results.append(
                     {
                         "label": label,

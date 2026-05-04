@@ -142,13 +142,52 @@ def _load_dissertation_filter_options_cached(db_signature: tuple[str, float, int
     return {"year": years, "city": cities, "specialties": specialties}
 
 
-@st.cache_data(show_spinner=False)
 def load_data() -> pd.DataFrame:
-    """Совместимая обёртка для существующего кода."""
+    """Совместимая обёртка для загрузки метаданных диссертаций."""
     return load_dissertation_metadata()
 
 
-@st.cache_data(show_spinner=False)
 def load_basic_scores() -> pd.DataFrame:
-    """Совместимая обёртка для загрузки профилей диссертаций из SQLite."""
+    """Совместимая обёртка для загрузки профилей диссертаций."""
     return load_dissertation_scores()
+
+
+def _get_table_columns(table_name: str) -> set[str]:
+    """Возвращает набор столбцов таблицы SQLite."""
+    with get_sqlite_connection() as conn:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
+
+
+def fetch_dissertation_metadata_by_codes(
+    codes: list[str] | set[str],
+    columns: list[str] | None = None,
+) -> pd.DataFrame:
+    """Загружает метаданные диссертаций по списку Code."""
+    normalized = [str(code).strip() for code in codes if str(code).strip()]
+    if not normalized:
+        selected = ["Code"] if columns is None else list(dict.fromkeys(["Code", *columns]))
+        return pd.DataFrame(columns=selected)
+
+    existing = _get_table_columns("diss_metadata")
+    if columns is None:
+        selected = ["Code", *[c for c in sorted(existing) if c != "Code"]]
+    else:
+        unknown = [c for c in columns if c not in existing]
+        if unknown:
+            raise ValueError(f"Неизвестные столбцы метаданных: {', '.join(unknown)}")
+        selected = list(dict.fromkeys(["Code", *columns]))
+
+    frames: list[pd.DataFrame] = []
+    with get_sqlite_connection() as conn:
+        for i in range(0, len(normalized), 500):
+            chunk = normalized[i:i + 500]
+            placeholders = ",".join(["?"] * len(chunk))
+            col_sql = ", ".join(_quote_identifier(c) for c in selected)
+            query = f'SELECT {col_sql} FROM diss_metadata WHERE "Code" IN ({placeholders})'
+            frames.append(pd.read_sql_query(query, conn, params=chunk))
+
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=selected)
+    if "Code" in out.columns:
+        out["Code"] = out["Code"].astype(str).str.strip()
+    return out
