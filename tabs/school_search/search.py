@@ -40,13 +40,13 @@ from __future__ import annotations
 import io
 import re
 from collections import deque
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
+from core.db import get_all_feature_columns, load_dissertation_scores
 
 # ---------------------------------------------------------------------------
-# Константы (должны совпадать с именами колонок в db_lineages)
+# Константы основных колонок данных диссертаций
 # ---------------------------------------------------------------------------
 
 AUTHOR_COLUMN = "candidate_name"
@@ -59,7 +59,7 @@ INSTITUTION_PREPARED_COLUMN = "institution_prepared"
 DEFENSE_LOCATION_COLUMN = "defense_location"
 LEADING_ORG_COLUMN = "leading_organization"
 
-# Колонки с тематическими профилями (basic_scores)
+# Колонка ключа в таблице тематических профилей
 SCORES_CODE_COLUMN = "Code"
 
 # Порог схожести для нечёткого поиска по строкам (rapidfuzz)
@@ -742,37 +742,19 @@ def search_by_classifier_score(
     lineage_func: Callable,
     rows_for_func: Callable,
     classifier_node: str,
-    scores_folder: str,
     scope: str = "all",
     top_n: int = 10,
 ) -> pd.DataFrame:
     """
     Топ-N школ по среднему баллу по узлу классификатора.
     """
-    base = Path(scores_folder).expanduser().resolve()
-    files = sorted(base.glob("*.csv"))
-    if not files:
-        return pd.DataFrame()
-
-    frames = []
-    for f in files:
-        try:
-            frame = pd.read_csv(f)
-            if SCORES_CODE_COLUMN in frame.columns:
-                frames.append(frame)
-        except Exception:
-            continue
-
-    if not frames:
-        return pd.DataFrame()
-
-    scores = pd.concat(frames, ignore_index=True)
+    scores = load_dissertation_scores()
     scores = scores.dropna(subset=[SCORES_CODE_COLUMN])
     scores[SCORES_CODE_COLUMN] = scores[SCORES_CODE_COLUMN].astype(str).str.strip()
     scores = scores[scores[SCORES_CODE_COLUMN].str.len() > 0]
     scores = scores.drop_duplicates(subset=[SCORES_CODE_COLUMN], keep="first")
 
-    feature_cols = [c for c in scores.columns if c != SCORES_CODE_COLUMN]
+    feature_cols = get_all_feature_columns(scores, key_column=SCORES_CODE_COLUMN)
     scores[feature_cols] = scores[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
     node_features = [

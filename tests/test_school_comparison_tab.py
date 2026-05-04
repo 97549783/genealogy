@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import tabs.school_comparison.tab as comp_tab
 
 
-def _fake_load_scores_from_folder(**kwargs):
+def _fake_load_scores_from_db(**kwargs):
     return pd.DataFrame([
         {"Code": "C1", "1": 0.4, "1.1": 0.2, "2": 0.1},
         {"Code": "C2", "1": 0.6, "1.1": 0.5, "2": 0.3},
@@ -82,7 +82,7 @@ def _fake_share(payload, key):
     st.session_state["_school_comp_share_key"] = key
 
 
-comp_tab.load_scores_from_folder = _fake_load_scores_from_folder
+comp_tab.load_scores_from_db = _fake_load_scores_from_db
 comp_tab.get_feature_columns = _fake_get_feature_columns
 comp_tab.get_selectable_nodes = _fake_get_selectable_nodes
 comp_tab.filter_columns_by_nodes = _fake_filter_columns_by_nodes

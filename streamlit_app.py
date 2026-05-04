@@ -61,8 +61,6 @@ with tab_by_id["profiles"]:
         df=ctx.df,
         idx=ctx.idx,
         thematic_classifier=THEMATIC_CLASSIFIER,
-        scores_folder="basic_scores",
-        specific_files=None,
     )
 
 with tab_by_id["school_search"]:
@@ -70,7 +68,6 @@ with tab_by_id["school_search"]:
         df=ctx.df,
         idx=ctx.idx,
         classifier=THEMATIC_CLASSIFIER,
-        scores_folder="basic_scores",
     )
 
 with tab_by_id["intersection"]:
@@ -81,15 +78,12 @@ with tab_by_id["school_analysis"]:
         df=ctx.df,
         idx=ctx.idx,
         classifier=THEMATIC_CLASSIFIER,
-        scores_folder="basic_scores",
     )
 
 with tab_by_id["school_comparison"]:
     render_school_comparison_tab(
         df=ctx.df,
         idx=ctx.idx,
-        scores_folder="basic_scores",
-        specific_files=None,
         classifier_labels=ctx.classifier_labels,
     )
 

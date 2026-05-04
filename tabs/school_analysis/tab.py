@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import matplotlib
@@ -37,7 +36,6 @@ from .exports import build_excel_report
 # КОНСТАНТЫ
 # ==============================================================================
 
-DEFAULT_SCORES_FOLDER = "basic_scores"
 
 SCOPE_LABELS: Dict[str, str] = {
     "direct": "Только первое поколение (прямые ученики)",
@@ -58,22 +56,6 @@ def _get_all_supervisors(df: pd.DataFrame) -> List[str]:
     ]
     return get_unique_supervisors(df, supervisor_columns=supervisor_cols)
 
-
-def _scores_folder_available(scores_folder: str) -> bool:
-    """
-    Проверяет наличие папки basic_scores с CSV-файлами.
-
-    Проверяет оба варианта расположения:
-    1. Текущая рабочая директория (CWD) — работает локально и на Streamlit Cloud.
-    2. Рядом с файлом самого модуля — запасной вариант.
-    """
-    p1 = Path(scores_folder)
-    if p1.exists() and any(p1.glob("*.csv")):
-        return True
-    p2 = Path(__file__).parent / scores_folder
-    if p2.exists() and any(p2.glob("*.csv")):
-        return True
-    return False
 
 
 def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figure:
@@ -117,7 +99,6 @@ def render_school_analysis_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
     classifier: Optional[List[Tuple[str, str, bool]]] = None,
-    scores_folder: str = DEFAULT_SCORES_FOLDER,
 ) -> None:
     """
     Отрисовывает вкладку «Анализ научной школы».
@@ -126,7 +107,6 @@ def render_school_analysis_tab(
         df              — основной DataFrame с диссертациями
         idx             — индекс имён
         classifier      — THEMATIC_CLASSIFIER из streamlit_app.py
-        scores_folder   — путь к basic_scores
     """
     st.subheader("Анализ научной школы")
 
@@ -352,19 +332,10 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 7. Тематический профиль школы")
     st.caption(
-        "Средние баллы по всем диссертациям школы, для которых доступны оценки в basic_scores."
+        "Средние баллы по всем диссертациям школы по данным таблицы diss_scores_5_8."
     )
 
-    scores_available = _scores_folder_available(scores_folder)
-
-    if not scores_available:
-        st.info(
-            f"Папка '{scores_folder}' не найдена или пуста. "
-            "Тематический профиль недоступен."
-        )
-        education_df = pd.DataFrame()
-        knowledge_df = pd.DataFrame()
-    elif classifier is None:
+    if classifier is None:
         st.info("Классификатор не передан. Тематический профиль недоступен.")
         education_df = pd.DataFrame()
         knowledge_df = pd.DataFrame()
@@ -372,7 +343,6 @@ def render_school_analysis_tab(
         with st.spinner("Вычисление тематического профиля..."):
             education_df, knowledge_df = compute_thematic_profile(
                 subset=subset,
-                scores_folder=scores_folder,
                 classifier=classifier,
                 group_prefix_education="1.1.1",
                 group_prefix_knowledge="1.1.2",

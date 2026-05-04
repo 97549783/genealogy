@@ -1,32 +1,31 @@
 from __future__ import annotations
 
+import importlib
+import sqlite3
+
 import pandas as pd
 
-from core.db.dissertations import AUTHOR_COLUMN, SUPERVISOR_COLUMNS, load_data
 
+def test_load_data_reads_sqlite_and_preserves_expected_columns(monkeypatch, tmp_path):
+    db_path = tmp_path / "genealogy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE diss_metadata (Code TEXT, candidate_name TEXT, `supervisors_1.name` TEXT)")
+    conn.execute("INSERT INTO diss_metadata VALUES (' 100 ', 'Автор 1', 'Руководитель 1')")
+    conn.execute("INSERT INTO diss_metadata VALUES ('', 'Пустой', 'x')")
+    conn.commit()
+    conn.close()
 
-def test_load_data_reads_csv_and_preserves_expected_columns(monkeypatch, tmp_path):
-    (tmp_path / "part_1.csv").write_text(
-        "candidate_name,supervisors_1.name,Code\n"
-        "Автор 1,Руководитель 1,100\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "part_2.csv").write_text(
-        "candidate_name,supervisors_2.name,Code\n"
-        "Автор 2,Руководитель 2,200\n",
-        encoding="utf-8",
-    )
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
-    monkeypatch.setattr("core.db.dissertations.DATA_DIR", str(tmp_path))
-    monkeypatch.setattr("core.db.dissertations.CSV_GLOB", "*.csv")
-    load_data.clear()
+    import core.db.dissertations as dissertations
+    importlib.reload(dissertations)
+    dissertations.load_dissertation_metadata.clear()
+    dissertations.load_data.clear()
 
-    result = load_data()
+    result = dissertations.load_data()
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2
-    assert AUTHOR_COLUMN == "candidate_name"
-    assert SUPERVISOR_COLUMNS == ["supervisors_1.name", "supervisors_2.name"]
-    assert set(result["Code"].astype(str).tolist()) == {"100", "200"}
-
-    load_data.clear()
+    assert len(result) == 1
+    assert dissertations.AUTHOR_COLUMN == "candidate_name"
+    assert dissertations.SUPERVISOR_COLUMNS == ["supervisors_1.name", "supervisors_2.name"]
+    assert result["Code"].tolist() == ["100"]

@@ -38,7 +38,6 @@ school_search_tab.render_school_search_tab(
     df=sample_df,
     idx={},
     classifier=None,
-    scores_folder="basic_scores",
 )
 """
     )

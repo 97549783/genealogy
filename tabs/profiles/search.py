@@ -10,14 +10,13 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 import urllib.parse
 import pandas as pd
-from core.db import get_all_feature_columns, load_scores_from_folder
+from core.db import get_all_feature_columns, load_dissertation_scores
 
 
 # ==============================================================================
 # КОНСТАНТЫ
 # ==============================================================================
 
-DEFAULT_SCORES_FOLDER = "basic_scores"
 DEFAULT_MIN_SCORE = 4.0
 SELECTION_LIMIT = 5
 
@@ -44,9 +43,9 @@ def _build_abstract_url(code: str, author: str) -> str:
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_basic_scores(folder_path: str = DEFAULT_SCORES_FOLDER) -> pd.DataFrame:
+def load_basic_scores() -> pd.DataFrame:
     """Совместимая обёртка над общим загрузчиком тематических профилей."""
-    return load_scores_from_folder(folder_path=folder_path)
+    return load_dissertation_scores()
 
 
 def get_feature_columns(scores_df: pd.DataFrame) -> List[str]:

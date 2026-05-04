@@ -329,7 +329,7 @@ def _show_disambiguation_dialog(ambiguous: Dict[str, List[str]]) -> None:
     @st.dialog("⚠️ Уточнение соответствия автора (инициалы → полное ФИО)", width="large")
     def _dlg():
         st.markdown(
-            "Для некоторых авторов в `articles_scores.csv` инициалы совпадают сразу с несколькими "
+            "Для некоторых авторов в `articles_scores_inf_edu` инициалы совпадают сразу с несколькими "
             "полными ФИО в базе. Выберите корректное ФИО для продолжения анализа "
             "или откажитесь от анализа."
         )
@@ -534,7 +534,7 @@ def render_articles_comparison_tab(
         help=(
             "Если выключено — доступны только руководители, у которых есть диссертанты в базе.\n\n"
             "Если включено — дополнительно доступны (а) люди из базы без диссертантов и (б) авторы из "
-            "`articles_scores.csv`, которых нет в базе (отображаются как 'Фамилия И.О.')."
+            "`articles_scores_inf_edu`, которых нет в базе (отображаются как 'Фамилия И.О.')."
         ),
     )
 
@@ -562,7 +562,7 @@ def render_articles_comparison_tab(
         default=st.session_state.get("ac_selected_options", []),
         key="ac_selected_options",
         help=(
-            "Список ограничен теми, чьи 'Фамилия И.О.' встречаются в articles_scores.csv.\n\n"
+            "Список ограничен теми, чьи 'Фамилия И.О.' встречаются в articles_scores_inf_edu.\n\n"
             "Элементы вида 'Фамилия И.О.' — авторы, которых нет в базе диссертаций."
         ),
     )
@@ -680,7 +680,7 @@ def render_articles_comparison_tab(
             df_articles = load_articles_data()
 
         if df_articles is None or df_articles.empty:
-            st.error("❌ Не удалось загрузить `articles_scores.csv`. Проверьте, что файл доступен в репозитории.")
+            st.error("❌ Не удалось загрузить данные статей из SQLite. Проверьте таблицы articles_metadata и articles_scores_inf_edu.")
             return
 
         # Построение датасета
