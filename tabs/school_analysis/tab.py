@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
+from core.db import get_db_signature
 
 from core.lineage.graph import lineage, rows_for
 from core.ui.links import share_params_button
@@ -84,8 +85,9 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
 
 def _clear_school_cache(root: str, scope: str) -> None:
     """Очищает кэш школы из session_state."""
+    db_sig = str(get_db_signature())
     for s in ("direct", "all"):
-        key = f"school_subset_{root}_{s}"
+        key = f"school_subset_{db_sig}_{root}_{s}"
         if key in st.session_state:
             del st.session_state[key]
 
@@ -167,14 +169,16 @@ def render_school_analysis_tab(
         st.session_state["school_analysis_run_state"] = True
 
     if not st.session_state.get("school_analysis_run_state", False):
-        if f"school_subset_{root}_direct" not in st.session_state:
+        db_sig = str(get_db_signature())
+        if f"school_subset_{db_sig}_{root}_direct" not in st.session_state:
             return
 
     # =========================================================================
     # Сбор данных с кэшированием в session_state
     # =========================================================================
-    key_direct = f"school_subset_{root}_direct"
-    key_all = f"school_subset_{root}_all"
+    db_sig = str(get_db_signature())
+    key_direct = f"school_subset_{db_sig}_{root}_direct"
+    key_all = f"school_subset_{db_sig}_{root}_all"
 
     with st.spinner("Сбор диссертаций школы..."):
         if key_direct not in st.session_state:
@@ -388,27 +392,30 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### \U0001f4e5 Скачать полный отчёт")
 
-    with st.spinner("Формируем Excel-файл..."):
-        excel_bytes = build_excel_report(
-            metrics_df=metrics_df,
-            generations_df=generations_df,
-            yearly_df=yearly_df if not yearly_df.empty else pd.DataFrame(),
-            city_df=city_df if not city_df.empty else pd.DataFrame(),
-            institutional=institutional,
-            opponents_df=compute_top_opponents(subset, top_n=None),
-            education_df=education_df if not education_df.empty else pd.DataFrame(),
-            knowledge_df=knowledge_df if not knowledge_df.empty else pd.DataFrame(),
-            continuity_df=continuity_df if not continuity_df.empty else pd.DataFrame(),
-        )
+    if st.button("Сформировать Excel-отчёт", key="school_analysis_build_excel"):
+        with st.spinner("Формируем Excel-файл..."):
+            excel_bytes = build_excel_report(
+                metrics_df=metrics_df,
+                generations_df=generations_df,
+                yearly_df=yearly_df if not yearly_df.empty else pd.DataFrame(),
+                city_df=city_df if not city_df.empty else pd.DataFrame(),
+                institutional=institutional,
+                opponents_df=compute_top_opponents(subset, top_n=None),
+                education_df=education_df if not education_df.empty else pd.DataFrame(),
+                knowledge_df=knowledge_df if not knowledge_df.empty else pd.DataFrame(),
+                continuity_df=continuity_df if not continuity_df.empty else pd.DataFrame(),
+            )
+        st.session_state["school_analysis_excel_bytes"] = excel_bytes
 
-    safe_name = root.replace(" ", "_").replace("/", "-")[:60]
-    st.download_button(
-        label="\U0001f4e5 Скачать полный отчёт (Excel)",
-        data=excel_bytes,
-        file_name=f"анализ_научной_школы_{safe_name}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="school_analysis_download_excel",
-    )
+    if "school_analysis_excel_bytes" in st.session_state:
+        safe_name = root.replace(" ", "_").replace("/", "-")[:60]
+        st.download_button(
+            label="\U0001f4e5 Скачать полный отчёт (Excel)",
+            data=st.session_state["school_analysis_excel_bytes"],
+            file_name=f"анализ_научной_школы_{safe_name}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="school_analysis_download_excel",
+        )
 
     share_params_button(
         {

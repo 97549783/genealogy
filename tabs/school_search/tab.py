@@ -39,6 +39,7 @@ from .search import (
 from core.ui.table_display import render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
+from core.db import get_db_signature
 
 
 # ==============================================================================
@@ -238,7 +239,7 @@ def _render_results(
             st.pyplot(fig)
             plt.close(fig)
     except Exception:
-        pass
+        st.warning("Не удалось построить диаграмму для текущих результатов.")
 
     # Таблица
     st.dataframe(result_df, use_container_width=True, hide_index=True)
@@ -262,7 +263,7 @@ def _render_results(
             key=f"{key_prefix}_dl_excel",
         )
     except Exception:
-        pass
+        st.warning("Не удалось сформировать Excel-файл для результатов.")
 
 
 # ==============================================================================
