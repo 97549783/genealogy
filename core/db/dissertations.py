@@ -29,6 +29,17 @@ MULTI_COLUMN_CRITERIA = {
     "opponents": ["opponents_1.name", "opponents_2.name", "opponents_3.name"],
     "specialties": ["specialties_1.code", "specialties_1.name", "specialties_2.code", "specialties_2.name"],
 }
+SCHOOL_SEARCH_TEXT_COLUMNS = {
+    "city",
+    "institution_prepared",
+    "defense_location",
+    "leading_organization",
+    "opponents_1.name",
+    "opponents_2.name",
+    "opponents_3.name",
+    "candidate_name",
+}
+SCHOOL_SEARCH_NUMERIC_COLUMNS = {"year"}
 
 
 def _quote_identifier(identifier: str) -> str:
@@ -191,3 +202,96 @@ def fetch_dissertation_metadata_by_codes(
     if "Code" in out.columns:
         out["Code"] = out["Code"].astype(str).str.strip()
     return out
+
+
+def fetch_dissertation_codes_by_year_range(year_from: int, year_to: int) -> set[str]:
+    """Возвращает Code диссертаций, защищённых в заданном диапазоне лет."""
+    if year_from > year_to:
+        raise ValueError("Начальный год не может быть больше конечного года.")
+    with get_sqlite_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT "Code"
+            FROM diss_metadata
+            WHERE "Code" IS NOT NULL
+              AND TRIM(CAST("Code" AS TEXT)) != ''
+              AND CAST("year" AS INTEGER) BETWEEN ? AND ?
+            """,
+            (year_from, year_to),
+        ).fetchall()
+    return {str(row[0]).strip() for row in rows if str(row[0]).strip()}
+
+
+def fetch_dissertation_codes_by_year(year: int) -> set[str]:
+    """Возвращает Code диссертаций, защищённых в заданный год."""
+    return fetch_dissertation_codes_by_year_range(year, year)
+
+
+def fetch_dissertation_text_candidates(
+    columns: list[str],
+    query: str,
+    *,
+    use_like_prefilter: bool = True,
+) -> pd.DataFrame:
+    """Возвращает кандидатов для текстового поиска по выбранным столбцам."""
+    if any(col not in SCHOOL_SEARCH_TEXT_COLUMNS for col in columns):
+        bad = [col for col in columns if col not in SCHOOL_SEARCH_TEXT_COLUMNS]
+        raise ValueError(f"Недопустимые столбцы для поиска: {', '.join(bad)}")
+    normalized_query = str(query).strip()
+    if not normalized_query:
+        return pd.DataFrame(columns=["Code", "column", "value"])
+
+    existing = _get_table_columns("diss_metadata")
+    safe_columns = [col for col in columns if col in existing]
+    if not safe_columns:
+        raise ValueError("В базе отсутствуют запрошенные столбцы для поиска.")
+
+    frames: list[pd.DataFrame] = []
+    like_value = f"%{normalized_query}%"
+    with get_sqlite_connection() as conn:
+        for col in safe_columns:
+            where_like = f" AND {_like_expr(col)}" if use_like_prefilter else ""
+            query_sql = f"""
+                SELECT
+                    CAST("Code" AS TEXT) AS Code,
+                    ? AS "column",
+                    CAST({_quote_identifier(col)} AS TEXT) AS value
+                FROM diss_metadata
+                WHERE "Code" IS NOT NULL
+                  AND TRIM(CAST("Code" AS TEXT)) != ''
+                  AND {_quote_identifier(col)} IS NOT NULL
+                  AND TRIM(CAST({_quote_identifier(col)} AS TEXT)) != ''
+                  {where_like}
+            """
+            params = [col]
+            if use_like_prefilter:
+                params.append(like_value)
+            frames.append(pd.read_sql_query(query_sql, conn, params=params))
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["Code", "column", "value"])
+    if out.empty:
+        return out
+    out["Code"] = out["Code"].astype(str).str.strip()
+    out["value"] = out["value"].astype(str).str.strip()
+    return out[(out["Code"] != "") & (out["value"] != "")].reset_index(drop=True)
+
+
+def fetch_candidate_name_options() -> list[str]:
+    """Возвращает список ФИО авторов диссертаций для выбора в интерфейсе."""
+    return _fetch_candidate_name_options_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _fetch_candidate_name_options_cached(db_signature: tuple[str, float, int]) -> list[str]:
+    """Загружает список ФИО авторов из SQLite с кэшированием."""
+    _ = db_signature
+    with get_sqlite_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT "candidate_name"
+            FROM diss_metadata
+            WHERE "candidate_name" IS NOT NULL
+              AND TRIM(CAST("candidate_name" AS TEXT)) != ''
+            ORDER BY "candidate_name" COLLATE NOCASE
+            """
+        ).fetchall()
+    return [str(row[0]).strip() for row in rows if str(row[0]).strip()]

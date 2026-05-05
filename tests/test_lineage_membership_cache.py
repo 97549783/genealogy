@@ -4,7 +4,9 @@ import pandas as pd
 
 from core.lineage.graph import build_index
 from core.lineage.membership import (
+    get_all_school_member_codes,
     get_cached_roots,
+    get_school_basic_stats,
     get_school_lineage,
     get_school_member_codes,
     get_school_subset,
@@ -42,3 +44,18 @@ def test_membership_cache_unknown_scope():
         assert False
     except ValueError as exc:
         assert "Неизвестная область" in str(exc)
+
+
+def test_bulk_school_stats():
+    df = _df()
+    df["year"] = ["2010", "2015", "2018"]
+    df["city"] = ["Москва", "Казань", "Москва"]
+    idx = build_index(df, ["supervisors_1.name", "supervisors_2.name"])
+    sig = ("x", 1.0, 1)
+    codes = get_all_school_member_codes(df, idx, "all", sig)
+    assert codes["Root"] == {"1", "2", "3"}
+    stats = get_school_basic_stats(df, idx, "all", sig)
+    assert stats["Root"]["n_members"] == 3
+    assert stats["Root"]["year_min"] == 2010
+    assert stats["Root"]["year_max"] == 2018
+    assert stats["Root"]["n_cities"] == 2

@@ -28,4 +28,7 @@ def get_sqlite_connection() -> sqlite3.Connection:
     db_path = _resolve_db_path()
     if not db_path.exists():
         raise FileNotFoundError(f"SQLite-база не найдена: {db_path.resolve()}")
-    return sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path)
+    # Регистрируем CASEFOLD для регистронезависимого Unicode-поиска в SQL.
+    conn.create_function("CASEFOLD", 1, lambda value: str(value or "").casefold())
+    return conn
