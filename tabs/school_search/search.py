@@ -44,12 +44,11 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from core.db import (
-    get_all_feature_columns,
-    load_dissertation_scores,
     get_db_signature,
     fetch_dissertation_codes_by_year,
     fetch_dissertation_codes_by_year_range,
     fetch_dissertation_text_candidates,
+    fetch_dissertation_node_score_by_codes,
 )
 from core.lineage.membership import (
     get_cached_roots,
@@ -723,11 +722,6 @@ def search_by_leading_organization(
 # ---------------------------------------------------------------------------
 
 
-def _is_child_of(code: str, parent: str) -> bool:
-    """Проверяет, является ли code дочерним (или равным) узлу parent."""
-    return code == parent or code.startswith(parent + ".")
-
-
 def search_by_classifier_score(
     df: pd.DataFrame,
     index: Dict[str, Set[int]],
@@ -740,49 +734,30 @@ def search_by_classifier_score(
     """
     Топ-N школ по среднему баллу по узлу классификатора.
     """
-    scores = load_dissertation_scores().copy()
-    # Профили уже нормализованы в слое загрузки из SQLite.
-    feature_cols = get_all_feature_columns(scores, key_column=SCORES_CODE_COLUMN)
-
-    node_features = [
-        col for col in feature_cols
-        if _is_child_of(col, classifier_node) or col == classifier_node
-    ]
-    if not node_features:
+    sig = get_db_signature()
+    school_codes = get_all_school_member_codes(df, index, scope, sig)
+    stats = get_school_basic_stats(df, index, scope, sig)
+    all_codes = {code for codes in school_codes.values() for code in codes if str(code).strip()}
+    if not all_codes:
         return pd.DataFrame()
-
-    scores_indexed = scores.set_index(SCORES_CODE_COLUMN)
-
+    node_scores = fetch_dissertation_node_score_by_codes(all_codes, classifier_node)
+    if node_scores.empty:
+        return pd.DataFrame()
+    score_by_code = (
+        node_scores.dropna(subset=["Code"])
+        .assign(Code=lambda x: x["Code"].astype(str).str.strip())
+        .set_index("Code")["node_score"]
+    )
     metric_label = f"Средний балл ({classifier_node})"
-    roots = get_all_roots(df)
     rows: List[SearchRow] = []
-
-    for root in roots:
-        subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
-        if subset.empty or SCORES_CODE_COLUMN not in subset.columns:
+    for root, codes in school_codes.items():
+        root_codes = [code for code in codes if code in score_by_code.index]
+        if not root_codes:
             continue
-
-        school_codes = (
-            subset[SCORES_CODE_COLUMN]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .pipe(lambda s: s[s != ""])
-            .unique()
-        )
-        if len(school_codes) == 0:
+        avg_score = score_by_code.loc[root_codes].mean()
+        if pd.isna(avg_score):
             continue
-
-        matched_scores = scores_indexed.loc[
-            scores_indexed.index.intersection(school_codes), node_features
-        ]
-        if matched_scores.empty:
-            continue
-
-        avg = float(matched_scores.values.mean())
-        row = build_result_row(0, root, round(avg, 3), subset, metric_label)
-        row["Диссертаций с оценками"] = len(matched_scores)
-        rows.append(row)
+        rows.append(_result_row_from_stats(0, root, round(float(avg_score), 3), metric_label, stats[root]))
 
     rows.sort(key=lambda r: r[metric_label], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
