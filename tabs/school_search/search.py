@@ -722,14 +722,9 @@ def search_by_classifier_score(
     """
     Топ-N школ по среднему баллу по узлу классификатора.
     """
-    scores = load_dissertation_scores()
-    scores = scores.dropna(subset=[SCORES_CODE_COLUMN])
-    scores[SCORES_CODE_COLUMN] = scores[SCORES_CODE_COLUMN].astype(str).str.strip()
-    scores = scores[scores[SCORES_CODE_COLUMN].str.len() > 0]
-    scores = scores.drop_duplicates(subset=[SCORES_CODE_COLUMN], keep="first")
-
+    scores = load_dissertation_scores().copy()
+    # Профили уже нормализованы в слое загрузки из SQLite.
     feature_cols = get_all_feature_columns(scores, key_column=SCORES_CODE_COLUMN)
-    scores[feature_cols] = scores[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
     node_features = [
         col for col in feature_cols

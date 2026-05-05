@@ -225,6 +225,16 @@ def _render_results(
     """
     if result_df.empty:
         st.warning("По заданным параметрам ничего не найдено.")
+        if "_school_search_pending_signature" in st.session_state:
+            st.session_state["school_search_last_signature"] = st.session_state["_school_search_pending_signature"]
+            st.session_state["school_search_last_payload"] = {
+                "kind": "table",
+                "result_df": result_df,
+                "metric_col": metric_col,
+                "chart_title": chart_title,
+                "matched_map": matched_map,
+                "key_prefix": key_prefix,
+            }
         return
 
     st.success(f"Найдено школ: {len(result_df)}")
@@ -264,6 +274,17 @@ def _render_results(
         )
     except Exception:
         st.warning("Не удалось сформировать Excel-файл для результатов.")
+
+    if "_school_search_pending_signature" in st.session_state:
+        st.session_state["school_search_last_signature"] = st.session_state["_school_search_pending_signature"]
+        st.session_state["school_search_last_payload"] = {
+            "kind": "table",
+            "result_df": result_df,
+            "metric_col": metric_col,
+            "chart_title": chart_title,
+            "matched_map": matched_map,
+            "key_prefix": key_prefix,
+        }
 
 
 # ==============================================================================
@@ -557,6 +578,7 @@ def render_school_search_tab(
         "extra_params": extra_params,
         "db_signature": get_db_signature(),
     }
+    st.session_state["_school_search_pending_signature"] = current_signature
     if (
         st.session_state.get("school_search_last_signature") == current_signature
         and "school_search_last_payload" in st.session_state
@@ -594,11 +616,6 @@ def render_school_search_tab(
         )
         if not result_df.empty:
             share_params_button(share_params, key="school_search_share_total")
-        st.session_state["school_search_last_signature"] = current_signature
-        st.session_state["school_search_last_payload"] = {
-            "kind": "table", "result_df": result_df, "metric_col": "Число членов",
-            "chart_title": f"Топ-{top_n} школ по числу членов", "matched_map": None, "key_prefix": "ss_total",
-        }
 
     elif search_mode == "members_in_period":
         with st.spinner(spinner_msg):
