@@ -521,8 +521,8 @@ def render_school_search_tab(
             "member":   "например, Петрова Наталья Сергеевна",
         }
         st.markdown("### 👤 Лицо")
-        st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
         if search_mode == "member":
+            st.caption("Выберите автора диссертации из списка.")
             candidate_options = fetch_candidate_name_options()
             person_query_q = str(st.query_params.get("person_query", "")).strip()
             default_index = 0
@@ -542,6 +542,7 @@ def render_school_search_tab(
                 key=f"school_search_person_{search_mode}",
             )
         if search_mode == "opponent":
+            st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
             text_search_mode = st.radio(
                 "Режим текстового поиска",
                 options=[SEARCH_MODE_FAST, SEARCH_MODE_FUZZY],
