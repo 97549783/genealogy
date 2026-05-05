@@ -538,8 +538,6 @@ def render_school_search_tab(
         run_btn = st.form_submit_button("🔍 Найти", type="primary")
     if run_btn:
         st.session_state["school_search_run_state"] = True
-    if not st.session_state.get("school_search_run_state", False):
-        return
 
     _text_modes = {"city", "org_prepared", "org_defense", "org_leading", "opponent", "member"}
     if search_mode in _text_modes:
@@ -579,6 +577,17 @@ def render_school_search_tab(
         "db_signature": get_db_signature(),
     }
     st.session_state["_school_search_pending_signature"] = current_signature
+
+    if run_btn:
+        st.session_state["school_search_execute_signature"] = current_signature
+    if st.session_state.get("school_search_run_state", False) and "school_search_execute_signature" not in st.session_state:
+        st.session_state["school_search_execute_signature"] = current_signature
+    execute_signature = st.session_state.get("school_search_execute_signature")
+    if execute_signature != current_signature:
+        return
+
+    if not st.session_state.get("school_search_run_state", False):
+        return
     if (
         st.session_state.get("school_search_last_signature") == current_signature
         and "school_search_last_payload" in st.session_state
@@ -596,6 +605,34 @@ def render_school_search_tab(
             )
             if not payload["result_df"].empty:
                 share_params_button(share_params, key=f"school_search_share_cached_{search_mode}")
+            return
+        if payload.get("kind") == "member":
+            member_results = payload.get("member_results", [])
+            if not member_results:
+                st.warning("По заданным параметрам ничего не найдено.")
+                return
+            st.success(f"Найдено вариантов ФИО авторов: {len(member_results)}")
+            for i, item in enumerate(member_results, start=1):
+                author_name = str(item["author_name"])
+                chain_names = item["chain_names"]
+                subset = item["subset"]
+                reverse_table = _build_reverse_lineage_rows(subset)
+                reverse_graph = _build_reverse_lineage_graph(subset, author_name)
+                st.markdown(f"#### {i}. {author_name}")
+                st.caption(" → ".join(chain_names) if chain_names else "Цепочка не найдена.")
+                if not reverse_table.empty:
+                    st.table(reverse_table)
+                if reverse_graph.number_of_edges() > 0:
+                    html_str, height_px = build_markmap_html(reverse_graph, author_name, branching_mode="unidirectional")
+                    st.components.v1.html(html_str, height=height_px + 20, scrolling=False)
+                render_dissertations_widget(
+                    subset=subset,
+                    key=f"ss_member_cached_{i}_{slug(author_name)}",
+                    title="Результаты",
+                    expanded=False,
+                    file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
+                )
+            share_params_button(share_params, key="school_search_share_member_cached")
             return
 
     # --------------------------------------------------------------------------
@@ -896,4 +933,9 @@ def render_school_search_tab(
                 expanded=False,
                 file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
             )
+        st.session_state["school_search_last_signature"] = current_signature
+        st.session_state["school_search_last_payload"] = {
+            "kind": "member",
+            "member_results": member_results,
+        }
         share_params_button(share_params, key="school_search_share_member")
