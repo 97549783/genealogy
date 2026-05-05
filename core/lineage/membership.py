@@ -138,3 +138,110 @@ def _school_basic_stats_cached(db_signature, df: pd.DataFrame, idx: dict, scope:
             "n_cities": n_cities,
         }
     return stats
+
+
+def get_author_by_code(
+    df: pd.DataFrame,
+    db_signature: tuple[str, float, int],
+) -> dict[str, str]:
+    """Возвращает словарь Code → ФИО автора диссертации."""
+    return _get_author_by_code_cached(df, db_signature)
+
+
+@st.cache_data(show_spinner=False)
+def _get_author_by_code_cached(
+    df: pd.DataFrame,
+    db_signature: tuple[str, float, int],
+) -> dict[str, str]:
+    """Кэширует соответствие Code → ФИО автора."""
+    _ = db_signature
+    if "Code" not in df.columns or "candidate_name" not in df.columns:
+        return {}
+    work = df[["Code", "candidate_name"]].copy()
+    work["Code"] = work["Code"].astype(str).str.strip()
+    work["candidate_name"] = work["candidate_name"].astype(str).str.strip()
+    work = work[(work["Code"] != "") & (work["candidate_name"] != "")]
+    work = work.drop_duplicates(subset=["Code"], keep="first")
+    return dict(zip(work["Code"], work["candidate_name"]))
+
+
+def get_supervisor_norm_set(
+    idx: dict[str, set[int]],
+    db_signature: tuple[str, float, int],
+) -> set[str]:
+    """Возвращает множество нормализованных имён людей, у которых есть ученики."""
+    return _get_supervisor_norm_set_cached(idx, db_signature)
+
+
+@st.cache_data(show_spinner=False)
+def _get_supervisor_norm_set_cached(
+    idx: dict[str, set[int]],
+    db_signature: tuple[str, float, int],
+) -> set[str]:
+    """Кэширует множество нормализованных имён руководителей."""
+    _ = db_signature
+    return {norm(str(name)) for name, row_ids in idx.items() if str(name).strip() and row_ids}
+
+
+def is_author_supervisor(author_name: str, supervisor_norms: set[str]) -> bool:
+    """Проверяет, встречается ли автор как научный руководитель."""
+    name = str(author_name).strip()
+    if not name:
+        return False
+    return any(norm(variant) in supervisor_norms for variant in variants(name))
+
+
+def get_author_supervisor_flags_by_code(
+    df: pd.DataFrame,
+    idx: dict[str, set[int]],
+    db_signature: tuple[str, float, int],
+) -> dict[str, bool]:
+    """Возвращает словарь Code → является ли автор научным руководителем."""
+    return _get_author_supervisor_flags_by_code_cached(df, idx, db_signature)
+
+
+@st.cache_data(show_spinner=False)
+def _get_author_supervisor_flags_by_code_cached(
+    df: pd.DataFrame,
+    idx: dict[str, set[int]],
+    db_signature: tuple[str, float, int],
+) -> dict[str, bool]:
+    """Кэширует флаги авторов, являющихся научными руководителями."""
+    authors = get_author_by_code(df, db_signature)
+    supervisor_norms = get_supervisor_norm_set(idx, db_signature)
+    return {code: is_author_supervisor(author, supervisor_norms) for code, author in authors.items()}
+
+
+def get_supervisor_rate_stats(
+    df: pd.DataFrame,
+    idx: dict[str, set[int]],
+    db_signature: tuple[str, float, int],
+) -> dict[str, dict]:
+    """Возвращает статистику доли учеников, ставших руководителями, по всем школам."""
+    return _get_supervisor_rate_stats_cached(df, idx, db_signature)
+
+
+@st.cache_data(show_spinner=False)
+def _get_supervisor_rate_stats_cached(
+    df: pd.DataFrame,
+    idx: dict[str, set[int]],
+    db_signature: tuple[str, float, int],
+) -> dict[str, dict]:
+    """Кэширует статистику доли учеников-руководителей по школам."""
+    direct_codes_by_root = get_all_school_member_codes(df=df, idx=idx, scope="direct", db_signature=db_signature)
+    flags = get_author_supervisor_flags_by_code(df, idx, db_signature)
+    out: dict[str, dict] = {}
+    for root, direct_codes in direct_codes_by_root.items():
+        direct = {str(code).strip() for code in direct_codes if str(code).strip()}
+        supervisor_codes = {code for code in direct if flags.get(code, False)}
+        direct_count = len(direct)
+        supervisor_count = len(supervisor_codes)
+        rate = round(100.0 * supervisor_count / direct_count, 1) if direct_count > 0 else 0.0
+        out[root] = {
+            "direct_count": direct_count,
+            "supervisor_count": supervisor_count,
+            "rate": rate,
+            "supervisor_codes": supervisor_codes,
+            "direct_codes": direct,
+        }
+    return out

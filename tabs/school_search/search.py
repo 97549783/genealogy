@@ -56,6 +56,7 @@ from core.lineage.membership import (
     get_school_lineage,
     get_all_school_member_codes,
     get_school_basic_stats,
+    get_supervisor_rate_stats,
 )
 
 # ---------------------------------------------------------------------------
@@ -473,36 +474,23 @@ def search_by_supervisor_rate(
         # | Руководитель | Доля учеников-руководителей, % | Таких учеников |
           Прямых учеников | Всего членов | Годы активности | Уникальных городов
     """
-    roots = get_all_roots(df)
+    _ = lineage_func, rows_for_func, scope
+    sig = get_db_signature()
+    rate_stats = get_supervisor_rate_stats(df, index, sig)
+    school_stats = get_school_basic_stats(df, index, "all", sig)
     rows: List[SearchRow] = []
-
-    for root in roots:
-        subset_direct = rows_for_func(df, index, root)
-        if subset_direct.empty or AUTHOR_COLUMN not in subset_direct.columns:
-            continue
-
-        direct_count = len(subset_direct)
-        supervisor_count = 0
-
-        for name in subset_direct[AUTHOR_COLUMN].dropna().astype(str).unique():
-            name = name.strip()
-            if not name:
-                continue
-            pupils = rows_for_func(df, index, name)
-            if not pupils.empty:
-                supervisor_count += 1
-
+    for root, stat in rate_stats.items():
+        direct_count = stat["direct_count"]
         if direct_count == 0:
             continue
-
-        rate = round(100.0 * supervisor_count / direct_count, 1)
-
-        subset_full = collect_subset(
-            df, index, root, scope, lineage_func, rows_for_func
+        row = _result_row_from_stats(
+            0,
+            root,
+            f"{stat['rate']}%",
+            "Доля учеников-руководителей, %",
+            school_stats.get(root, {"n_members": direct_count, "year_range": "—", "n_cities": 0}),
         )
-
-        row = build_result_row(0, root, f"{rate}%", subset_full,
-                               "Доля учеников-руководителей, %")
+        supervisor_count = stat["supervisor_count"]
         row["Таких учеников"] = supervisor_count
         row["Прямых учеников"] = direct_count
         rows.append(row)
