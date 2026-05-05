@@ -37,3 +37,5 @@ def test_school_search_fetchers(tmp_path, monkeypatch):
         assert False
     except ValueError:
         assert True
+    no_prefilter = dissertations.fetch_dissertation_text_candidates(["opponents_1.name"], "zzz", use_like_prefilter=False)
+    assert set(no_prefilter["Code"]) == {"1", "2"}
