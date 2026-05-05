@@ -757,6 +757,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 city_query=extra_params["city_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Защит в городе",
@@ -793,6 +794,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций (орг. выполнения)",
@@ -810,6 +812,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций (место защиты)",
@@ -827,6 +830,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций (вед. организация)",
@@ -871,6 +875,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 person_query=extra_params["person_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций с оппонентом",

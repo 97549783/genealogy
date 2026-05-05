@@ -118,3 +118,36 @@ def test_search_and_filter_options_from_sql(monkeypatch, tmp_path):
     assert "13.00.01" in options["specialties"]
     assert "13.00.08" in options["specialties"]
     assert "" not in options["specialties"]
+
+
+def test_search_dissertation_metadata_fuzzy_and_and_semantics(monkeypatch, tmp_path):
+    db_path = tmp_path / "genealogy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE diss_metadata ("
+        "Code TEXT, candidate_name TEXT, city TEXT, institution_prepared TEXT, year TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO diss_metadata VALUES (?,?,?,?,?)",
+        [
+            ("1", "Иванов Иван Иванович", "Москва", "Московский государственный университет", "2020"),
+            ("2", "Иванов Иван Иванович", "Казань", "КФУ", "2020"),
+            ("3", "Петров Петр Петрович", "Москва", "МГУ", "2021"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+    import core.db.dissertations as dissertations
+    importlib.reload(dissertations)
+
+    fast = dissertations.search_dissertation_metadata({"institution_prepared": "московский"}, use_fuzzy=False)
+    fuzzy = dissertations.search_dissertation_metadata({"institution_prepared": "московский"}, use_fuzzy=True)
+    and_filtered = dissertations.search_dissertation_metadata(
+        {"candidate_name": "иванов", "city": "москва"},
+        use_fuzzy=True,
+    )
+
+    assert set(fast["Code"].tolist()) == {"1"}
+    assert set(fuzzy["Code"].tolist()) == {"1"}
+    assert set(and_filtered["Code"].tolist()) == {"1"}

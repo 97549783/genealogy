@@ -96,3 +96,36 @@ def test_criteria_dictionary_contract() -> None:
         "year",
         "specialties",
     ]
+
+
+def test_dissertations_tab_passes_use_fuzzy_and_adds_mode_to_share_payload() -> None:
+    app = AppTest.from_string(
+        """
+import streamlit as st
+import pandas as pd
+import tabs.dissertations.tab as diss_tab
+
+def _fake_filter(df, search_params, use_fuzzy=False):
+    st.session_state["_captured_use_fuzzy"] = use_fuzzy
+    return pd.DataFrame([{"Code": "1", "candidate_name": "Иванов И.И.", "title": "Тест"}])
+
+def _fake_share(payload, key):
+    st.session_state["_captured_share_payload"] = payload
+
+def _fake_render(**kwargs):
+    pass
+
+diss_tab.filter_dissertations = _fake_filter
+diss_tab.share_params_button = _fake_share
+diss_tab.render_dissertations_widget = _fake_render
+
+sample_df = pd.DataFrame([{"title": "x"}])
+diss_tab.render_dissertations_tab(sample_df)
+"""
+    )
+    app.query_params["diss_criterion"] = ["title"]
+    app.query_params["diss_title"] = "метод"
+    app.query_params["diss_text_search_mode"] = "fuzzy"
+    app.run()
+    assert app.session_state["_captured_use_fuzzy"] is True
+    assert app.session_state["_captured_share_payload"]["diss_text_search_mode"] == "fuzzy"
