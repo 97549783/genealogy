@@ -87,3 +87,93 @@ def get_numeric_code_feature_columns(scores_df: pd.DataFrame) -> list[str]:
         for column in scores_df.columns
         if column != "Code" and len(column) > 0 and column[0].isdigit()
     ]
+
+
+def _quote_identifier(identifier: str) -> str:
+    """Экранирует имя идентификатора SQLite."""
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _table_columns(table_name: str) -> list[str]:
+    with get_sqlite_connection() as conn:
+        rows = conn.execute(f"PRAGMA table_info({_quote_identifier(table_name)})").fetchall()
+    return [row[1] for row in rows]
+
+
+def fetch_scores_by_codes(
+    codes: list[str] | set[str],
+    score_columns: list[str] | None = None,
+    table_name: str = "diss_scores_5_8",
+    key_column: str = "Code",
+) -> pd.DataFrame:
+    """Загружает профили по списку ключей и выбранным признакам."""
+    safe_table = _validate_table_name(table_name)
+    all_columns = _table_columns(safe_table)
+    if key_column not in all_columns:
+        raise ValueError(f"В таблице '{safe_table}' отсутствует ключевой столбец '{key_column}'")
+
+    feature_columns = [c for c in all_columns if c not in NON_SCORE_COLUMNS and c != key_column]
+    if score_columns is None:
+        selected_features = feature_columns
+    else:
+        unknown = [c for c in score_columns if c not in feature_columns]
+        if unknown:
+            raise ValueError(f"Неизвестные столбцы профилей: {', '.join(unknown)}")
+        selected_features = list(dict.fromkeys(score_columns))
+    select_columns = [key_column, *selected_features]
+
+    normalized = [str(code).strip() for code in codes if str(code).strip()]
+    if not normalized:
+        return pd.DataFrame(columns=select_columns)
+
+    frames: list[pd.DataFrame] = []
+    with get_sqlite_connection() as conn:
+        for i in range(0, len(normalized), 500):
+            chunk = normalized[i:i + 500]
+            placeholders = ",".join(["?"] * len(chunk))
+            col_sql = ", ".join(_quote_identifier(c) for c in select_columns)
+            query = (
+                f"SELECT {col_sql} FROM {_quote_identifier(safe_table)} "
+                f"WHERE {_quote_identifier(key_column)} IN ({placeholders})"
+            )
+            frames.append(pd.read_sql_query(query, conn, params=chunk))
+
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=select_columns)
+    for column in selected_features:
+        out[column] = pd.to_numeric(out[column], errors="coerce").fillna(0.0)
+    return out
+
+
+def search_dissertation_scores_by_codes_threshold(
+    selected_score_columns: list[str],
+    min_score: float,
+    return_columns: list[str] | None = None,
+) -> pd.DataFrame:
+    """Ищет диссертации по порогу выбранных тематических признаков."""
+    if not selected_score_columns:
+        raise ValueError("Нужно выбрать хотя бы один тематический признак.")
+    table_name = "diss_scores_5_8"
+    all_columns = _table_columns(table_name)
+    feature_columns = [c for c in all_columns if c not in NON_SCORE_COLUMNS and c != "Code"]
+    unknown = [c for c in selected_score_columns if c not in feature_columns]
+    if unknown:
+        raise ValueError(f"Неизвестные тематические признаки: {', '.join(unknown)}")
+    return_cols = selected_score_columns if return_columns is None else return_columns
+    bad_return = [c for c in return_cols if c not in feature_columns and c != "Code"]
+    if bad_return:
+        raise ValueError(f"Недопустимые столбцы возврата: {', '.join(bad_return)}")
+
+    where_sql = " AND ".join(f'COALESCE({_quote_identifier(c)}, 0) >= ?' for c in selected_score_columns)
+    total_sql = " + ".join(f'COALESCE({_quote_identifier(c)}, 0)' for c in selected_score_columns)
+    select_columns = list(dict.fromkeys(["Code", *return_cols]))
+    select_sql = ", ".join(_quote_identifier(c) for c in select_columns)
+    query = (
+        f'SELECT {select_sql}, ({total_sql}) AS profile_total FROM {_quote_identifier(table_name)} '
+        f"WHERE {where_sql} ORDER BY profile_total DESC"
+    )
+    with get_sqlite_connection() as conn:
+        out = pd.read_sql_query(query, conn, params=[min_score] * len(selected_score_columns))
+    for column in selected_score_columns:
+        if column in out.columns:
+            out[column] = pd.to_numeric(out[column], errors="coerce").fillna(0.0)
+    return out

@@ -21,7 +21,6 @@ def test_load_data_reads_sqlite_and_preserves_expected_columns(monkeypatch, tmp_
     import core.db.dissertations as dissertations
     importlib.reload(dissertations)
     dissertations._load_dissertation_metadata_cached.clear()
-    dissertations.load_data.clear()
 
     result = dissertations.load_data()
 
@@ -30,6 +29,28 @@ def test_load_data_reads_sqlite_and_preserves_expected_columns(monkeypatch, tmp_
     assert dissertations.AUTHOR_COLUMN == "candidate_name"
     assert dissertations.SUPERVISOR_COLUMNS == ["supervisors_1.name", "supervisors_2.name"]
     assert result["Code"].tolist() == ["100"]
+
+
+def test_fetch_dissertation_metadata_by_codes(monkeypatch, tmp_path):
+    db_path = tmp_path / "genealogy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE diss_metadata (Code TEXT, candidate_name TEXT, year TEXT)")
+    conn.executemany("INSERT INTO diss_metadata VALUES (?,?,?)", [("1", "А", "2020"), ("2", "Б", "2021")])
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+    import core.db.dissertations as dissertations
+    importlib.reload(dissertations)
+    empty = dissertations.fetch_dissertation_metadata_by_codes([])
+    assert empty.empty
+    subset = dissertations.fetch_dissertation_metadata_by_codes(["1"], columns=["year"])
+    assert set(subset.columns) == {"Code", "year"}
+    assert subset.iloc[0]["Code"] == "1"
+    try:
+        dissertations.fetch_dissertation_metadata_by_codes(["1"], columns=["bad"])
+        assert False
+    except ValueError:
+        assert True
 
 
 def test_db_signature_changes_after_file_update(monkeypatch, tmp_path):

@@ -16,6 +16,8 @@ from core.db import (
 )
 from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances, cosine_distances
+from core.lineage.membership import get_school_subset
+from core.db import get_db_signature
 
 
 # ==============================================================================
@@ -218,12 +220,8 @@ def gather_school_dataset(
     author_column: str = "candidate_name",
 ) -> Tuple[pd.DataFrame, pd.DataFrame, int]:
     """Собирает данные тематических профилей для научной школы."""
-    if scope == "direct":
-        subset = rows_for_func(df, index, root)
-    elif scope == "all":
-        _, subset = lineage_func(df, index, root)
-    else:
-        raise ValueError(f"Неизвестный scope: {scope}")
+    _ = lineage_func, rows_for_func
+    subset = get_school_subset(df, index, root, scope, get_db_signature())
 
     if subset is None or subset.empty:
         empty = pd.DataFrame(columns=["Code", "school", author_column])

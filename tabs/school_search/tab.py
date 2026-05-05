@@ -39,6 +39,7 @@ from .search import (
 from core.ui.table_display import render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
+from core.db import get_db_signature
 
 
 # ==============================================================================
@@ -224,6 +225,16 @@ def _render_results(
     """
     if result_df.empty:
         st.warning("По заданным параметрам ничего не найдено.")
+        if "_school_search_pending_signature" in st.session_state:
+            st.session_state["school_search_last_signature"] = st.session_state["_school_search_pending_signature"]
+            st.session_state["school_search_last_payload"] = {
+                "kind": "table",
+                "result_df": result_df,
+                "metric_col": metric_col,
+                "chart_title": chart_title,
+                "matched_map": matched_map,
+                "key_prefix": key_prefix,
+            }
         return
 
     st.success(f"Найдено школ: {len(result_df)}")
@@ -238,7 +249,7 @@ def _render_results(
             st.pyplot(fig)
             plt.close(fig)
     except Exception:
-        pass
+        st.warning("Не удалось построить диаграмму для текущих результатов.")
 
     # Таблица
     st.dataframe(result_df, use_container_width=True, hide_index=True)
@@ -262,7 +273,18 @@ def _render_results(
             key=f"{key_prefix}_dl_excel",
         )
     except Exception:
-        pass
+        st.warning("Не удалось сформировать Excel-файл для результатов.")
+
+    if "_school_search_pending_signature" in st.session_state:
+        st.session_state["school_search_last_signature"] = st.session_state["_school_search_pending_signature"]
+        st.session_state["school_search_last_payload"] = {
+            "kind": "table",
+            "result_df": result_df,
+            "metric_col": metric_col,
+            "chart_title": chart_title,
+            "matched_map": matched_map,
+            "key_prefix": key_prefix,
+        }
 
 
 # ==============================================================================
@@ -321,7 +343,10 @@ def render_school_search_tab(
 
         person_q = str(st.query_params.get("person_query", "")).strip()
         if person_q:
-            st.session_state["school_search_person_opponent"] = person_q
+            if mode_q == "member":
+                st.session_state["school_search_person_member_select"] = person_q
+            elif mode_q == "opponent":
+                st.session_state["school_search_person_opponent"] = person_q
 
         classifier_node_q = str(st.query_params.get("classifier_node", "")).strip()
         if classifier_node_q:
@@ -509,11 +534,10 @@ def render_school_search_tab(
     # ==========================================================================
     st.markdown("---")
 
-    run_btn = st.button("🔍 Найти", key="school_search_run", type="primary")
+    with st.form("school_search_form", clear_on_submit=False):
+        run_btn = st.form_submit_button("🔍 Найти", type="primary")
     if run_btn:
         st.session_state["school_search_run_state"] = True
-    if not st.session_state.get("school_search_run_state", False):
-        return
 
     _text_modes = {"city", "org_prepared", "org_defense", "org_leading", "opponent", "member"}
     if search_mode in _text_modes:
@@ -544,6 +568,72 @@ def render_school_search_tab(
         "top_n": top_n,
         **extra_params,
     }
+
+    current_signature = {
+        "mode": search_mode,
+        "scope": scope,
+        "top_n": top_n,
+        "extra_params": extra_params,
+        "db_signature": get_db_signature(),
+    }
+    st.session_state["_school_search_pending_signature"] = current_signature
+
+    if run_btn:
+        st.session_state["school_search_execute_signature"] = current_signature
+    if st.session_state.get("school_search_run_state", False) and "school_search_execute_signature" not in st.session_state:
+        st.session_state["school_search_execute_signature"] = current_signature
+    execute_signature = st.session_state.get("school_search_execute_signature")
+    if execute_signature != current_signature:
+        return
+
+    if not st.session_state.get("school_search_run_state", False):
+        return
+    if (
+        st.session_state.get("school_search_last_signature") == current_signature
+        and "school_search_last_payload" in st.session_state
+    ):
+        payload = st.session_state["school_search_last_payload"]
+        if payload.get("kind") == "table":
+            _render_results(
+                payload["result_df"],
+                metric_col=payload["metric_col"],
+                chart_title=payload["chart_title"],
+                matched_map=payload.get("matched_map"),
+                key_prefix=payload["key_prefix"],
+                search_mode=mode_label,
+                search_params=params_for_excel,
+            )
+            if not payload["result_df"].empty:
+                share_params_button(share_params, key=f"school_search_share_cached_{search_mode}")
+            return
+        if payload.get("kind") == "member":
+            member_results = payload.get("member_results", [])
+            if not member_results:
+                st.warning("По заданным параметрам ничего не найдено.")
+                return
+            st.success(f"Найдено вариантов ФИО авторов: {len(member_results)}")
+            for i, item in enumerate(member_results, start=1):
+                author_name = str(item["author_name"])
+                chain_names = item["chain_names"]
+                subset = item["subset"]
+                reverse_table = _build_reverse_lineage_rows(subset)
+                reverse_graph = _build_reverse_lineage_graph(subset, author_name)
+                st.markdown(f"#### {i}. {author_name}")
+                st.caption(" → ".join(chain_names) if chain_names else "Цепочка не найдена.")
+                if not reverse_table.empty:
+                    st.table(reverse_table)
+                if reverse_graph.number_of_edges() > 0:
+                    html_str, height_px = build_markmap_html(reverse_graph, author_name, branching_mode="unidirectional")
+                    st.components.v1.html(html_str, height=height_px + 20, scrolling=False)
+                render_dissertations_widget(
+                    subset=subset,
+                    key=f"ss_member_cached_{i}_{slug(author_name)}",
+                    title="Результаты",
+                    expanded=False,
+                    file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
+                )
+            share_params_button(share_params, key="school_search_share_member_cached")
+            return
 
     # --------------------------------------------------------------------------
     # ГРУППА 1: По размеру школы
@@ -843,4 +933,9 @@ def render_school_search_tab(
                 expanded=False,
                 file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
             )
+        st.session_state["school_search_last_signature"] = current_signature
+        st.session_state["school_search_last_payload"] = {
+            "kind": "member",
+            "member_results": member_results,
+        }
         share_params_button(share_params, key="school_search_share_member")

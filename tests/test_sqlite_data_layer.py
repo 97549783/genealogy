@@ -39,7 +39,6 @@ def test_sqlite_loaders(tmp_path, monkeypatch):
     importlib.reload(articles)
 
     dissertations._load_dissertation_metadata_cached.clear()
-    dissertations.load_data.clear()
     meta = dissertations.load_dissertation_metadata()
     assert set(meta["Code"].tolist()) == {"123"}
 
@@ -51,6 +50,11 @@ def test_sqlite_loaders(tmp_path, monkeypatch):
     merged = articles.load_articles_data()
     assert merged["Article_id"].dtype == object
     assert pd.api.types.is_numeric_dtype(merged["1.1"])
+    by_code = scores.fetch_scores_by_codes(["123"], score_columns=["1.1"])
+    assert list(by_code.columns) == ["Code", "1.1"]
+    assert by_code.iloc[0]["Code"] == "123"
+    filtered = scores.search_dissertation_scores_by_codes_threshold(["1.1"], 4.0)
+    assert "profile_total" in filtered.columns
 
 
 def test_runtime_modules_without_csv_patterns():

@@ -43,7 +43,8 @@ from collections import deque
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from core.db import get_all_feature_columns, load_dissertation_scores
+from core.db import get_all_feature_columns, load_dissertation_scores, get_db_signature
+from core.lineage.membership import get_cached_roots, get_school_subset, get_school_lineage
 
 # ---------------------------------------------------------------------------
 # Константы основных колонок данных диссертаций
@@ -158,31 +159,7 @@ def get_all_roots(df: pd.DataFrame) -> List[str]:
         «Рожков М. И.», «Рожков М.И.», «Рожков Михаил Иосифович»  → один корень
         «Третьяков П.И.», «Третьяков Пётр Иванович»               → один корень
     """
-    # Собираем все сырые значения из колонок руководителей
-    raw_names: Set[str] = set()
-    for col in SUPERVISOR_COLUMNS:
-        if col in df.columns:
-            raw_names.update(
-                str(v).strip()
-                for v in df[col].dropna().unique()
-                if str(v).strip()
-            )
-
-    # Группируем по нормализованному ключу, выбираем «лучший» вариант
-    groups: Dict[str, str] = {}  # norm_key → best raw name
-    for name in raw_names:
-        key = _norm_initials(name)
-        if key not in groups:
-            groups[key] = name
-        else:
-            current_best = groups[key]
-            # Предпочитаем более длинное имя (полное ФИО > инициалы)
-            if len(name) > len(current_best) or (
-                len(name) == len(current_best) and name < current_best
-            ):
-                groups[key] = name
-
-    return sorted(groups.values())
+    return get_cached_roots(df, get_db_signature())
 
 
 # ---------------------------------------------------------------------------
@@ -204,11 +181,8 @@ def collect_subset(
     scope='direct' — только прямые ученики руководителя;
     scope='all'    — все поколения (полное дерево).
     """
-    if scope == "direct":
-        return rows_for_func(df, index, root)
-    else:
-        _graph, subset = lineage_func(df, index, root)
-        return subset
+    _ = lineage_func, rows_for_func
+    return get_school_subset(df, index, root, scope, get_db_signature())
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +417,7 @@ def search_by_depth(
     rows: List[SearchRow] = []
 
     for root in roots:
-        graph, subset = lineage_func(df, index, root)
+        graph, subset = get_school_lineage(df, index, root, None, get_db_signature())
         if graph.number_of_nodes() < 2:
             continue
 
@@ -748,14 +722,9 @@ def search_by_classifier_score(
     """
     Топ-N школ по среднему баллу по узлу классификатора.
     """
-    scores = load_dissertation_scores()
-    scores = scores.dropna(subset=[SCORES_CODE_COLUMN])
-    scores[SCORES_CODE_COLUMN] = scores[SCORES_CODE_COLUMN].astype(str).str.strip()
-    scores = scores[scores[SCORES_CODE_COLUMN].str.len() > 0]
-    scores = scores.drop_duplicates(subset=[SCORES_CODE_COLUMN], keep="first")
-
+    scores = load_dissertation_scores().copy()
+    # Профили уже нормализованы в слое загрузки из SQLite.
     feature_cols = get_all_feature_columns(scores, key_column=SCORES_CODE_COLUMN)
-    scores[feature_cols] = scores[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
     node_features = [
         col for col in feature_cols
