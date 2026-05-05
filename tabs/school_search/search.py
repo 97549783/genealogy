@@ -548,7 +548,8 @@ def search_by_geo_diversity(
     Возвращает DataFrame с колонками:
         # | Руководитель | Уникальных городов | Всего членов | Годы активности | Уникальных городов
     """
-    stats = get_school_basic_stats(df, index, scope, get_db_signature())
+    with perf_timer("school_search.geo_diversity.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, get_db_signature())
     rows: List[SearchRow] = []
     for root, stat in stats.items():
         n_cities = stat["n_cities"]
@@ -556,7 +557,8 @@ def search_by_geo_diversity(
             continue
         rows.append(_result_row_from_stats(0, root, n_cities, "Уникальных городов", stat))
 
-    rows.sort(key=lambda r: r["Уникальных городов"], reverse=True)
+    with perf_timer("school_search.geo_diversity.rank"):
+        rows.sort(key=lambda r: r["Уникальных городов"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 

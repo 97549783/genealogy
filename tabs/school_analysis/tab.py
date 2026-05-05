@@ -185,13 +185,13 @@ def render_school_analysis_tab(
         if key_direct not in st.session_state:
             with perf_timer("school_analysis.collect_direct_subset"):
                 st.session_state[key_direct] = collect_school_subset(
-                df, idx, root, "direct", lineage, rows_for
-            )
+                    df, idx, root, "direct", lineage, rows_for
+                )
         if key_all not in st.session_state:
             with perf_timer("school_analysis.collect_all_subset"):
                 st.session_state[key_all] = collect_school_subset(
-                df, idx, root, "all", lineage, rows_for
-            )
+                    df, idx, root, "all", lineage, rows_for
+                )
 
     subset_direct: pd.DataFrame = st.session_state[key_direct]
     subset_all: pd.DataFrame = st.session_state[key_all]
@@ -208,13 +208,13 @@ def render_school_analysis_tab(
 
     with perf_timer("school_analysis.compute_overview"):
         overview = compute_overview(
-        subset=subset,
-        root=root,
-        index=idx,
-        lineage_func=lineage,
-        df_full=df,
-        scope=scope,
-    )
+            subset=subset,
+            root=root,
+            index=idx,
+            lineage_func=lineage,
+            df_full=df,
+            scope=scope,
+        )
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Всего диссертаций", overview["total"])
@@ -244,14 +244,14 @@ def render_school_analysis_tab(
     with st.spinner("Вычисление метрик..."):
         with perf_timer("school_analysis.compute_metrics"):
             metrics_df, generations_df = compute_metrics(
-            df_full=df,
-            index=idx,
-            root=root,
-            lineage_func=lineage,
-            rows_for_func=rows_for,
-            subset_direct=subset_direct,
-            subset_all=subset_all,
-        )
+                df_full=df,
+                index=idx,
+                root=root,
+                lineage_func=lineage,
+                rows_for_func=rows_for,
+                subset_direct=subset_direct,
+                subset_all=subset_all,
+            )
 
     st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
