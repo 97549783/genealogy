@@ -11,6 +11,7 @@ from core.ui.links import share_params_button
 
 from .search import build_filter_options, filter_dissertations, get_available_criteria
 from .state import hydrate_dissertations_query_params, request_search
+from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY, TEXT_SEARCH_MODE_LABELS
 
 
 def render_dissertations_tab(df: pd.DataFrame) -> None:
@@ -55,13 +56,20 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
                 key=f"diss_search_{criterion}",
             )
 
+    text_criteria = {"title","candidate_name","supervisors","opponents","institution_prepared","leading_organization","defense_location","city","specialties"}
+    use_fuzzy = False
+    text_search_mode = SEARCH_MODE_FAST
+    if any(c in text_criteria for c in selected_criteria):
+        text_search_mode = st.radio("Режим текстового поиска", options=[SEARCH_MODE_FAST, SEARCH_MODE_FUZZY], format_func=lambda value: TEXT_SEARCH_MODE_LABELS[value], index=0, key="diss_text_search_mode")
+        use_fuzzy = text_search_mode == SEARCH_MODE_FUZZY
+
     st.markdown("### 3. Результат")
 
     if st.button("Найти", type="primary", key="dissertation_search_button"):
         request_search()
 
     if st.session_state.get("diss_search_should_run", False):
-        st.session_state["diss_search_result"] = filter_dissertations(df, search_params)
+        st.session_state["diss_search_result"] = filter_dissertations(df, search_params, use_fuzzy=use_fuzzy)
 
     if "diss_search_result" in st.session_state:
         result_df = st.session_state["diss_search_result"]
@@ -73,10 +81,8 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
                 {
                     "tab": "dissertations",
                     "diss_criterion": selected_criteria,
-                    **{
-                        f"diss_{criterion}": search_params.get(criterion, "")
-                        for criterion in selected_criteria
-                    },
+                    **{f"diss_{criterion}": search_params.get(criterion, "") for criterion in selected_criteria},
+                    **({"diss_text_search_mode": text_search_mode} if any(c in text_criteria for c in selected_criteria) else {}),
                 },
                 key="diss_search_share",
             )

@@ -38,7 +38,6 @@
 from __future__ import annotations
 
 import io
-import re
 from collections import deque
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
@@ -50,6 +49,7 @@ from core.db import (
     fetch_dissertation_text_candidates,
     fetch_dissertation_node_score_by_codes,
 )
+from core.search.text_matching import FUZZY_THRESHOLD, fuzzy_match_series, normalize_text
 from core.lineage.membership import (
     get_cached_roots,
     get_school_subset,
@@ -76,9 +76,6 @@ LEADING_ORG_COLUMN = "leading_organization"
 # Колонка ключа в таблице тематических профилей
 SCORES_CODE_COLUMN = "Code"
 
-# Порог схожести для нечёткого поиска по строкам (rapidfuzz)
-FUZZY_THRESHOLD = 75
-
 # ---------------------------------------------------------------------------
 # Вспомогательные типы
 # ---------------------------------------------------------------------------
@@ -92,23 +89,8 @@ SearchRow = Dict
 
 
 def _norm_initials(s: str) -> str:
-    """
-    Канонизирует строку с именем:
-      - приводит к нижнему регистру;
-      - заменяет ё → е (чтобы «Пётр» == «Петр»);
-      - схлопывает лишние пробелы;
-      - убирает пробел между однобуквенными инициалами с точкой:
-        «Е. А.» → «е.а.», «А. Б. В.» → «а.б.в.»
-    """
-    s = s.lower()
-    s = s.replace('ё', 'е')
-    s = re.sub(r'\s+', ' ', s).strip()
-    # Итеративно убираем пробел между «х. у.» (однобуквенный инициал с точкой)
-    prev = None
-    while prev != s:
-        prev = s
-        s = re.sub(r'([а-яеa-z])\. ([а-яеa-z]\.)', r'\1.\2', s)
-    return s
+    """Нормализует строку для совместимости со старым кодом."""
+    return normalize_text(s)
 
 
 # ---------------------------------------------------------------------------
@@ -276,33 +258,8 @@ def _rank_by_matching_codes(
 
 
 def _fuzzy_match(series: pd.Series, query: str) -> pd.Series:
-    """
-    Возвращает булеву маску: True для строк, содержащих query
-    (сначала простой contains, затем rapidfuzz при его наличии).
-
-    Пробелы между инициалами нормализуются перед сравнением,
-    ё и е считаются одинаковыми.
-    Регистр игнорируется. Применяется к одному столбцу.
-    """
-    query_norm = _norm_initials(query.strip())
-
-    # Нормализуем серию
-    norm_series = series.astype(str).map(_norm_initials)
-
-    # Быстрый проход через str.contains
-    mask_contains = norm_series.str.contains(query_norm, na=False, regex=False)
-
-    # Нечёткий проход через rapidfuzz (если доступен)
-    try:
-        from rapidfuzz import fuzz  # type: ignore
-
-        def _ratio(val: str) -> bool:
-            return fuzz.partial_ratio(query_norm, val) >= FUZZY_THRESHOLD
-
-        mask_fuzzy = norm_series.map(_ratio)
-        return mask_contains | mask_fuzzy
-    except ImportError:
-        return mask_contains
+    """Возвращает булеву маску нечёткого совпадения."""
+    return fuzzy_match_series(series, query, threshold=FUZZY_THRESHOLD)
 
 
 def _fuzzy_count(subset: pd.DataFrame, col: str, query: str) -> Tuple[int, List[str]]:
@@ -518,6 +475,7 @@ def search_by_city(
     city_query: str,
     scope: str = "all",
     top_n: int = 10,
+    use_fuzzy: bool = False,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу защит в указанном городе (нечёткий поиск).
@@ -528,11 +486,10 @@ def search_by_city(
                         Всего членов | Годы активности | Уникальных городов
         matched_map — словарь {root: [список найденных вариантов написания]}
     """
-    candidates = fetch_dissertation_text_candidates([CITY_COLUMN], city_query, use_like_prefilter=False)
+    candidates = fetch_dissertation_text_candidates([CITY_COLUMN], city_query, use_like_prefilter=not use_fuzzy)
     if candidates.empty:
         return pd.DataFrame(), {}
-    mask = _fuzzy_match(candidates["value"], city_query)
-    matched = candidates[mask]
+    matched = candidates[_fuzzy_match(candidates["value"], city_query)] if use_fuzzy else candidates
     if matched.empty:
         return pd.DataFrame(), {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
@@ -601,6 +558,7 @@ def _search_by_org_column(
     metric_label: str,
     scope: str = "all",
     top_n: int = 10,
+    use_fuzzy: bool = False,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Внутренняя функция: топ-N школ по числу диссертаций,
@@ -610,10 +568,10 @@ def _search_by_org_column(
         result_df   — DataFrame результатов
         matched_map — словарь {root: [список найденных вариантов написания]}
     """
-    candidates = fetch_dissertation_text_candidates([org_column], org_query, use_like_prefilter=False)
+    candidates = fetch_dissertation_text_candidates([org_column], org_query, use_like_prefilter=not use_fuzzy)
     if candidates.empty:
         return pd.DataFrame(), {}
-    matched = candidates[_fuzzy_match(candidates["value"], org_query)]
+    matched = candidates[_fuzzy_match(candidates["value"], org_query)] if use_fuzzy else candidates
     if matched.empty:
         return pd.DataFrame(), {}
     rows: List[SearchRow] = []
@@ -647,7 +605,8 @@ def search_by_institution_prepared(
     org_query: str,
     scope: str = "all",
     top_n: int = 10,
-) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+
+    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной организацией выполнения.
     """
@@ -658,6 +617,7 @@ def search_by_institution_prepared(
         metric_label="Диссертаций (орг. выполнения)",
         scope=scope,
         top_n=top_n,
+        use_fuzzy=use_fuzzy,
     )
 
 
@@ -669,7 +629,8 @@ def search_by_defense_location(
     org_query: str,
     scope: str = "all",
     top_n: int = 10,
-) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+
+    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанным местом (организацией) защиты.
     """
@@ -680,6 +641,7 @@ def search_by_defense_location(
         metric_label="Диссертаций (место защиты)",
         scope=scope,
         top_n=top_n,
+        use_fuzzy=use_fuzzy,
     )
 
 
@@ -691,7 +653,8 @@ def search_by_leading_organization(
     org_query: str,
     scope: str = "all",
     top_n: int = 10,
-) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+
+    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной ведущей организацией.
     """
@@ -702,6 +665,7 @@ def search_by_leading_organization(
         metric_label="Диссертаций (вед. организация)",
         scope=scope,
         top_n=top_n,
+        use_fuzzy=use_fuzzy,
     )
 
 
@@ -767,7 +731,8 @@ def search_by_opponent(
     person_query: str,
     scope: str = "all",
     top_n: int = 10,
-) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+
+    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в диссертациях которых указанное лицо выступает оппонентом
     (нечёткий поиск с нормализацией инициалов и ё→е по OPPONENT_COLUMNS).
@@ -779,10 +744,10 @@ def search_by_opponent(
       - Это исключает двойной счёт одной диссертации при совпадении сразу
         в нескольких столбцах оппонентов.
     """
-    candidates = fetch_dissertation_text_candidates(OPPONENT_COLUMNS, person_query, use_like_prefilter=False)
+    candidates = fetch_dissertation_text_candidates(OPPONENT_COLUMNS, person_query, use_like_prefilter=not use_fuzzy)
     if candidates.empty:
         return pd.DataFrame(), {}
-    matched = candidates[_fuzzy_match(candidates["value"], person_query)]
+    matched = candidates[_fuzzy_match(candidates["value"], person_query)] if use_fuzzy else candidates
     if matched.empty:
         return pd.DataFrame(), {}
     rows: List[SearchRow] = []

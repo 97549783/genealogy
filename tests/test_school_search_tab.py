@@ -61,6 +61,7 @@ school_search_tab.render_school_search_tab(
         "scope": "all",
         "top_n": 10,
         "city_query": "Москва",
+        "text_search_mode": "fast",
     }
 
 

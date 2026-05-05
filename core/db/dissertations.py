@@ -83,8 +83,8 @@ def _load_dissertation_metadata_cached(db_signature: tuple[str, float, int]) -> 
     return df
 
 
-def search_dissertation_metadata(search_params: dict[str, str]) -> pd.DataFrame:
-    """Ищет диссертации в таблице diss_metadata по формальным критериям."""
+def _search_dissertation_metadata_like(search_params: dict[str, str]) -> pd.DataFrame:
+    """Ищет диссертации через быстрый SQL LIKE."""
     existing = _existing_columns()
     where_clauses: list[str] = []
     params: list[str] = []
@@ -124,6 +124,61 @@ def search_dissertation_metadata(search_params: dict[str, str]) -> pd.DataFrame:
         return pd.read_sql_query(query, conn, params=params)
 
 
+
+
+def _apply_default_sort(df: pd.DataFrame) -> pd.DataFrame:
+    """Сортирует результаты так же, как SQL-путь."""
+    if df.empty:
+        return df
+    if "year" in df.columns and "candidate_name" in df.columns:
+        years = pd.to_numeric(df["year"], errors="coerce")
+        return df.assign(_year_sort=years).sort_values(["_year_sort", "candidate_name"], ascending=[False, True], na_position="last").drop(columns=["_year_sort"])
+    if "Code" in df.columns:
+        return df.sort_values("Code")
+    return df
+
+
+def _search_dissertation_metadata_fuzzy(search_params: dict[str, str]) -> pd.DataFrame:
+    """Ищет диссертации через нечёткое сопоставление текстовых критериев."""
+    from core.search.text_matching import fuzzy_match_series
+
+    existing = _existing_columns()
+    active = {k: str(v).strip() for k, v in search_params.items() if str(v).strip() and str(v).strip() != "Все"}
+    if not active:
+        return _search_dissertation_metadata_like(search_params)
+
+    with get_sqlite_connection() as conn:
+        df = pd.read_sql_query("SELECT * FROM diss_metadata", conn)
+
+    mask = pd.Series(True, index=df.index)
+    for criterion, value in active.items():
+        if criterion in SINGLE_COLUMN_CRITERIA:
+            column = SINGLE_COLUMN_CRITERIA[criterion]
+            if column not in existing:
+                raise ValueError(f"В таблице diss_metadata отсутствуют столбцы для критерия: {criterion}")
+            if criterion == "year":
+                criterion_mask = df[column].astype(str).str.strip() == value
+            else:
+                criterion_mask = fuzzy_match_series(df[column], value)
+            mask = mask & criterion_mask
+            continue
+        if criterion in MULTI_COLUMN_CRITERIA:
+            cols = [col for col in MULTI_COLUMN_CRITERIA[criterion] if col in existing]
+            if not cols:
+                raise ValueError(f"В таблице diss_metadata отсутствуют столбцы для критерия: {criterion}")
+            criterion_mask = pd.Series(False, index=df.index)
+            for col in cols:
+                criterion_mask = criterion_mask | fuzzy_match_series(df[col], value)
+            mask = mask & criterion_mask
+
+    return _apply_default_sort(df[mask].copy())
+
+
+def search_dissertation_metadata(search_params: dict[str, str], *, use_fuzzy: bool = False) -> pd.DataFrame:
+    """Ищет диссертации по формальным критериям."""
+    if use_fuzzy:
+        return _search_dissertation_metadata_fuzzy(search_params)
+    return _search_dissertation_metadata_like(search_params)
 def load_dissertation_filter_options() -> dict[str, list[str]]:
     """Загружает значения для выпадающих фильтров поиска диссертаций."""
     return _load_dissertation_filter_options_cached(get_db_signature())
@@ -233,7 +288,11 @@ def fetch_dissertation_text_candidates(
     *,
     use_like_prefilter: bool = True,
 ) -> pd.DataFrame:
-    """Возвращает кандидатов для текстового поиска по выбранным столбцам."""
+    """Возвращает кандидатов для текстового поиска.
+
+Если use_like_prefilter=True, SQLite заранее ограничивает строки через LIKE.
+Если False, возвращаются все непустые значения выбранных колонок, чтобы Python мог выполнить нечёткое сопоставление.
+"""
     if any(col not in SCHOOL_SEARCH_TEXT_COLUMNS for col in columns):
         bad = [col for col in columns if col not in SCHOOL_SEARCH_TEXT_COLUMNS]
         raise ValueError(f"Недопустимые столбцы для поиска: {', '.join(bad)}")

@@ -39,6 +39,7 @@ from .search import (
 from core.ui.table_display import render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
+from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY, TEXT_SEARCH_MODE_LABELS
 from core.db import get_db_signature, fetch_candidate_name_options
 
 
@@ -77,6 +78,7 @@ SEARCH_MODES: Dict[str, str] = {
 
 # Режимы, для которых параметр scope не применяется
 _SCOPE_INDEPENDENT_MODES = {"depth", "supervisor_rate"}
+_TEXT_SEARCH_MODES = {"city", "org_prepared", "org_defense", "org_leading", "opponent"}
 
 
 # ==============================================================================
@@ -358,6 +360,9 @@ def render_school_search_tab(
                 st.session_state["school_search_person_member_select"] = person_q
             elif mode_q == "opponent":
                 st.session_state["school_search_person_opponent"] = person_q
+        text_search_mode_q = str(st.query_params.get("text_search_mode", "")).strip()
+        if text_search_mode_q in {SEARCH_MODE_FAST, SEARCH_MODE_FUZZY}:
+            st.session_state["school_search_text_search_mode"] = text_search_mode_q
 
         classifier_node_q = str(st.query_params.get("classifier_node", "")).strip()
         if classifier_node_q:
@@ -446,7 +451,15 @@ def render_school_search_tab(
             placeholder="например, Москва",
             key="school_search_city",
         )
-        extra_params = {"city_query": city_query}
+        text_search_mode = st.radio(
+            "Режим текстового поиска",
+            options=[SEARCH_MODE_FAST, SEARCH_MODE_FUZZY],
+            format_func=lambda value: TEXT_SEARCH_MODE_LABELS[value],
+            index=0,
+            key="school_search_text_search_mode",
+        )
+        st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
+        extra_params = {"city_query": city_query, "text_search_mode": text_search_mode}
 
     elif search_mode in ("org_prepared", "org_defense", "org_leading"):
         labels = {
@@ -455,17 +468,20 @@ def render_school_search_tab(
             "org_leading":  "Название ведущей организации",
         }
         st.markdown("### 🏢 Организация")
-        st.caption(
-            "Поиск нечёткий: сначала проверяется вхождение строки (без учёта регистра), затем нечёткое "
-            f"совпадение через rapidfuzz (порог: {FUZZY_THRESHOLD}%). Помогает найти разные варианты "
-            "написания (например, «МГУ» и «Московский государственный университет»)."
-        )
+        st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
         org_query = st.text_input(
             labels[search_mode],
             placeholder="например, МГУ или Педагогический университет",
             key=f"school_search_org_{search_mode}",
         )
-        extra_params = {"org_query": org_query}
+        text_search_mode = st.radio(
+            "Режим текстового поиска",
+            options=[SEARCH_MODE_FAST, SEARCH_MODE_FUZZY],
+            format_func=lambda value: TEXT_SEARCH_MODE_LABELS[value],
+            index=0,
+            key="school_search_text_search_mode",
+        )
+        extra_params = {"org_query": org_query, "text_search_mode": text_search_mode}
 
     elif search_mode == "classifier_score":
         st.markdown("### 🔬 Узел классификатора")
@@ -505,11 +521,7 @@ def render_school_search_tab(
             "member":   "например, Петрова Наталья Сергеевна",
         }
         st.markdown("### 👤 Лицо")
-        st.caption(
-            "Поиск нечёткий: поддерживаются частичные совпадения и инициалы. "
-            "Пробел между инициалами не важен: «Е. А.» и «Е.А.» считаются одинаковыми. "
-            f"Порог rapidfuzz: {FUZZY_THRESHOLD}%."
-        )
+        st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
         if search_mode == "member":
             candidate_options = fetch_candidate_name_options()
             person_query_q = str(st.query_params.get("person_query", "")).strip()
@@ -529,7 +541,17 @@ def render_school_search_tab(
                 placeholder=placeholder_map[search_mode],
                 key=f"school_search_person_{search_mode}",
             )
-        extra_params = {"person_query": person_query}
+        if search_mode == "opponent":
+            text_search_mode = st.radio(
+                "Режим текстового поиска",
+                options=[SEARCH_MODE_FAST, SEARCH_MODE_FUZZY],
+                format_func=lambda value: TEXT_SEARCH_MODE_LABELS[value],
+                index=0,
+                key="school_search_text_search_mode",
+            )
+            extra_params = {"person_query": person_query, "text_search_mode": text_search_mode}
+        else:
+            extra_params = {"person_query": person_query}
 
     # ==========================================================================
     # 2. Кнопка «Найти»

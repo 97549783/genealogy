@@ -37,7 +37,7 @@ def test_year_and_text_modes_use_sqlite_first(monkeypatch):
     assert set(by_city["Руководитель"]) == {"Root1", "Root2"}
 
 
-def test_org_modes_and_opponent_use_prefilter_false(monkeypatch):
+def test_org_modes_and_opponent_use_prefilter_by_mode(monkeypatch):
     df = _df()
     monkeypatch.setattr(ss, "get_db_signature", lambda: ("x", 1.0, 1))
     monkeypatch.setattr(ss, "get_all_school_member_codes", lambda *a, **k: {"Root1": {"1", "2"}, "Root2": {"3"}})
@@ -61,9 +61,9 @@ def test_org_modes_and_opponent_use_prefilter_false(monkeypatch):
 
     monkeypatch.setattr(ss, "fetch_dissertation_text_candidates", _fake_fetch)
 
-    r1, _ = ss.search_by_institution_prepared(df, {}, None, None, "МГУ")
-    r2, _ = ss.search_by_defense_location(df, {}, None, None, "МГУ")
-    r3, _ = ss.search_by_leading_organization(df, {}, None, None, "РАН")
-    r4, _ = ss.search_by_opponent(df, {}, None, None, "Петров")
+    r1, _ = ss.search_by_institution_prepared(df, {}, None, None, "МГУ", use_fuzzy=True)
+    r2, _ = ss.search_by_defense_location(df, {}, None, None, "МГУ", use_fuzzy=True)
+    r3, _ = ss.search_by_leading_organization(df, {}, None, None, "РАН", use_fuzzy=True)
+    r4, _ = ss.search_by_opponent(df, {}, None, None, "Петров", use_fuzzy=True)
     assert not r1.empty and not r2.empty and not r4.empty
     assert all(flag is False for _, flag in calls)
