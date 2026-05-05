@@ -39,3 +39,14 @@ def test_school_search_fetchers(tmp_path, monkeypatch):
         assert True
     no_prefilter = dissertations.fetch_dissertation_text_candidates(["opponents_1.name"], "zzz", use_like_prefilter=False)
     assert set(no_prefilter["Code"]) == {"1", "2"}
+    conn = sqlite3.connect(db)
+    conn.execute('ALTER TABLE diss_metadata ADD COLUMN "institution_prepared" TEXT')
+    conn.execute('UPDATE diss_metadata SET "institution_prepared" = ? WHERE "Code" = "1"', ("МГУ имени М.В. Ломоносова",))
+    conn.execute('UPDATE diss_metadata SET "institution_prepared" = ? WHERE "Code" = "2"', ("Московский государственный университет",))
+    conn.commit()
+    conn.close()
+    importlib.reload(dissertations)
+    like_only = dissertations.fetch_dissertation_text_candidates(["institution_prepared"], "МГУ", use_like_prefilter=True)
+    assert set(like_only["Code"]) == {"1"}
+    all_candidates = dissertations.fetch_dissertation_text_candidates(["institution_prepared"], "МГУ", use_like_prefilter=False)
+    assert set(all_candidates["Code"]) == {"1", "2"}

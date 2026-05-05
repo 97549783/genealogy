@@ -31,7 +31,9 @@ def build_filter_options(df: pd.DataFrame | None = None) -> Dict[str, List[str]]
 def filter_dissertations(
     df: pd.DataFrame | None,
     search_params: Dict[str, str],
+    *,
+    use_fuzzy: bool = False,
 ) -> pd.DataFrame:
-    """Ищет диссертации через SQL-запрос к diss_metadata."""
+    """Ищет диссертации через SQLite."""
     _ = df
-    return search_dissertation_metadata(search_params)
+    return search_dissertation_metadata(search_params, use_fuzzy=use_fuzzy)
