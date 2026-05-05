@@ -27,3 +27,13 @@ def test_school_search_fetchers(tmp_path, monkeypatch):
     assert set(cands["Code"]) == {"1", "2"}
     names = dissertations.fetch_candidate_name_options()
     assert names == ["Иванов И.И.", "Сидоров С.С."]
+    try:
+        dissertations.fetch_dissertation_codes_by_year_range(2022, 2021)
+        assert False
+    except ValueError:
+        assert True
+    try:
+        dissertations.fetch_dissertation_text_candidates(["unknown_column"], "x")
+        assert False
+    except ValueError:
+        assert True

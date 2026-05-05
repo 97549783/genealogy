@@ -541,7 +541,7 @@ def search_by_city(
                         Всего членов | Годы активности | Уникальных городов
         matched_map — словарь {root: [список найденных вариантов написания]}
     """
-    candidates = fetch_dissertation_text_candidates([CITY_COLUMN], city_query)
+    candidates = fetch_dissertation_text_candidates([CITY_COLUMN], city_query, use_like_prefilter=False)
     if candidates.empty:
         return pd.DataFrame(), {}
     mask = _fuzzy_match(candidates["value"], city_query)
@@ -623,7 +623,7 @@ def _search_by_org_column(
         result_df   — DataFrame результатов
         matched_map — словарь {root: [список найденных вариантов написания]}
     """
-    candidates = fetch_dissertation_text_candidates([org_column], org_query)
+    candidates = fetch_dissertation_text_candidates([org_column], org_query, use_like_prefilter=False)
     if candidates.empty:
         return pd.DataFrame(), {}
     matched = candidates[_fuzzy_match(candidates["value"], org_query)]
@@ -816,7 +816,7 @@ def search_by_opponent(
       - Это исключает двойной счёт одной диссертации при совпадении сразу
         в нескольких столбцах оппонентов.
     """
-    candidates = fetch_dissertation_text_candidates(OPPONENT_COLUMNS, person_query)
+    candidates = fetch_dissertation_text_candidates(OPPONENT_COLUMNS, person_query, use_like_prefilter=False)
     if candidates.empty:
         return pd.DataFrame(), {}
     matched = candidates[_fuzzy_match(candidates["value"], person_query)]

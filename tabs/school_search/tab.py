@@ -260,7 +260,9 @@ def _render_results(
 
     excel_bytes = None
     payload = st.session_state.get("school_search_last_payload", {})
-    if isinstance(payload, dict):
+    pending_signature = st.session_state.get("_school_search_pending_signature")
+    last_signature = st.session_state.get("school_search_last_signature")
+    if isinstance(payload, dict) and pending_signature is not None and last_signature == pending_signature:
         excel_bytes = payload.get("excel_bytes")
     if excel_bytes is None:
         try:
