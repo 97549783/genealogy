@@ -10,12 +10,14 @@ from core.classifier import THEMATIC_CLASSIFIER
 from core.db import AUTHOR_COLUMN, SUPERVISOR_COLUMNS, load_data, get_db_signature
 from core.lineage.graph import build_index
 from core.app.context import AppContext
+from core.perf import perf_timer
 
 
 def build_app_context() -> AppContext:
     """Собирает и валидирует общий контекст для вкладок."""
     try:
-        df = load_data()
+        with perf_timer("app.load_data"):
+            df = load_data()
     except Exception as exc:
         st.error(f"Ошибка при загрузке данных: {exc}")
         st.stop()
@@ -27,8 +29,10 @@ def build_app_context() -> AppContext:
 
     db_signature = get_db_signature()
     # Временный кэш до перехода на материализованные таблицы графа в SQLite.
-    idx = _build_cached_index(db_signature, df)
-    all_supervisor_names = _collect_cached_supervisor_names(db_signature, df)
+    with perf_timer("app.build_index"):
+        idx = _build_cached_index(db_signature, df)
+    with perf_timer("app.collect_supervisor_names"):
+        all_supervisor_names = _collect_cached_supervisor_names(db_signature, df)
 
     shared_roots = st.query_params.get_all("root")
     valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
