@@ -521,8 +521,8 @@ def render_school_search_tab(
             "member":   "например, Петрова Наталья Сергеевна",
         }
         st.markdown("### 👤 Лицо")
-        st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
         if search_mode == "member":
+            st.caption("Выберите автора диссертации из списка.")
             candidate_options = fetch_candidate_name_options()
             person_query_q = str(st.query_params.get("person_query", "")).strip()
             default_index = 0
@@ -542,6 +542,7 @@ def render_school_search_tab(
                 key=f"school_search_person_{search_mode}",
             )
         if search_mode == "opponent":
+            st.caption("В быстром режиме ищется строгое вхождение введённого текста. Нечёткий поиск учитывает варианты написания, но может выполняться существенно дольше.")
             text_search_mode = st.radio(
                 "Режим текстового поиска",
                 options=[SEARCH_MODE_FAST, SEARCH_MODE_FUZZY],
@@ -757,6 +758,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 city_query=extra_params["city_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Защит в городе",
@@ -793,6 +795,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций (орг. выполнения)",
@@ -810,6 +813,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций (место защиты)",
@@ -827,6 +831,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций (вед. организация)",
@@ -871,6 +876,7 @@ def render_school_search_tab(
                 lineage_func=lineage, rows_for_func=rows_for,
                 person_query=extra_params["person_query"],
                 scope=scope, top_n=top_n,
+                use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
             )
         _render_results(
             result_df, metric_col="Диссертаций с оппонентом",

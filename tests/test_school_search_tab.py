@@ -97,3 +97,53 @@ school_search_tab.render_school_search_tab(df=sample_df, idx={}, classifier=None
     app.button[0].click()
     app.run()
     assert ("excel_build_calls" in app.session_state) and app.session_state["excel_build_calls"] >= 1
+
+
+def test_school_search_city_mode_passes_fuzzy_flag_from_query() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.school_search.tab as school_search_tab
+
+def _fake_search_by_city(**kwargs):
+    st.session_state["_last_use_fuzzy"] = kwargs.get("use_fuzzy")
+    return pd.DataFrame([{"Руководитель": "Иванов И.И.", "Защит в городе": 1}]), {"Иванов И.И.": ["Москва"]}
+
+school_search_tab.search_by_city = _fake_search_by_city
+sample_df = pd.DataFrame([{"candidate_name": "Иванов И.И.", "city": "Москва", "supervisors_1.name": "Петров П.П."}])
+school_search_tab.render_school_search_tab(df=sample_df, idx={}, classifier=None)
+"""
+    )
+    app.query_params["mode"] = "city"
+    app.query_params["city_query"] = "Москва"
+    app.query_params["text_search_mode"] = "fuzzy"
+    app.run()
+    app.button[0].click()
+    app.run()
+    assert app.session_state["_last_use_fuzzy"] is True
+
+
+def test_school_search_city_mode_default_is_fast_without_query_param() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.school_search.tab as school_search_tab
+
+def _fake_search_by_city(**kwargs):
+    st.session_state["_last_use_fuzzy"] = kwargs.get("use_fuzzy")
+    return pd.DataFrame([{"Руководитель": "Иванов И.И.", "Защит в городе": 1}]), {"Иванов И.И.": ["Москва"]}
+
+school_search_tab.search_by_city = _fake_search_by_city
+sample_df = pd.DataFrame([{"candidate_name": "Иванов И.И.", "city": "Москва", "supervisors_1.name": "Петров П.П."}])
+school_search_tab.render_school_search_tab(df=sample_df, idx={}, classifier=None)
+"""
+    )
+    app.query_params["mode"] = "city"
+    app.query_params["city_query"] = "Москва"
+    app.run()
+    app.button[0].click()
+    app.run()
+    assert app.session_state["school_search_text_search_mode"] == "fast"
+    assert app.session_state["_last_use_fuzzy"] is False
