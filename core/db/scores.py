@@ -100,6 +100,89 @@ def _table_columns(table_name: str) -> list[str]:
     return [row[1] for row in rows]
 
 
+def get_score_feature_columns_from_table(
+    table_name: str = "diss_scores_5_8",
+    key_column: str = "Code",
+) -> list[str]:
+    """Возвращает список признаков профилей из таблицы SQLite."""
+    return _get_score_feature_columns_from_table_cached(
+        table_name=table_name,
+        key_column=key_column,
+        db_signature=get_db_signature(),
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _get_score_feature_columns_from_table_cached(
+    table_name: str,
+    key_column: str,
+    db_signature: tuple[str, float, int],
+) -> list[str]:
+    """Возвращает кэшированный список признаков профилей."""
+    _ = db_signature
+    safe_table = _validate_table_name(table_name)
+    columns = _table_columns(safe_table)
+    return [c for c in columns if c not in NON_SCORE_COLUMNS and c != key_column]
+
+
+def _is_classifier_node_column(column: str, classifier_node: str) -> bool:
+    """Проверяет принадлежность признака узлу классификатора."""
+    return column == classifier_node or column.startswith(classifier_node + ".")
+
+
+def get_score_columns_for_classifier_node(
+    classifier_node: str,
+    table_name: str = "diss_scores_5_8",
+    key_column: str = "Code",
+) -> list[str]:
+    """Возвращает признаки, относящиеся к выбранному узлу классификатора."""
+    node = str(classifier_node).strip()
+    if not node:
+        return []
+    features = get_score_feature_columns_from_table(table_name=table_name, key_column=key_column)
+    return [c for c in features if _is_classifier_node_column(c, node)]
+
+
+def fetch_dissertation_scores_for_node(
+    codes: list[str] | set[str],
+    classifier_node: str,
+) -> pd.DataFrame:
+    """Загружает только признаки выбранного узла классификатора для списка диссертаций."""
+    node_features = get_score_columns_for_classifier_node(classifier_node, table_name="diss_scores_5_8", key_column="Code")
+    normalized_codes = [str(code).strip() for code in codes if str(code).strip()]
+    if not normalized_codes:
+        return pd.DataFrame(columns=["Code", *node_features])
+    if not node_features:
+        return pd.DataFrame(columns=["Code"])
+    out = fetch_scores_by_codes(
+        codes=normalized_codes,
+        score_columns=node_features,
+        table_name="diss_scores_5_8",
+        key_column="Code",
+    )
+    if "Code" in out.columns:
+        out["Code"] = out["Code"].astype(str).str.strip()
+    return out
+
+
+def fetch_dissertation_node_score_by_codes(
+    codes: list[str] | set[str],
+    classifier_node: str,
+) -> pd.DataFrame:
+    """Возвращает Code и средний балл по выбранному узлу классификатора."""
+    scores = fetch_dissertation_scores_for_node(codes, classifier_node)
+    if scores.empty or "Code" not in scores.columns:
+        return pd.DataFrame(columns=["Code", "node_score"])
+    feature_columns = [c for c in scores.columns if c != "Code"]
+    if not feature_columns:
+        return pd.DataFrame(columns=["Code", "node_score"])
+    result = scores[["Code"]].copy()
+    result["Code"] = result["Code"].astype(str).str.strip()
+    result["node_score"] = scores[feature_columns].mean(axis=1)
+    result = result[result["Code"] != ""].drop_duplicates(subset=["Code"], keep="first")
+    return result
+
+
 def fetch_scores_by_codes(
     codes: list[str] | set[str],
     score_columns: list[str] | None = None,

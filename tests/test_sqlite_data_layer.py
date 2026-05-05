@@ -78,3 +78,33 @@ def test_runtime_modules_without_csv_patterns():
             text = path.read_text(encoding="utf-8")
             for pattern in banned:
                 assert pattern not in text, f"Найден запрещённый паттерн {pattern} в {rel}"
+
+
+def test_score_node_helpers(tmp_path, monkeypatch):
+    db_path = tmp_path / "genealogy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE diss_metadata (Code TEXT, candidate_name TEXT)")
+    conn.execute("INSERT INTO diss_metadata VALUES ('A','Автор')")
+    conn.execute('CREATE TABLE diss_scores_5_8 (Code TEXT, title TEXT, year TEXT, "1" REAL, "1.1" REAL, "1.1.1" REAL, "1.2" REAL, "2" REAL, "10" REAL, "10.1" REAL)')
+    conn.execute('INSERT INTO diss_scores_5_8 VALUES ("A","t","2020",1,2,3,4,10,7,8)')
+    conn.execute("CREATE TABLE articles_metadata (Article_id TEXT, Authors TEXT, Title TEXT, Journal TEXT, Volume TEXT, Issue TEXT, Year TEXT, school TEXT)")
+    conn.execute("INSERT INTO articles_metadata VALUES ('A1','Автор','Статья','Журнал','1','1','2024','Школа')")
+    conn.execute("CREATE TABLE articles_scores_inf_edu (Article_id TEXT, `1.1` TEXT)")
+    conn.execute("INSERT INTO articles_scores_inf_edu VALUES ('A1','3.2')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+    import core.db.connection as connection
+    import core.db.scores as scores
+    importlib.reload(connection)
+    importlib.reload(scores)
+    feats = scores.get_score_feature_columns_from_table()
+    assert feats == ["1", "1.1", "1.1.1", "1.2", "2", "10", "10.1"]
+    assert scores.get_score_columns_for_classifier_node("1") == ["1", "1.1", "1.1.1", "1.2"]
+    assert scores.get_score_columns_for_classifier_node("1.1") == ["1.1", "1.1.1"]
+    assert scores.get_score_columns_for_classifier_node("3") == []
+    node_scores = scores.fetch_dissertation_scores_for_node({"A"}, "1.1")
+    assert list(node_scores.columns) == ["Code", "1.1", "1.1.1"]
+    averaged = scores.fetch_dissertation_node_score_by_codes({"A"}, "1.1")
+    assert averaged.iloc[0]["Code"] == "A"
+    assert averaged.iloc[0]["node_score"] == 2.5

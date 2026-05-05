@@ -39,7 +39,7 @@ from .search import (
 from core.ui.table_display import render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
-from core.db import get_db_signature
+from core.db import get_db_signature, fetch_candidate_name_options
 
 
 # ==============================================================================
@@ -258,13 +258,23 @@ def _render_results(
     if matched_map:
         _show_matched_variants(matched_map, result_df, key_prefix)
 
-    # Скачивание Excel
-    try:
-        excel_bytes = build_excel_search_results(
-            result_df=result_df,
-            search_mode=search_mode,
-            search_params=search_params,
-        )
+    excel_bytes = None
+    payload = st.session_state.get("school_search_last_payload", {})
+    pending_signature = st.session_state.get("_school_search_pending_signature")
+    last_signature = st.session_state.get("school_search_last_signature")
+    if isinstance(payload, dict) and pending_signature is not None and last_signature == pending_signature:
+        excel_bytes = payload.get("excel_bytes")
+    if excel_bytes is None:
+        try:
+            excel_bytes = build_excel_search_results(
+                result_df=result_df,
+                search_mode=search_mode,
+                search_params=search_params,
+            )
+        except Exception:
+            st.warning("Не удалось сформировать Excel-файл для результатов.")
+            excel_bytes = None
+    if excel_bytes is not None:
         st.download_button(
             label="📥 Скачать результаты (Excel)",
             data=excel_bytes,
@@ -272,8 +282,6 @@ def _render_results(
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{key_prefix}_dl_excel",
         )
-    except Exception:
-        st.warning("Не удалось сформировать Excel-файл для результатов.")
 
     if "_school_search_pending_signature" in st.session_state:
         st.session_state["school_search_last_signature"] = st.session_state["_school_search_pending_signature"]
@@ -284,6 +292,9 @@ def _render_results(
             "chart_title": chart_title,
             "matched_map": matched_map,
             "key_prefix": key_prefix,
+            "excel_bytes": excel_bytes,
+            "search_mode": search_mode,
+            "search_params": search_params,
         }
 
 
@@ -499,17 +510,8 @@ def render_school_search_tab(
             "Пробел между инициалами не важен: «Е. А.» и «Е.А.» считаются одинаковыми. "
             f"Порог rapidfuzz: {FUZZY_THRESHOLD}%."
         )
-        if search_mode == "member" and "candidate_name" in df.columns:
-            candidate_options = sorted(
-                set(
-                    df["candidate_name"]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                    .loc[lambda s: s != ""]
-                    .tolist()
-                )
-            )
+        if search_mode == "member":
+            candidate_options = fetch_candidate_name_options()
             person_query_q = str(st.query_params.get("person_query", "")).strip()
             default_index = 0
             if person_query_q and person_query_q in candidate_options:
