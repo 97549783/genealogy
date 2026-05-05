@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from core.lineage.graph import build_index
+import core.lineage.membership as membership
 from core.lineage.membership import (
     get_author_by_code,
     get_author_supervisor_flags_by_code,
@@ -86,3 +87,16 @@ def test_supervisor_rate_helpers_with_variants():
     assert stats["Root"]["supervisor_count"] == 2
     assert stats["Root"]["rate"] == 100.0
     assert stats["C"]["rate"] == 0.0
+
+
+def test_get_all_school_member_codes_does_not_call_get_school_member_codes(monkeypatch):
+    df = _df()
+    idx = build_index(df, ["supervisors_1.name", "supervisors_2.name"])
+    sig = ("x", 1.0, 1)
+    monkeypatch.setattr(
+        membership,
+        "get_school_member_codes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("bulk helper не должен вызывать get_school_member_codes")),
+    )
+    out = membership.get_all_school_member_codes(df, idx, "direct", sig)
+    assert out["Root"] == {"1", "3"}

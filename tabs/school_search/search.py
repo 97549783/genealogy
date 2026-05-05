@@ -50,6 +50,7 @@ from core.db import (
     fetch_dissertation_node_score_by_codes,
 )
 from core.search.text_matching import FUZZY_THRESHOLD, fuzzy_match_series, normalize_text
+from core.perf import perf_timer
 from core.lineage.membership import (
     get_cached_roots,
     get_school_subset,
@@ -238,15 +239,18 @@ def _rank_by_matching_codes(
     if not matching_codes:
         return pd.DataFrame()
     sig = get_db_signature()
-    school_codes = get_all_school_member_codes(df, index, scope, sig)
-    stats = get_school_basic_stats(df, index, scope, sig)
+    with perf_timer("school_search.rank_by_matching_codes.get_all_school_member_codes"):
+        school_codes = get_all_school_member_codes(df, index, scope, sig)
+    with perf_timer("school_search.rank_by_matching_codes.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, sig)
     rows: List[SearchRow] = []
-    for root, codes in school_codes.items():
-        count = len(codes & matching_codes)
-        if count == 0:
-            continue
-        rows.append(_result_row_from_stats(0, root, count, metric_label, stats[root]))
-    rows.sort(key=lambda r: r[metric_label], reverse=True)
+    with perf_timer("school_search.rank_by_matching_codes.rank"):
+        for root, codes in school_codes.items():
+            count = len(codes & matching_codes)
+            if count == 0:
+                continue
+            rows.append(_result_row_from_stats(0, root, count, metric_label, stats[root]))
+        rows.sort(key=lambda r: r[metric_label], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
     return pd.DataFrame(rows[:top_n])
@@ -303,7 +307,8 @@ def search_by_total_members(
     Возвращает DataFrame с колонками:
         # | Руководитель | Число членов | Всего членов | Годы активности | Уникальных городов
     """
-    stats = get_school_basic_stats(df, index, scope, get_db_signature())
+    with perf_timer("school_search.total_members.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, get_db_signature())
     rows: List[SearchRow] = []
     for root, stat in stats.items():
         count = stat["n_members"]
@@ -311,7 +316,8 @@ def search_by_total_members(
             continue
         rows.append(_result_row_from_stats(0, root, count, "Число членов", stat))
 
-    rows.sort(key=lambda r: r["Число членов"], reverse=True)
+    with perf_timer("school_search.total_members.rank"):
+        rows.sort(key=lambda r: r["Число членов"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -334,8 +340,10 @@ def search_by_members_in_period(
     Возвращает DataFrame с колонками:
         # | Руководитель | Защит за период | Всего членов | Годы активности | Уникальных городов
     """
-    matching_codes = fetch_dissertation_codes_by_year_range(year_from, year_to)
-    return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, "Защит за период")
+    with perf_timer("school_search.members_in_period.fetch_codes"):
+        matching_codes = fetch_dissertation_codes_by_year_range(year_from, year_to)
+    with perf_timer("school_search.members_in_period.rank_by_matching_codes"):
+        return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, "Защит за период")
 
 
 def search_by_members_in_year(
@@ -353,8 +361,10 @@ def search_by_members_in_year(
     Возвращает DataFrame с колонками:
         # | Руководитель | Защит в [год] г. | Всего членов | Годы активности | Уникальных городов
     """
-    matching_codes = fetch_dissertation_codes_by_year(year)
-    return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, f"Защит в {year} г.")
+    with perf_timer("school_search.members_in_year.fetch_codes"):
+        matching_codes = fetch_dissertation_codes_by_year(year)
+    with perf_timer("school_search.members_in_year.rank_by_matching_codes"):
+        return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, f"Защит в {year} г.")
 
 
 def search_by_depth(
@@ -381,33 +391,36 @@ def search_by_depth(
                      "Годы активности", "Уникальных городов"]
         )
 
-    roots = get_all_roots(df)
+    with perf_timer("school_search.depth.all_roots"):
+        roots = get_all_roots(df)
     rows: List[SearchRow] = []
 
-    for root in roots:
-        graph, subset = get_school_lineage(df, index, root, None, get_db_signature())
-        if graph.number_of_nodes() < 2:
-            continue
+    with perf_timer("school_search.depth.lineage_loop"):
+        for root in roots:
+            graph, subset = get_school_lineage(df, index, root, None, get_db_signature())
+            if graph.number_of_nodes() < 2:
+                continue
 
-        depth = 0
-        if nx.is_directed_acyclic_graph(graph):
-            q: deque = deque([(root, 0)])
-            seen: Set[str] = {root}
-            while q:
-                node, d = q.popleft()
-                if d > depth:
-                    depth = d
-                for child in graph.successors(node):
-                    if child not in seen:
-                        seen.add(child)
-                        q.append((child, d + 1))
+            depth = 0
+            if nx.is_directed_acyclic_graph(graph):
+                q: deque = deque([(root, 0)])
+                seen: Set[str] = {root}
+                while q:
+                    node, d = q.popleft()
+                    if d > depth:
+                        depth = d
+                    for child in graph.successors(node):
+                        if child not in seen:
+                            seen.add(child)
+                            q.append((child, d + 1))
 
-        if depth == 0:
-            continue
+            if depth == 0:
+                continue
 
-        rows.append(build_result_row(0, root, depth, subset, "Поколений"))
+            rows.append(build_result_row(0, root, depth, subset, "Поколений"))
 
-    rows.sort(key=lambda r: r["Поколений"], reverse=True)
+    with perf_timer("school_search.depth.rank"):
+        rows.sort(key=lambda r: r["Поколений"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -433,8 +446,10 @@ def search_by_supervisor_rate(
     """
     _ = lineage_func, rows_for_func, scope
     sig = get_db_signature()
-    rate_stats = get_supervisor_rate_stats(df, index, sig)
-    school_stats = get_school_basic_stats(df, index, "all", sig)
+    with perf_timer("school_search.supervisor_rate.get_supervisor_rate_stats"):
+        rate_stats = get_supervisor_rate_stats(df, index, sig)
+    with perf_timer("school_search.supervisor_rate.get_school_basic_stats"):
+        school_stats = get_school_basic_stats(df, index, "all", sig)
     rows: List[SearchRow] = []
     for root, stat in rate_stats.items():
         direct_count = stat["direct_count"]
@@ -452,10 +467,11 @@ def search_by_supervisor_rate(
         row["Прямых учеников"] = direct_count
         rows.append(row)
 
-    rows.sort(
-        key=lambda r: float(str(r["Доля учеников-руководителей, %"]).replace("%", "")),
-        reverse=True,
-    )
+    with perf_timer("school_search.supervisor_rate.rank"):
+        rows.sort(
+            key=lambda r: float(str(r["Доля учеников-руководителей, %"]).replace("%", "")),
+            reverse=True,
+        )
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -486,28 +502,33 @@ def search_by_city(
                         Всего членов | Годы активности | Уникальных городов
         matched_map — словарь {root: [список найденных вариантов написания]}
     """
-    candidates = fetch_dissertation_text_candidates([CITY_COLUMN], city_query, use_like_prefilter=not use_fuzzy)
+    with perf_timer("school_search.city.fetch_candidates"):
+        candidates = fetch_dissertation_text_candidates([CITY_COLUMN], city_query, use_like_prefilter=not use_fuzzy)
     if candidates.empty:
         return pd.DataFrame(), {}
-    matched = candidates[_fuzzy_match(candidates["value"], city_query)] if use_fuzzy else candidates
+    with perf_timer("school_search.city.match_candidates"):
+        matched = candidates[_fuzzy_match(candidates["value"], city_query)] if use_fuzzy else candidates
     if matched.empty:
         return pd.DataFrame(), {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
-    codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
-    stats = get_school_basic_stats(df, index, scope, get_db_signature())
+    with perf_timer("school_search.city.get_all_school_member_codes"):
+        codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
+    with perf_timer("school_search.city.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, get_db_signature())
     matched_by_code = matched.groupby("Code")["value"].apply(lambda s: sorted(set(s.astype(str)))).to_dict()
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
-    for root, codes in codes_by_root.items():
-        root_codes = codes & matching_codes
-        if not root_codes:
-            continue
-        vals = sorted({v for c in root_codes for v in matched_by_code.get(c, [])})
-        matched_map[root] = vals
-        row = _result_row_from_stats(0, root, len(root_codes), "Защит в городе", stats[root])
-        row["Найденные варианты"] = "; ".join(vals)
-        rows.append(row)
-    rows.sort(key=lambda r: r["Защит в городе"], reverse=True)
+    with perf_timer("school_search.city.rank"):
+        for root, codes in codes_by_root.items():
+            root_codes = codes & matching_codes
+            if not root_codes:
+                continue
+            vals = sorted({v for c in root_codes for v in matched_by_code.get(c, [])})
+            matched_map[root] = vals
+            row = _result_row_from_stats(0, root, len(root_codes), "Защит в городе", stats[root])
+            row["Найденные варианты"] = "; ".join(vals)
+            rows.append(row)
+        rows.sort(key=lambda r: r["Защит в городе"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
     return pd.DataFrame(rows[:top_n]), matched_map
@@ -527,7 +548,8 @@ def search_by_geo_diversity(
     Возвращает DataFrame с колонками:
         # | Руководитель | Уникальных городов | Всего членов | Годы активности | Уникальных городов
     """
-    stats = get_school_basic_stats(df, index, scope, get_db_signature())
+    with perf_timer("school_search.geo_diversity.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, get_db_signature())
     rows: List[SearchRow] = []
     for root, stat in stats.items():
         n_cities = stat["n_cities"]
@@ -535,7 +557,8 @@ def search_by_geo_diversity(
             continue
         rows.append(_result_row_from_stats(0, root, n_cities, "Уникальных городов", stat))
 
-    rows.sort(key=lambda r: r["Уникальных городов"], reverse=True)
+    with perf_timer("school_search.geo_diversity.rank"):
+        rows.sort(key=lambda r: r["Уникальных городов"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -568,29 +591,33 @@ def _search_by_org_column(
         result_df   — DataFrame результатов
         matched_map — словарь {root: [список найденных вариантов написания]}
     """
-    candidates = fetch_dissertation_text_candidates([org_column], org_query, use_like_prefilter=not use_fuzzy)
+    with perf_timer("school_search.org.fetch_candidates"):
+        candidates = fetch_dissertation_text_candidates([org_column], org_query, use_like_prefilter=not use_fuzzy)
     if candidates.empty:
         return pd.DataFrame(), {}
-    matched = candidates[_fuzzy_match(candidates["value"], org_query)] if use_fuzzy else candidates
+    with perf_timer("school_search.org.match_candidates"):
+        matched = candidates[_fuzzy_match(candidates["value"], org_query)] if use_fuzzy else candidates
     if matched.empty:
         return pd.DataFrame(), {}
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
-    codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
-    stats = get_school_basic_stats(df, index, scope, get_db_signature())
+    with perf_timer("school_search.org.get_all_school_member_codes"):
+        codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
+    with perf_timer("school_search.org.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, get_db_signature())
     matched_by_code = matched.groupby("Code")["value"].apply(lambda s: sorted(set(s.astype(str)))).to_dict()
-    for root, codes in codes_by_root.items():
-        root_codes = codes & matching_codes
-        if not root_codes:
-            continue
-        vals = sorted({v for c in root_codes for v in matched_by_code.get(c, [])})
-        matched_map[root] = vals
-        row = _result_row_from_stats(0, root, len(root_codes), metric_label, stats[root])
-        row["Найденные варианты"] = "; ".join(vals)
-        rows.append(row)
-
-    rows.sort(key=lambda r: r[metric_label], reverse=True)
+    with perf_timer("school_search.org.rank"):
+        for root, codes in codes_by_root.items():
+            root_codes = codes & matching_codes
+            if not root_codes:
+                continue
+            vals = sorted({v for c in root_codes for v in matched_by_code.get(c, [])})
+            matched_map[root] = vals
+            row = _result_row_from_stats(0, root, len(root_codes), metric_label, stats[root])
+            row["Найденные варианты"] = "; ".join(vals)
+            rows.append(row)
+        rows.sort(key=lambda r: r[metric_label], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -687,12 +714,15 @@ def search_by_classifier_score(
     Топ-N школ по среднему баллу по узлу классификатора.
     """
     sig = get_db_signature()
-    school_codes = get_all_school_member_codes(df, index, scope, sig)
-    stats = get_school_basic_stats(df, index, scope, sig)
+    with perf_timer("school_search.classifier.get_all_school_member_codes"):
+        school_codes = get_all_school_member_codes(df, index, scope, sig)
+    with perf_timer("school_search.classifier.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, sig)
     all_codes = {code for codes in school_codes.values() for code in codes if str(code).strip()}
     if not all_codes:
         return pd.DataFrame()
-    node_scores = fetch_dissertation_node_score_by_codes(all_codes, classifier_node)
+    with perf_timer("school_search.classifier.fetch_node_scores"):
+        node_scores = fetch_dissertation_node_score_by_codes(all_codes, classifier_node)
     if node_scores.empty:
         return pd.DataFrame()
     score_by_code = (
@@ -702,16 +732,16 @@ def search_by_classifier_score(
     )
     metric_label = f"Средний балл ({classifier_node})"
     rows: List[SearchRow] = []
-    for root, codes in school_codes.items():
-        root_codes = [code for code in codes if code in score_by_code.index]
-        if not root_codes:
-            continue
-        avg_score = score_by_code.loc[root_codes].mean()
-        if pd.isna(avg_score):
-            continue
-        rows.append(_result_row_from_stats(0, root, round(float(avg_score), 3), metric_label, stats[root]))
-
-    rows.sort(key=lambda r: r[metric_label], reverse=True)
+    with perf_timer("school_search.classifier.rank"):
+        for root, codes in school_codes.items():
+            root_codes = [code for code in codes if code in score_by_code.index]
+            if not root_codes:
+                continue
+            avg_score = score_by_code.loc[root_codes].mean()
+            if pd.isna(avg_score):
+                continue
+            rows.append(_result_row_from_stats(0, root, round(float(avg_score), 3), metric_label, stats[root]))
+        rows.sort(key=lambda r: r[metric_label], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 
@@ -744,29 +774,33 @@ def search_by_opponent(
       - Это исключает двойной счёт одной диссертации при совпадении сразу
         в нескольких столбцах оппонентов.
     """
-    candidates = fetch_dissertation_text_candidates(OPPONENT_COLUMNS, person_query, use_like_prefilter=not use_fuzzy)
+    with perf_timer("school_search.opponent.fetch_candidates"):
+        candidates = fetch_dissertation_text_candidates(OPPONENT_COLUMNS, person_query, use_like_prefilter=not use_fuzzy)
     if candidates.empty:
         return pd.DataFrame(), {}
-    matched = candidates[_fuzzy_match(candidates["value"], person_query)] if use_fuzzy else candidates
+    with perf_timer("school_search.opponent.match_candidates"):
+        matched = candidates[_fuzzy_match(candidates["value"], person_query)] if use_fuzzy else candidates
     if matched.empty:
         return pd.DataFrame(), {}
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
-    codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
-    stats = get_school_basic_stats(df, index, scope, get_db_signature())
+    with perf_timer("school_search.opponent.get_all_school_member_codes"):
+        codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
+    with perf_timer("school_search.opponent.get_school_basic_stats"):
+        stats = get_school_basic_stats(df, index, scope, get_db_signature())
     matched_by_code = matched.groupby("Code")["value"].apply(lambda s: sorted(set(s.astype(str)))).to_dict()
-    for root, codes in codes_by_root.items():
-        root_codes = codes & matching_codes
-        if not root_codes:
-            continue
-        vals = sorted({v for c in root_codes for v in matched_by_code.get(c, [])})
-        matched_map[root] = vals
-        row = _result_row_from_stats(0, root, len(root_codes), "Диссертаций с оппонентом", stats[root])
-        row["Найденные варианты"] = "; ".join(vals)
-        rows.append(row)
-
-    rows.sort(key=lambda r: r["Диссертаций с оппонентом"], reverse=True)
+    with perf_timer("school_search.opponent.rank"):
+        for root, codes in codes_by_root.items():
+            root_codes = codes & matching_codes
+            if not root_codes:
+                continue
+            vals = sorted({v for c in root_codes for v in matched_by_code.get(c, [])})
+            matched_map[root] = vals
+            row = _result_row_from_stats(0, root, len(root_codes), "Диссертаций с оппонентом", stats[root])
+            row["Найденные варианты"] = "; ".join(vals)
+            rows.append(row)
+        rows.sort(key=lambda r: r["Диссертаций с оппонентом"], reverse=True)
     for i, row in enumerate(rows[:top_n], 1):
         row["#"] = i
 

@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
 from core.db import get_db_signature
+from core.perf import perf_timer
 
 from core.lineage.graph import lineage, rows_for
 from core.ui.links import share_params_button
@@ -182,13 +183,15 @@ def render_school_analysis_tab(
 
     with st.spinner("Сбор диссертаций школы..."):
         if key_direct not in st.session_state:
-            st.session_state[key_direct] = collect_school_subset(
-                df, idx, root, "direct", lineage, rows_for
-            )
+            with perf_timer("school_analysis.collect_direct_subset"):
+                st.session_state[key_direct] = collect_school_subset(
+                    df, idx, root, "direct", lineage, rows_for
+                )
         if key_all not in st.session_state:
-            st.session_state[key_all] = collect_school_subset(
-                df, idx, root, "all", lineage, rows_for
-            )
+            with perf_timer("school_analysis.collect_all_subset"):
+                st.session_state[key_all] = collect_school_subset(
+                    df, idx, root, "all", lineage, rows_for
+                )
 
     subset_direct: pd.DataFrame = st.session_state[key_direct]
     subset_all: pd.DataFrame = st.session_state[key_all]
@@ -203,14 +206,15 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 1. Обзор")
 
-    overview = compute_overview(
-        subset=subset,
-        root=root,
-        index=idx,
-        lineage_func=lineage,
-        df_full=df,
-        scope=scope,
-    )
+    with perf_timer("school_analysis.compute_overview"):
+        overview = compute_overview(
+            subset=subset,
+            root=root,
+            index=idx,
+            lineage_func=lineage,
+            df_full=df,
+            scope=scope,
+        )
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Всего диссертаций", overview["total"])
@@ -238,15 +242,16 @@ def render_school_analysis_tab(
     st.markdown("### 2. Метрики научной школы")
 
     with st.spinner("Вычисление метрик..."):
-        metrics_df, generations_df = compute_metrics(
-            df_full=df,
-            index=idx,
-            root=root,
-            lineage_func=lineage,
-            rows_for_func=rows_for,
-            subset_direct=subset_direct,
-            subset_all=subset_all,
-        )
+        with perf_timer("school_analysis.compute_metrics"):
+            metrics_df, generations_df = compute_metrics(
+                df_full=df,
+                index=idx,
+                root=root,
+                lineage_func=lineage,
+                rows_for_func=rows_for,
+                subset_direct=subset_direct,
+                subset_all=subset_all,
+            )
 
     st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
@@ -261,7 +266,8 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 3. Защиты по годам")
 
-    yearly_df = compute_yearly_stats(subset)
+    with perf_timer("school_analysis.compute_yearly_stats"):
+        yearly_df = compute_yearly_stats(subset)
 
     if yearly_df.empty:
         st.info("Данные о годах защит отсутствуют.")
@@ -285,7 +291,8 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 4. Географическое распределение")
 
-    city_df = compute_city_stats(subset)
+    with perf_timer("school_analysis.compute_city_stats"):
+        city_df = compute_city_stats(subset)
 
     if city_df.empty:
         st.info("Данные о городах защит отсутствуют.")
@@ -299,7 +306,8 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 5. Институциональные распределения")
 
-    institutional = compute_institutional_stats(subset)
+    with perf_timer("school_analysis.compute_institutional_stats"):
+        institutional = compute_institutional_stats(subset)
 
     _INST_LABELS = {
         "institution_prepared": "\U0001f3e2 Организация выполнения",
@@ -322,7 +330,8 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 6. Топ-5 оппонентов")
 
-    opponents_df = compute_top_opponents(subset, top_n=5)
+    with perf_timer("school_analysis.compute_top_opponents"):
+        opponents_df = compute_top_opponents(subset, top_n=5)
 
     if opponents_df.empty:
         st.info("Данные об оппонентах отсутствуют.")
@@ -345,7 +354,8 @@ def render_school_analysis_tab(
         knowledge_df = pd.DataFrame()
     else:
         with st.spinner("Вычисление тематического профиля..."):
-            education_df, knowledge_df = compute_thematic_profile(
+            with perf_timer("school_analysis.compute_thematic_profile"):
+                education_df, knowledge_df = compute_thematic_profile(
                 subset=subset,
                 classifier=classifier,
                 group_prefix_education="1.1.1",
@@ -373,7 +383,8 @@ def render_school_analysis_tab(
     st.caption("Ученики из первого поколения, сами ставшие научными руководителями.")
 
     with st.spinner("Поиск учеников-руководителей..."):
-        continuity_df = compute_continuity(
+        with perf_timer("school_analysis.compute_continuity"):
+            continuity_df = compute_continuity(
             df_full=df,
             index=idx,
             subset_direct=subset_direct,
@@ -395,7 +406,8 @@ def render_school_analysis_tab(
     excel_signature = f"{db_sig}::{root}::{scope}"
     if st.button("Сформировать Excel-отчёт", key="school_analysis_build_excel"):
         with st.spinner("Формируем Excel-файл..."):
-            excel_bytes = build_excel_report(
+            with perf_timer("school_analysis.build_excel"):
+                excel_bytes = build_excel_report(
                 metrics_df=metrics_df,
                 generations_df=generations_df,
                 yearly_df=yearly_df if not yearly_df.empty else pd.DataFrame(),
