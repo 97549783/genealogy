@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import List
 
@@ -95,10 +94,11 @@ def _load_dissertation_metadata_cached(db_signature: tuple[str, float, int]) -> 
 def _science_field_like_clauses(
     science_field_ids: list[str] | tuple[str, ...] | set[str] | None,
     existing_columns: set[str],
+    column: str = SCIENCE_FIELD_COLUMN,
 ) -> tuple[list[str], list[str]]:
     if not science_field_ids:
         return [], []
-    if SCIENCE_FIELD_COLUMN not in existing_columns:
+    if column not in existing_columns:
         return [], []
 
     stems: list[str] = []
@@ -109,7 +109,7 @@ def _science_field_like_clauses(
         stems.extend(option.match_stems)
 
     normalized_stems = [variant for stem in stems for variant in get_science_field_stem_variants(stem)]
-    clauses = [_like_expr(SCIENCE_FIELD_COLUMN) for _ in normalized_stems]
+    clauses = [_like_expr(column) for _ in normalized_stems]
     params = [f"%{stem}%" for stem in normalized_stems]
     if not clauses:
         return [], []
@@ -123,7 +123,7 @@ def build_science_field_like_clauses(
     existing = _existing_columns()
     if column not in existing:
         return "", []
-    clauses, params = _science_field_like_clauses(selected_field_ids, existing)
+    clauses, params = _science_field_like_clauses(selected_field_ids, existing, column=column)
     return (clauses[0], params) if clauses else ("", [])
 
 
@@ -243,10 +243,7 @@ def search_dissertation_metadata(
 
 def load_dissertation_filter_options() -> dict[str, list[str]]:
     """Загружает значения для выпадающих фильтров поиска диссертаций."""
-    try:
-        return _load_dissertation_filter_options_cached(get_db_signature())
-    except sqlite3.DatabaseError:
-        return {"year": [], "city": [], "specialties": []}
+    return _load_dissertation_filter_options_cached(get_db_signature())
 
 
 @st.cache_data(show_spinner=False)
