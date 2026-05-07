@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import List
 
 import pandas as pd
 import streamlit as st
+
+from core.domain.science_fields import (
+    SCIENCE_FIELD_COLUMN,
+    SCIENCE_FIELD_OPTIONS,
+    filter_df_by_science_fields,
+    normalize_science_field_text,
+    get_science_field_stem_variants,
+)
 
 from .connection import get_db_signature, get_sqlite_connection
 from .scores import load_dissertation_scores
@@ -83,7 +92,45 @@ def _load_dissertation_metadata_cached(db_signature: tuple[str, float, int]) -> 
     return df
 
 
-def _search_dissertation_metadata_like(search_params: dict[str, str]) -> pd.DataFrame:
+def _science_field_like_clauses(
+    science_field_ids: list[str] | tuple[str, ...] | set[str] | None,
+    existing_columns: set[str],
+) -> tuple[list[str], list[str]]:
+    if not science_field_ids:
+        return [], []
+    if SCIENCE_FIELD_COLUMN not in existing_columns:
+        return [], []
+
+    stems: list[str] = []
+    for field_id in science_field_ids:
+        option = SCIENCE_FIELD_OPTIONS.get(str(field_id).strip())
+        if option is None:
+            continue
+        stems.extend(option.match_stems)
+
+    normalized_stems = [variant for stem in stems for variant in get_science_field_stem_variants(stem)]
+    clauses = [_like_expr(SCIENCE_FIELD_COLUMN) for _ in normalized_stems]
+    params = [f"%{stem}%" for stem in normalized_stems]
+    if not clauses:
+        return [], []
+    return ["(" + " OR ".join(clauses) + ")"], params
+
+
+def build_science_field_like_clauses(
+    selected_field_ids: list[str] | tuple[str, ...] | set[str] | None,
+    column: str = SCIENCE_FIELD_COLUMN,
+) -> tuple[str, list[str]]:
+    existing = _existing_columns()
+    if column not in existing:
+        return "", []
+    clauses, params = _science_field_like_clauses(selected_field_ids, existing)
+    return (clauses[0], params) if clauses else ("", [])
+
+
+def _search_dissertation_metadata_like(
+    search_params: dict[str, str],
+    science_field_ids: list[str] | None = None,
+) -> pd.DataFrame:
     """Ищет диссертации через быстрый SQL LIKE."""
     existing = _existing_columns()
     where_clauses: list[str] = []
@@ -110,6 +157,10 @@ def _search_dissertation_metadata_like(search_params: dict[str, str]) -> pd.Data
             where_clauses.append("(" + " OR ".join(_like_expr(col) for col in cols) + ")")
             params.extend([like_value] * len(cols))
 
+    science_clauses, science_params = _science_field_like_clauses(science_field_ids, existing)
+    where_clauses.extend(science_clauses)
+    params.extend(science_params)
+
     query = "SELECT * FROM diss_metadata"
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
@@ -120,7 +171,7 @@ def _search_dissertation_metadata_like(search_params: dict[str, str]) -> pd.Data
         query += f" ORDER BY {_quote_identifier('Code')}"
 
     with get_sqlite_connection() as conn:
-        conn.create_function("CASEFOLD", 1, lambda value: str(value).casefold())
+        conn.create_function("CASEFOLD", 1, normalize_science_field_text)
         return pd.read_sql_query(query, conn, params=params)
 
 
@@ -138,14 +189,17 @@ def _apply_default_sort(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _search_dissertation_metadata_fuzzy(search_params: dict[str, str]) -> pd.DataFrame:
+def _search_dissertation_metadata_fuzzy(
+    search_params: dict[str, str],
+    science_field_ids: list[str] | None = None,
+) -> pd.DataFrame:
     """Ищет диссертации через нечёткое сопоставление текстовых критериев."""
     from core.search.text_matching import fuzzy_match_series
 
     existing = _existing_columns()
     active = {k: str(v).strip() for k, v in search_params.items() if str(v).strip() and str(v).strip() != "Все"}
     if not active:
-        return _search_dissertation_metadata_like(search_params)
+        return _search_dissertation_metadata_like(search_params, science_field_ids=science_field_ids)
 
     with get_sqlite_connection() as conn:
         df = pd.read_sql_query("SELECT * FROM diss_metadata", conn)
@@ -171,17 +225,28 @@ def _search_dissertation_metadata_fuzzy(search_params: dict[str, str]) -> pd.Dat
                 criterion_mask = criterion_mask | fuzzy_match_series(df[col], value)
             mask = mask & criterion_mask
 
-    return _apply_default_sort(df[mask].copy())
+    result = _apply_default_sort(df[mask].copy())
+    return filter_df_by_science_fields(result, science_field_ids)
 
 
-def search_dissertation_metadata(search_params: dict[str, str], *, use_fuzzy: bool = False) -> pd.DataFrame:
+def search_dissertation_metadata(
+    search_params: dict[str, str],
+    *,
+    use_fuzzy: bool = False,
+    science_field_ids: list[str] | None = None,
+) -> pd.DataFrame:
     """Ищет диссертации по формальным критериям."""
     if use_fuzzy:
-        return _search_dissertation_metadata_fuzzy(search_params)
-    return _search_dissertation_metadata_like(search_params)
+        return _search_dissertation_metadata_fuzzy(search_params, science_field_ids=science_field_ids)
+    return _search_dissertation_metadata_like(search_params, science_field_ids=science_field_ids)
+
+
 def load_dissertation_filter_options() -> dict[str, list[str]]:
     """Загружает значения для выпадающих фильтров поиска диссертаций."""
-    return _load_dissertation_filter_options_cached(get_db_signature())
+    try:
+        return _load_dissertation_filter_options_cached(get_db_signature())
+    except sqlite3.DatabaseError:
+        return {"year": [], "city": [], "specialties": []}
 
 
 @st.cache_data(show_spinner=False)
@@ -208,14 +273,32 @@ def _load_dissertation_filter_options_cached(db_signature: tuple[str, float, int
     return {"year": years, "city": cities, "specialties": specialties}
 
 
+def fetch_distinct_science_field_values() -> list[str]:
+    """Возвращает уникальные непустые значения отраслей наук из метаданных."""
+    existing = _existing_columns()
+    if SCIENCE_FIELD_COLUMN not in existing:
+        return []
+    with get_sqlite_connection() as conn:
+        rows = conn.execute(
+            f'''
+            SELECT DISTINCT {_quote_identifier(SCIENCE_FIELD_COLUMN)}
+            FROM diss_metadata
+            WHERE {_quote_identifier(SCIENCE_FIELD_COLUMN)} IS NOT NULL
+              AND TRIM(CAST({_quote_identifier(SCIENCE_FIELD_COLUMN)} AS TEXT)) != ''
+            ORDER BY {_quote_identifier(SCIENCE_FIELD_COLUMN)} COLLATE NOCASE
+            '''
+        ).fetchall()
+    return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+
+
 def load_data() -> pd.DataFrame:
     """Совместимая обёртка для загрузки метаданных диссертаций."""
     return load_dissertation_metadata()
 
 
-def load_basic_scores() -> pd.DataFrame:
+def load_basic_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
     """Совместимая обёртка для загрузки профилей диссертаций."""
-    return load_dissertation_scores()
+    return load_dissertation_scores(profile_source_id=profile_source_id)
 
 
 def _get_table_columns(table_name: str) -> set[str]:

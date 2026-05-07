@@ -25,3 +25,15 @@ def classifier_label(code: str) -> str:
         return code
     _, title, _ = item
     return f"{code} · {title}"
+
+
+def classifier_label_from_labels(code: str, labels: dict[str, str]) -> str:
+    title = labels.get(code)
+    if title:
+        return f"{code} · {title}"
+    return code
+
+
+def classifier_item_label(item: ClassifierItem) -> str:
+    code, title, _ = item
+    return f"{code} · {title}"

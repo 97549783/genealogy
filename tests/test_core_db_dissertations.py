@@ -151,3 +151,41 @@ def test_search_dissertation_metadata_fuzzy_and_and_semantics(monkeypatch, tmp_p
     assert set(fast["Code"].tolist()) == {"1"}
     assert set(fuzzy["Code"].tolist()) == {"1"}
     assert set(and_filtered["Code"].tolist()) == {"1"}
+
+
+def test_search_dissertation_metadata_science_field_filter(monkeypatch, tmp_path):
+    db_path = tmp_path / "genealogy.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        'CREATE TABLE diss_metadata (Code TEXT, candidate_name TEXT, title TEXT, "degree.science_field" TEXT)'
+    )
+    conn.executemany(
+        "INSERT INTO diss_metadata VALUES (?,?,?,?)",
+        [
+            ("A", "Автор А", "Педагогика", "Педагогические науки"),
+            ("B", "Автор Б", "Техника", "Технические науки"),
+            ("C", "Автор В", "Математика", "Физико-математические науки"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
+    import core.db.dissertations as dissertations
+    importlib.reload(dissertations)
+
+    result = dissertations.search_dissertation_metadata({}, science_field_ids=["technical"])
+    assert result["Code"].tolist() == ["B"]
+
+    fuzzy = dissertations.search_dissertation_metadata(
+        {"candidate_name": "автор"},
+        use_fuzzy=True,
+        science_field_ids=["phys_math"],
+    )
+    assert fuzzy["Code"].tolist() == ["C"]
+
+    assert dissertations.fetch_distinct_science_field_values() == [
+        "Педагогические науки",
+        "Технические науки",
+        "Физико-математические науки",
+    ]
