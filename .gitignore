@@ -16,3 +16,8 @@ env/
 # Системные
 .DS_Store
 Thumbs.db
+
+# SQLite runtime files
+*.db-wal
+*.db-shm
+*.db-journal
