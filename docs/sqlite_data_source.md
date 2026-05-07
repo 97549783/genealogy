@@ -85,7 +85,7 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 - `diss_scores_2_3` — тематические профили диссертаций для ИТ-классификатора `2.3.x / 05.13.xx`;
 - `diss_scores_5_8` — тематические профили диссертаций для педагогического классификатора `5.8.x / 13.00.xx`.
 
-Runtime-код поддерживает обе таблицы диссертационных тематических профилей: `diss_scores_5_8` и `diss_scores_2_3`. Выбор таблицы выполняется через registry источников профилей в `core/domain/profile_sources.py`.
+Runtime-код поддерживает обе таблицы диссертационных тематических профилей: `diss_scores_5_8` и `diss_scores_2_3`. Выбор таблицы выполняется через registry источников профилей в `core/domain/profile_sources.py`. Канонический ИТ-классификатор хранится в `core/classifier/it_2_3_classifier.json`; Python-код загружает его и вычисляет признак selectable/disabled по наличию дочерних узлов.
 
 ### `articles_metadata`
 
