@@ -73,6 +73,145 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 
 Остальные поля — числовые признаки тематического классификатора статей.
 
+## Фактическая структура `genealogy.db`
+
+Этот раздел фиксирует снимок структуры рабочей SQLite-базы, чтобы сведения о таблицах и типах столбцов не терялись при изменениях кода.
+
+В текущей базе есть пять таблиц:
+
+- `articles_metadata` — метаданные статей;
+- `articles_scores_inf_edu` — тематические профили статей;
+- `diss_metadata` — метаданные диссертаций;
+- `diss_scores_2_3` — тематические профили диссертаций для другого набора/уровня классификатора;
+- `diss_scores_5_8` — тематические профили диссертаций, используемые текущим runtime-кодом.
+
+Важно: таблица `diss_scores_2_3` присутствует в `genealogy.db`, но текущий allowlist загрузчика профилей в `core/db/scores.py` разрешает только `diss_scores_5_8` и `articles_scores_inf_edu`. Если `diss_scores_2_3` потребуется использовать в интерфейсе или аналитике, её нужно явно добавить в слой `core/db/`.
+
+### `articles_metadata`
+
+```text
+Article_id  TEXT
+Authors     TEXT
+Title       TEXT
+Year        INTEGER
+Journal     TEXT
+Volume      INTEGER
+Issue       INTEGER
+```
+
+### `articles_scores_inf_edu`
+
+Ключевой столбец:
+
+```text
+Article_id  TEXT
+```
+
+Остальные столбцы — целочисленные тематические признаки классификатора. Имена признаков являются кодами узлов классификатора, например:
+
+```text
+1.1.1.1          INTEGER
+1.1.1.2.1        INTEGER
+1.1.2.1.7        INTEGER
+1.2.3.4          INTEGER
+2.1.1.1          INTEGER
+2.4.2.5          INTEGER
+3.1.1.1          INTEGER
+3.5.3.5          INTEGER
+```
+
+Полный список признаков этой таблицы нужно получать из самой базы через `PRAGMA table_info("articles_scores_inf_edu")`, потому что код приложения обрабатывает их динамически как все столбцы, кроме ключа `Article_id`.
+
+### `diss_metadata`
+
+```text
+Code                    TEXT
+defense_council         TEXT
+leading_organization    TEXT
+specialties_1.code      TEXT
+specialties_1.name      TEXT
+specialties_2.code      TEXT
+specialties_2.name      TEXT
+supervisors_1.name      TEXT
+supervisors_1.degree    TEXT
+supervisors_1.title     TEXT
+supervisors_1.other     TEXT
+supervisors_2.name      TEXT
+supervisors_2.degree    TEXT
+supervisors_2.title     TEXT
+supervisors_2.other     TEXT
+defense_location        TEXT
+year                    TEXT
+opponents_1.name        TEXT
+opponents_1.degree      TEXT
+opponents_1.title       TEXT
+opponents_1.other       TEXT
+opponents_2.name        TEXT
+opponents_2.degree      TEXT
+opponents_2.title       TEXT
+opponents_2.other       TEXT
+opponents_3.name        TEXT
+opponents_3.degree      TEXT
+opponents_3.title       TEXT
+opponents_3.other       TEXT
+candidate_name          TEXT
+degree.degree_level     TEXT
+degree.science_field    TEXT
+institution_prepared    TEXT
+title                   TEXT
+city                    TEXT
+supervisors             TEXT
+opponents               TEXT
+specialties             TEXT
+```
+
+### `diss_scores_2_3`
+
+Ключевой столбец:
+
+```text
+Code  TEXT
+```
+
+Остальные столбцы — вещественные тематические признаки классификатора (`REAL`). Имена признаков являются кодами узлов классификатора. В текущем снимке эта таблица содержит признаки с префиксами `1.*`, `2.*` и `3.*`, например:
+
+```text
+1.1.1.1  REAL
+1.2.4.3  REAL
+1.3.6.3  REAL
+2.1.1.1  REAL
+2.4.4.4  REAL
+2.6.4.4  REAL
+3.1.1.1  REAL
+3.3.6.4  REAL
+```
+
+Полный список признаков этой таблицы нужно получать из самой базы через `PRAGMA table_info("diss_scores_2_3")`.
+
+### `diss_scores_5_8`
+
+Ключевой столбец:
+
+```text
+Code  TEXT
+```
+
+Остальные столбцы — целочисленные тематические признаки классификатора (`INTEGER`). Имена признаков являются кодами узлов классификатора. В отличие от `diss_scores_2_3`, эта таблица включает как промежуточные узлы, так и более глубокие дочерние признаки, например:
+
+```text
+1.1                  INTEGER
+1.1.1                INTEGER
+1.1.1.2.1            INTEGER
+1.1.2.2.1.1.3.4      INTEGER
+1.2.2.4              INTEGER
+2.1                  INTEGER
+2.2.3.4              INTEGER
+3.1                  INTEGER
+3.3.6.6              INTEGER
+```
+
+Полный список признаков этой таблицы нужно получать из самой базы через `PRAGMA table_info("diss_scores_5_8")`. Runtime-код уже делает это динамически при построении списка тематических признаков.
+
 ## Проверка структуры базы
 
 Пример проверки через Python:
@@ -110,6 +249,27 @@ conn.close()
 missing = required - actual
 if missing:
     raise RuntimeError(f"Не найдены таблицы: {sorted(missing)}")
+```
+
+Проверка фактической схемы всех таблиц:
+
+```python
+import sqlite3
+
+conn = sqlite3.connect("genealogy.db")
+tables = [
+    row[0]
+    for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+    )
+]
+
+for table in tables:
+    print(f"\n[{table}]")
+    for _, name, type_, *_ in conn.execute(f'PRAGMA table_info("{table}")'):
+        print(f"  {name}  {type_}")
+
+conn.close()
 ```
 
 ## CSV и экспорт
