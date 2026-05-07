@@ -39,7 +39,7 @@ def _load_articles_metadata_cached(db_signature: tuple[str, float, int]) -> pd.D
         raise KeyError(f"В таблице articles_metadata отсутствуют обязательные поля: {', '.join(missing)}")
 
     metadata = metadata.dropna(subset=["Article_id"]).copy()
-    metadata["Article_id"] = metadata["Article_id"].astype(str).str.strip()
+    metadata["Article_id"] = metadata["Article_id"].astype(str).str.strip().astype(object)
     metadata = metadata[metadata["Article_id"].str.len() > 0]
     return metadata
 
@@ -58,7 +58,7 @@ def _load_articles_scores_cached(db_signature: tuple[str, float, int]) -> pd.Dat
         raise KeyError("В таблице articles_scores_inf_edu отсутствует столбец 'Article_id'")
 
     scores = scores.dropna(subset=["Article_id"]).copy()
-    scores["Article_id"] = scores["Article_id"].astype(str).str.strip()
+    scores["Article_id"] = scores["Article_id"].astype(str).str.strip().astype(object)
     scores = scores[scores["Article_id"].str.len() > 0]
 
     feature_columns = [col for col in scores.columns if col != "Article_id"]

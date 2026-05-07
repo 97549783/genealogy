@@ -10,6 +10,7 @@ from .dissertations import (
     fetch_dissertation_codes_by_year,
     fetch_dissertation_codes_by_year_range,
     fetch_dissertation_metadata_by_codes,
+    fetch_distinct_science_field_values,
     fetch_dissertation_text_candidates,
     search_dissertation_metadata,
 )
@@ -18,6 +19,7 @@ from .scores import (
     get_numeric_code_feature_columns,
     load_article_scores,
     load_dissertation_scores,
+    load_dissertation_scores_for_source,
     get_score_feature_columns_from_table,
     get_score_columns_for_classifier_node,
     fetch_dissertation_scores_for_node,

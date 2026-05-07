@@ -98,7 +98,11 @@ def test_criteria_dictionary_contract() -> None:
     ]
 
 
-def test_dissertations_tab_passes_use_fuzzy_and_adds_mode_to_share_payload() -> None:
+def test_dissertations_tab_passes_use_fuzzy_and_adds_mode_to_share_payload(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
     app = AppTest.from_string(
         """
 import streamlit as st
