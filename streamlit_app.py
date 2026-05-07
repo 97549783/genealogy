@@ -21,7 +21,7 @@ from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
 
 
-st.set_page_config(page_title="Академические родословные", layout="wide")
+st.set_page_config(page_title="Академическая генеалогия", layout="wide")
 
 st.markdown(
     """
