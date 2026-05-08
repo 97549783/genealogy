@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import io
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
+
+
+def _safe_sheet_name(prefix: str, label: str) -> str:
+    invalid = set('[]:*?/\\')
+    cleaned = "".join("_" if ch in invalid else ch for ch in label).strip()
+    name = f"{prefix} {cleaned}" if cleaned else prefix
+    return name[:31]
 
 
 def build_excel_report(
@@ -15,9 +22,8 @@ def build_excel_report(
     city_df: pd.DataFrame,
     institutional: Dict[str, pd.DataFrame],
     opponents_df: pd.DataFrame,
-    education_df: pd.DataFrame,
-    knowledge_df: pd.DataFrame,
     continuity_df: pd.DataFrame,
+    thematic_groups: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> bytes:
     """
     Формирует Excel-файл со всеми листами анализа.
@@ -56,11 +62,21 @@ def build_excel_report(
         if not opponents_df.empty:
             opponents_df.to_excel(writer, index=False, sheet_name="Оппоненты")
 
-        if not education_df.empty:
-            education_df.to_excel(writer, index=False, sheet_name="Тематика_уровень")
-
-        if not knowledge_df.empty:
-            knowledge_df.to_excel(writer, index=False, sheet_name="Тематика_область")
+        for i, (group_label, group_df) in enumerate((thematic_groups or {}).items(), start=1):
+            if group_df.empty:
+                continue
+            sheet_df = pd.concat(
+                [
+                    pd.DataFrame([{"Название": group_label, "Средний балл": ""}]),
+                    group_df,
+                ],
+                ignore_index=True,
+            )
+            sheet_df.to_excel(
+                writer,
+                index=False,
+                sheet_name=_safe_sheet_name(f"Тема {i}", group_label),
+            )
 
         if not continuity_df.empty:
             continuity_df.to_excel(

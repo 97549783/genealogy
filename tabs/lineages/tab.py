@@ -20,7 +20,7 @@ import streamlit as st
 from .rendering import draw_matplotlib
 from core.lineage.graph import TREE_OPTIONS, slug, lineage
 from core.lineage.membership import get_school_lineage
-from core.db import get_db_signature
+from core.db import get_db_signature, SUPERVISOR_COLUMNS
 from core.ui.table_display import (
     build_tree_export_df,
     render_dissertations_widget,
@@ -28,6 +28,8 @@ from core.ui.table_display import (
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.chrome import show_instruction
 from core.ui.links import share_button
+from core.ui.filters import science_field_state_suffix, science_fields_to_query_params
+from core.ui.science_filtering import render_science_filtered_lineage_context
 
 
 # ---------------------------------------------------------------------------
@@ -99,24 +101,35 @@ def render_school_trees_tab(
     if st.button("📖 Инструкция", key="instruction_lineages"):
         show_instruction("lineages")
 
+    st.markdown("### Фильтр отраслей наук")
+    filtered_context = render_science_filtered_lineage_context(
+        df=df,
+        key_prefix="lineages",
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
+    filtered_df = filtered_context.df
+    filtered_idx = filtered_context.idx
+    filtered_supervisors = filtered_context.all_supervisor_names
+    sf_suffix = science_field_state_suffix(filtered_context.science_field_ids)
+
     st.subheader("Выбор научных руководителей для построения деревьев")
     shared_roots = shared_roots or []
-    valid_shared_roots = [r for r in shared_roots if r in all_supervisor_names]
-    manual_prefill = "\n".join(r for r in shared_roots if r not in all_supervisor_names)
+    valid_shared_roots = [r for r in shared_roots if r in filtered_supervisors]
+    manual_prefill = "\n".join(r for r in shared_roots if r not in filtered_supervisors)
 
     roots = st.multiselect(
         "Выберите имена из базы",
-        options=sorted(all_supervisor_names),
+        options=sorted(filtered_supervisors),
         default=valid_shared_roots,
         help="Список формируется из столбцов с руководителями",
         max_selections=20,
-        key="lineages_selected_roots",
+        key=f"lineages_selected_roots_{sf_suffix}",
     )
     manual = st.text_area(
         "Или добавьте имена вручную в формате: Фамилия Имя Отчество (по одному на строку)",
         height=120,
         value=manual_prefill,
-        key="lineages_manual_roots",
+        key=f"lineages_manual_roots_{sf_suffix}",
     )
     manual_list = [r.strip() for r in manual.splitlines() if r.strip()]
     roots = list(dict.fromkeys([*roots, *manual_list]))
@@ -132,14 +145,14 @@ def render_school_trees_tab(
         options=tree_option_labels,
         default=[tree_option_labels[0]],
         help="Фильтрация по степени применяется только к первому уровню относительно выбранного руководителя.",
-        key="lineages_tree_types",
+        key=f"lineages_tree_types_{sf_suffix}",
     )
     selected_tree_labels = selected_tree_labels or [tree_option_labels[0]]
     selected_tree_configs = [opt for opt in TREE_OPTIONS if opt[0] in selected_tree_labels]
     export_md_outline = st.checkbox(
         "Также сохранить оглавление (.md)",
         value=False,
-        key="lineages_save_md",
+        key=f"lineages_save_md_{sf_suffix}",
     )
 
     if not build:
@@ -163,11 +176,11 @@ def render_school_trees_tab(
                 elif suffix == "candidates":
                     filter_name = "candidates"
                 if callable(globals().get("lineage")) and getattr(lineage, "__name__", "") != "lineage":
-                    G, subset = lineage(df, idx, root, first_level_filter=first_level_filter)
+                    G, subset = lineage(filtered_df, filtered_idx, root, first_level_filter=first_level_filter)
                 else:
                     G, subset = get_school_lineage(
-                        df=df,
-                        idx=idx,
+                        df=filtered_df,
+                        idx=filtered_idx,
                         root=root,
                         first_level_filter_name=filter_name,
                         db_signature=get_db_signature(),
@@ -206,7 +219,7 @@ def render_school_trees_tab(
                 st.image(png_bytes, caption="Миниатюра PNG", width=220)
 
                 file_prefix = root_slug if suffix == "general" else f"{root_slug}.{suffix}"
-                selected_branching_label, html_bytes = _render_markmap_widget(G, root, key=file_prefix)
+                selected_branching_label, html_bytes = _render_markmap_widget(G, root, key=f"{sf_suffix}_{file_prefix}")
 
                 md_bytes = None
                 if export_md_outline:
@@ -227,7 +240,7 @@ def render_school_trees_tab(
                         data=png_bytes,
                         file_name=f"{file_prefix}.изображение.png",
                         mime="image/png",
-                        key=f"png_{file_prefix}",
+                        key=f"png_{sf_suffix}_{file_prefix}",
                     )
                 with c2:
                     st.download_button(
@@ -235,7 +248,7 @@ def render_school_trees_tab(
                         data=html_bytes,
                         file_name=f"{file_prefix}.интерактивная_схема.html",
                         mime="text/html",
-                        key=f"html_{file_prefix}",
+                        key=f"html_{sf_suffix}_{file_prefix}",
                     )
                 with c3:
                     if md_bytes is not None:
@@ -244,12 +257,12 @@ def render_school_trees_tab(
                             data=md_bytes,
                             file_name=f"{file_prefix}.оглавление.md",
                             mime="text/markdown",
-                            key=f"md_{file_prefix}",
+                            key=f"md_{sf_suffix}_{file_prefix}",
                         )
                     else:
                         st.empty()
 
-                _render_tree_table(subset, key=file_prefix)
+                _render_tree_table(subset, key=f"{sf_suffix}_{file_prefix}")
 
                 person_entries.append((f"{file_prefix}.изображение.png", png_bytes))
                 person_entries.append((f"{file_prefix}.интерактивная_схема.html", html_bytes))
@@ -280,7 +293,7 @@ def render_school_trees_tab(
                     data=person_zip_buf.getvalue(),
                     file_name=f"{root_slug}.архив.zip",
                     mime="application/zip",
-                    key=f"zip_{root_slug}",
+                    key=f"zip_{sf_suffix}_{root_slug}",
                 )
 
     if len(roots) > 1:
@@ -290,8 +303,12 @@ def render_school_trees_tab(
             data=all_zip_buf.getvalue(),
             file_name="архив_деревьев.zip",
             mime="application/zip",
-            key="dl_zip_all_trees",
+            key=f"dl_zip_all_trees_{sf_suffix}",
         )
 
     st.markdown("---")
-    share_button(roots, key="lineages_share", extra_params={"tab": "lineages"})
+    share_button(
+        roots,
+        key="lineages_share",
+        extra_params={"tab": "lineages", **science_fields_to_query_params(filtered_context.science_field_ids)},
+    )

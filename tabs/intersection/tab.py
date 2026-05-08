@@ -68,10 +68,19 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from core.lineage.graph import lineage, rows_for
+from core.domain.science_fields import filter_df_by_science_fields
+from core.lineage.graph import build_index, lineage, rows_for
+from core.people import get_unique_supervisors
 from core.lineage.names import norm as _norm
 from core.ui.table_display import render_dissertations_widget
 from core.ui.links import share_params_button
+from core.ui.filters import (
+    hydrate_science_fields_from_query_params,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_field_state_suffix,
+    science_fields_to_query_params,
+)
 
 # ---------------------------------------------------------------------------
 #  Константы
@@ -311,23 +320,26 @@ def render_opponents_intersection_tab(
             """
         )
 
+    st.markdown("---")
+    st.markdown("### 0. Фильтр отраслей наук")
+    default_science_fields = hydrate_science_fields_from_query_params()
+    science_field_ids = render_science_field_filter(
+        key_prefix="opponents_intersection",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    working_df = filter_df_by_science_fields(df, science_field_ids)
+    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+
     # --- Выбор научных руководителей ---
     st.markdown("---")
     st.markdown("### 1. Выбор научных школ")
 
-    supervisor_cols = [
-        col for col in df.columns
-        if "supervisor" in col.lower() and "name" in col.lower()
-    ]
-    all_supervisors: Set[str] = set()
-    for col in supervisor_cols:
-        if col in df.columns:
-            all_supervisors.update(
-                str(v).strip()
-                for v in df[col].dropna().unique()
-                if str(v).strip()
-            )
-    all_supervisors_sorted = sorted(all_supervisors)
+    all_supervisors_sorted = get_unique_supervisors(
+        working_df,
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
 
     if not all_supervisors_sorted:
         st.error("В данных не найдены научные руководители.")
@@ -385,7 +397,7 @@ def render_opponents_intersection_tab(
         if st.button("Сбросить кэш",
                      key="opponents_intersection_reset",
                      help="Очистить сохранённые результаты и пересчитать"):
-            cache_key = _cache_key(selected_schools, selected_scope)
+            cache_key = _cache_key(selected_schools, selected_scope, science_field_ids)
             if cache_key in st.session_state:
                 del st.session_state[cache_key]
             st.rerun()
@@ -393,7 +405,7 @@ def render_opponents_intersection_tab(
     if run_clicked:
         st.session_state["opponents_intersection_run_state"] = True
 
-    cache_key = _cache_key(selected_schools, selected_scope)
+    cache_key = _cache_key(selected_schools, selected_scope, science_field_ids)
     if not st.session_state.get("opponents_intersection_run_state", False) and cache_key not in st.session_state:
         return
 
@@ -406,7 +418,7 @@ def render_opponents_intersection_tab(
             progress = st.progress(0)
             for i, school_name in enumerate(selected_schools):
                 members, subset = _collect_members(
-                    df, idx, school_name, selected_scope,
+                    working_df, working_idx, school_name, selected_scope,
                 )
                 opponents = _collect_opponents(subset)
                 school_data[school_name] = (members, opponents)
@@ -555,11 +567,17 @@ def render_opponents_intersection_tab(
             "tab": "intersection",
             "schools": selected_schools,
             "scope": selected_scope,
+            **science_fields_to_query_params(science_field_ids),
         },
         key="opponents_intersection_share",
     )
 
 
-def _cache_key(selected_schools: List[str], scope: str) -> str:
-    """Уникальный ключ кэша для данного набора школ и глубины."""
-    return "opp_intersection_" + "|".join(sorted(selected_schools)) + "_" + scope
+def _cache_key(
+    selected_schools: List[str],
+    scope: str,
+    science_field_ids: list[str] | None = None,
+) -> str:
+    """Уникальный ключ кэша для данного набора школ, глубины и фильтра отраслей."""
+    sf_suffix = science_field_state_suffix(science_field_ids)
+    return "opp_intersection_" + "|".join(sorted(selected_schools)) + "_" + scope + "_" + sf_suffix

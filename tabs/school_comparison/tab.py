@@ -12,10 +12,22 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
+from core.domain.science_fields import filter_df_by_science_fields
+from core.classifier import get_classifier_labels_by_profile_source
+from core.ui.filters import (
+    hydrate_profile_source_from_query_params,
+    hydrate_science_fields_from_query_params,
+    render_profile_source_radio,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_field_state_suffix,
+    science_fields_to_query_params,
+)
 
-from core.lineage.graph import lineage, rows_for
+from core.lineage.graph import build_index, lineage, rows_for
 from core.ui.chrome import download_data_dialog
 from core.ui.links import share_params_button
+from core.db import SUPERVISOR_COLUMNS
 from .comparison import (
     DistanceMetric,
     ComparisonScope,
@@ -128,11 +140,8 @@ def show_instruction_dialog() -> None:
 def render_school_comparison_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    classifier_labels: Optional[Dict[str, str]] = None,
 ) -> None:
     """Отрисовывает вкладку сравнения научных школ."""
-    if classifier_labels is None:
-        classifier_labels = {}
 
     if not st.session_state.get("school_comp_query_hydrated", False):
         schools_q = [s.strip() for s in st.query_params.get_all("school_comp_schools") if str(s).strip()]
@@ -157,6 +166,14 @@ def render_school_comparison_tab(
         if nodes_q:
             st.session_state["school_comp_nodes_prefill_query"] = nodes_q
 
+        science_fields_q = hydrate_science_fields_from_query_params()
+        if science_fields_q:
+            st.session_state["school_comp_science_fields_query"] = science_fields_q
+
+        source_q = str(st.query_params.get("school_comp_profile_source", "")).strip()
+        if source_q:
+            st.session_state["school_comp_profile_source_query"] = source_q
+
         decay_q = str(st.query_params.get("school_comp_decay", "")).strip()
         if decay_q:
             try:
@@ -178,12 +195,35 @@ def render_school_comparison_tab(
     тематических направлений.
     """)
 
+    default_source_id = hydrate_profile_source_from_query_params(
+        param_name="school_comp_profile_source"
+    )
+    source = render_profile_source_radio(
+        key="school_comp_profile_source",
+        default_id=default_source_id,
+    )
+    classifier_labels = get_classifier_labels_by_profile_source(source.id)
+
+    default_science_fields = st.session_state.pop(
+        "school_comp_science_fields_query",
+        hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="school_comp",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    working_df = filter_df_by_science_fields(df, science_field_ids)
+    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    sf_suffix = science_field_state_suffix(science_field_ids)
+    results_key = f"{_RESULTS_KEY}_{source.id}_{sf_suffix}"
+
     # =========================================================================
     # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
     # =========================================================================
     try:
-        scores_df = load_scores_from_db(
-        )
+        scores_df = load_scores_from_db(profile_source_id=source.id)
         all_feature_columns = get_feature_columns(scores_df)
         st.success(
             f"✅ Загружено {len(scores_df)} профилей, "
@@ -204,7 +244,7 @@ def render_school_comparison_tab(
     # =========================================================================
     st.markdown("### 👥 Выбор научных школ для сравнения")
 
-    all_supervisors_sorted = get_all_supervisors(df)
+    all_supervisors_sorted = get_all_supervisors(working_df)
     if not all_supervisors_sorted:
         st.error("❌ В данных не найдено научных руководителей")
         return
@@ -228,7 +268,7 @@ def render_school_comparison_tab(
     if len(selected_schools) < 2:
         st.warning("⚠️ Выберите минимум 2 научных руководителя для сравнения")
         # Если школы сменились, сбрасываем кэшированные результаты
-        st.session_state.pop(_RESULTS_KEY, None)
+        st.session_state.pop(results_key, None)
         return
 
     st.markdown("---")
@@ -312,7 +352,7 @@ def render_school_comparison_tab(
                     for i, node in enumerate(level1_nodes):
                         with cols_l1[i % len(cols_l1)]:
                             node_prefill = st.session_state.get("school_comp_nodes_prefill", [])
-                            node_key = f"node_l1_{node}"
+                            node_key = f"node_l1_{source.id}_{node}"
                             if node in node_prefill and node_key not in st.session_state:
                                 st.session_state[node_key] = True
                             label = classifier_labels.get(node, "")
@@ -326,7 +366,7 @@ def render_school_comparison_tab(
                         for i, node in enumerate(level2_nodes):
                             with cols_l2[i % 3]:
                                 node_prefill = st.session_state.get("school_comp_nodes_prefill", [])
-                                node_key = f"node_l2_{node}"
+                                node_key = f"node_l2_{source.id}_{node}"
                                 if node in node_prefill and node_key not in st.session_state:
                                     st.session_state[node_key] = True
                                 label = classifier_labels.get(node, "")
@@ -340,7 +380,7 @@ def render_school_comparison_tab(
                         for i, node in enumerate(level3_nodes):
                             with cols_l3[i % 3]:
                                 node_prefill = st.session_state.get("school_comp_nodes_prefill", [])
-                                node_key = f"node_l3_{node}"
+                                node_key = f"node_l3_{source.id}_{node}"
                                 if node in node_prefill and node_key not in st.session_state:
                                     st.session_state[node_key] = True
                                 label = classifier_labels.get(node, "")
@@ -389,7 +429,7 @@ def render_school_comparison_tab(
 
     run_requested = run_clicked or (
         st.session_state.get("school_comp_run_state", False)
-        and st.session_state.get(_RESULTS_KEY) is None
+        and st.session_state.get(results_key) is None
     )
 
     if run_requested:
@@ -402,8 +442,8 @@ def render_school_comparison_tab(
             for i, school_name in enumerate(selected_schools):
                 try:
                     dataset, missing_info, total_count = gather_school_dataset(
-                        df=df,
-                        index=idx,
+                        df=working_df,
+                        index=working_idx,
                         root=school_name,
                         scores=scores_df,
                         scope=selected_scope,
@@ -483,7 +523,7 @@ def render_school_comparison_tab(
         fig_save.savefig(buf_silhouette, format="png", dpi=150, bbox_inches="tight")
         plt.close(fig_save)
 
-        st.session_state[_RESULTS_KEY] = {
+        st.session_state[results_key] = {
             "stats_info": stats_info,
             "valid_datasets": valid_datasets,
             "overall_score": overall_score,
@@ -499,18 +539,28 @@ def render_school_comparison_tab(
             "basis_choice": basis_choice,
             "selected_nodes": selected_nodes,
             "classifier_labels": classifier_labels,
+            "profile_source_id": source.id,
+            "profile_source_label": source.label,
+            "science_field_ids": science_field_ids,
         }
 
     # =========================================================================
     # ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ (читаем из session_state, не из блока if-button)
     # =========================================================================
-    results = st.session_state.get(_RESULTS_KEY)
+    results = st.session_state.get(results_key)
     if results is None:
+        return
+
+    if results.get("profile_source_id") != source.id:
+        st.session_state.pop(results_key, None)
+        return
+    if results.get("science_field_ids", []) != science_field_ids:
+        st.session_state.pop(results_key, None)
         return
 
     # Сбрасываем кэш, если школы изменились
     if set(results["school_order"]) != set(selected_schools):
-        st.session_state.pop(_RESULTS_KEY, None)
+        st.session_state.pop(results_key, None)
         return
 
     stats_info = results["stats_info"]
@@ -686,6 +736,8 @@ def render_school_comparison_tab(
             "school_comp_basis": basis_choice,
             "school_comp_nodes": selected_nodes or [],
             "school_comp_decay": decay_factor,
+            "school_comp_profile_source": source.id,
+            **science_fields_to_query_params(science_field_ids),
         },
         key="school_comp_share",
     )

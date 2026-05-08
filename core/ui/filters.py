@@ -44,9 +44,11 @@ def render_science_field_filter(
     label: str = "Отрасли наук",
     default_selected_ids: list[str] | None = None,
 ) -> list[str]:
+    default_selected_ids = default_selected_ids or []
     mode = st.radio(
         label,
         options=["all", "selected"],
+        index=1 if default_selected_ids else 0,
         format_func=lambda value: "Все диссертации" if value == "all" else "Выбрать отрасли",
         horizontal=True,
         key=f"{key_prefix}_science_field_mode",
@@ -56,7 +58,6 @@ def render_science_field_filter(
         return []
 
     options = get_science_field_options()
-    default_selected_ids = default_selected_ids or []
     selected = st.multiselect(
         "Выберите отрасли наук",
         options=options,
@@ -90,3 +91,20 @@ def hydrate_science_fields_from_query_params(param_name: str = "science_field") 
 def hydrate_profile_source_from_query_params(param_name: str = "profile_source") -> str:
     raw_value = st.query_params.get(param_name)
     return get_profile_source(raw_value).id
+
+
+def science_field_state_suffix(selected_ids: list[str] | tuple[str, ...] | set[str] | None) -> str:
+    """Возвращает стабильный суффикс для ключей session_state с учётом фильтра отраслей."""
+    if not selected_ids:
+        return "all"
+    values = sorted(str(value).strip() for value in selected_ids if str(value).strip())
+    return "_".join(values) if values else "all"
+
+
+def science_field_filter_caption(selected_ids: list[str]) -> str:
+    """Возвращает человекочитаемое описание активного фильтра отраслей наук."""
+    if not selected_ids:
+        return "Фильтр отраслей наук не применяется."
+    labels_by_id = {option.id: option.label for option in get_science_field_options()}
+    labels = [labels_by_id.get(field_id, field_id) for field_id in selected_ids]
+    return "Активный фильтр отраслей наук: " + ", ".join(labels)

@@ -48,7 +48,7 @@ lineages_tab.render_dissertations_widget = _fake_table
 lineages_tab.share_button = _fake_share
 
 lineages_tab.render_school_trees_tab(
-    df=pd.DataFrame([{"candidate_name": "x"}]),
+    df=pd.DataFrame([{"candidate_name": "x", "supervisors_1.name": "Иванов И.И."}]),
     idx={},
     all_supervisor_names=["Иванов И.И."],
     shared_roots=["Иванов И.И.", "Ручной Руководитель"],
@@ -59,8 +59,8 @@ lineages_tab.render_school_trees_tab(
     app.run(timeout=15)
 
     assert app.session_state["lineages_built"] is True
-    assert app.session_state["lineages_selected_roots"] == ["Иванов И.И."]
-    assert app.session_state["lineages_manual_roots"] == "Ручной Руководитель"
+    assert app.session_state["lineages_selected_roots_all"] == ["Иванов И.И."]
+    assert app.session_state["lineages_manual_roots_all"] == "Ручной Руководитель"
     assert app.session_state["_lineages_share_key"] == "lineages_share"
     assert app.session_state["_lineages_share_extra"] == {"tab": "lineages"}
     assert app.session_state["_lineages_share_roots"] == ["Иванов И.И.", "Ручной Руководитель"]

@@ -33,6 +33,7 @@
     - build_excel_search_results   — Excel-отчёт по результатам поиска
 
 Модуль не импортирует streamlit и не содержит UI-кода.
+Функции ожидают, что df и index уже отфильтрованы по отраслям наук на уровне UI-вкладки.
 """
 
 from __future__ import annotations
@@ -709,6 +710,7 @@ def search_by_classifier_score(
     classifier_node: str,
     scope: str = "all",
     top_n: int = 10,
+    profile_source_id: str = "pedagogy_5_8",
 ) -> pd.DataFrame:
     """
     Топ-N школ по среднему баллу по узлу классификатора.
@@ -722,7 +724,11 @@ def search_by_classifier_score(
     if not all_codes:
         return pd.DataFrame()
     with perf_timer("school_search.classifier.fetch_node_scores"):
-        node_scores = fetch_dissertation_node_score_by_codes(all_codes, classifier_node)
+        node_scores = fetch_dissertation_node_score_by_codes(
+            all_codes,
+            classifier_node,
+            profile_source_id=profile_source_id,
+        )
     if node_scores.empty:
         return pd.DataFrame()
     score_by_code = (

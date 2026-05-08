@@ -9,7 +9,6 @@ from core.app import (
     maybe_render_admin_page_and_stop,
     render_app_header,
 )
-from core.classifier import THEMATIC_CLASSIFIER
 from tabs.articles.tab import render_articles_comparison_tab
 from tabs.dissertations.tab import render_dissertations_tab
 from tabs.intersection.tab import render_opponents_intersection_tab
@@ -60,14 +59,12 @@ with tab_by_id["profiles"]:
     render_profiles_tab(
         df=ctx.df,
         idx=ctx.idx,
-        thematic_classifier=THEMATIC_CLASSIFIER,
     )
 
 with tab_by_id["school_search"]:
     render_school_search_tab(
         df=ctx.df,
         idx=ctx.idx,
-        classifier=THEMATIC_CLASSIFIER,
     )
 
 with tab_by_id["intersection"]:
@@ -77,14 +74,12 @@ with tab_by_id["school_analysis"]:
     render_school_analysis_tab(
         df=ctx.df,
         idx=ctx.idx,
-        classifier=THEMATIC_CLASSIFIER,
     )
 
 with tab_by_id["school_comparison"]:
     render_school_comparison_tab(
         df=ctx.df,
         idx=ctx.idx,
-        classifier_labels=ctx.classifier_labels,
     )
 
 with tab_by_id["articles_comparison"]:

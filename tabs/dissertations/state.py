@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import streamlit as st
+from core.ui.filters import hydrate_science_fields_from_query_params
 from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY
 
 from .search import get_available_criteria
@@ -18,6 +19,10 @@ def hydrate_dissertations_query_params() -> None:
     mode_q = str(st.query_params.get("diss_text_search_mode", "")).strip()
     if mode_q in {SEARCH_MODE_FAST, SEARCH_MODE_FUZZY}:
         st.session_state["diss_text_search_mode"] = mode_q
+
+    science_fields = hydrate_science_fields_from_query_params()
+    if science_fields:
+        st.session_state["dissertations_science_fields_query"] = science_fields
 
     if criteria_q:
         st.session_state["dissertation_search_criteria"] = criteria_q

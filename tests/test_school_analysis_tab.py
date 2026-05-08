@@ -73,6 +73,7 @@ analysis_tab.compute_city_stats = _fake_compute_city_stats
 analysis_tab.compute_institutional_stats = _fake_compute_institutional_stats
 analysis_tab.compute_top_opponents = _fake_compute_top_opponents
 analysis_tab.compute_continuity = _fake_compute_continuity
+analysis_tab.compute_thematic_profile = lambda **kwargs: {"🎓 Уровень образования": pd.DataFrame()}
 analysis_tab.build_excel_report = _fake_build_excel_report
 analysis_tab._scores_folder_available = lambda _: False
 analysis_tab.share_params_button = _fake_share
@@ -104,4 +105,5 @@ analysis_tab.render_school_analysis_tab(sample_df, idx={})
         "tab": "school_analysis",
         "analysis_root": "Иванов И.И.",
         "analysis_scope": "all",
+        "analysis_profile_source": "pedagogy_5_8",
     }

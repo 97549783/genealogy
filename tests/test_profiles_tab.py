@@ -30,12 +30,13 @@ scores = pd.DataFrame([
     {"Code": "A1", "1.1.1": 5.0}
 ])
 
-profiles_tab.load_basic_scores = lambda folder_path="basic_scores": scores
+profiles_tab.load_basic_scores = lambda profile_source_id="pedagogy_5_8": scores
 
+profiles_tab.get_classifier_by_profile_source = lambda source_id: [("1.1.1", "Тема", False)]
+profiles_tab.get_classifier_labels_by_profile_source = lambda source_id: {"1.1.1": "Тема"}
 profiles_tab.render_profiles_tab(
     df=sample_df,
     idx={},
-    thematic_classifier=[("1.1.1", "Тема", False)],
 )
 
 st.session_state["_captured_calls"] = captured
@@ -107,14 +108,15 @@ topics.render_search_by_topics(
     app.query_params["min_score"] = "5.5"
     app.run()
 
-    assert app.session_state["profile_query_hydrated"] is True
-    assert app.session_state["profile_selected_codes"] == ["1.1.1"]
-    assert app.session_state["profile_search_active"] is True
-    assert app.session_state["profile_min_score"] == 5.5
+    assert app.session_state["profile_query_hydrated_pedagogy_5_8"] is True
+    assert app.session_state["profile_selected_codes_pedagogy_5_8"] == ["1.1.1"]
+    assert app.session_state["profile_search_active_pedagogy_5_8"] is True
+    assert app.session_state["profile_min_score_pedagogy_5_8"] == 5.5
 
-    assert app.session_state["_captured_share_key"] == "profiles_share_results"
+    assert app.session_state["_captured_share_key"] == "profiles_share_results_pedagogy_5_8"
     assert app.session_state["_captured_share_payload"] == {
         "tab": "profiles",
+        "profile_source": "pedagogy_5_8",
         "codes": ["1.1.1"],
         "min_score": 5.5,
     }

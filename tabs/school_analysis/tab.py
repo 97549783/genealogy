@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set
 
 import matplotlib
 matplotlib.use("Agg")
@@ -13,10 +13,22 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
+from core.domain.science_fields import filter_df_by_science_fields
+from core.classifier import get_classifier_by_profile_source
 from core.db import get_db_signature
+from core.domain.profile_sources import get_profile_summary_groups
 from core.perf import perf_timer
+from core.ui.filters import (
+    hydrate_profile_source_from_query_params,
+    hydrate_science_fields_from_query_params,
+    render_profile_source_radio,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_field_state_suffix,
+    science_fields_to_query_params,
+)
 
-from core.lineage.graph import lineage, rows_for
+from core.lineage.graph import build_index, lineage, rows_for
 from core.ui.links import share_params_button
 from .analysis import (
     collect_school_subset,
@@ -28,10 +40,9 @@ from .analysis import (
     compute_top_opponents,
     compute_thematic_profile,
     compute_continuity,
-
+    SUPERVISOR_COLUMNS,
 )
 from .exports import build_excel_report
-
 
 
 # ==============================================================================
@@ -84,11 +95,11 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
     return fig
 
 
-def _clear_school_cache(root: str, scope: str) -> None:
+def _clear_school_cache(root: str, scope: str, sf_suffix: str) -> None:
     """Очищает кэш школы из session_state."""
     db_sig = str(get_db_signature())
     for s in ("direct", "all"):
-        key = f"school_subset_{db_sig}_{root}_{s}"
+        key = f"school_subset_{db_sig}_{sf_suffix}_{root}_{s}"
         if key in st.session_state:
             del st.session_state[key]
 
@@ -101,7 +112,6 @@ def _clear_school_cache(root: str, scope: str) -> None:
 def render_school_analysis_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    classifier: Optional[List[Tuple[str, str, bool]]] = None,
 ) -> None:
     """
     Отрисовывает вкладку «Анализ научной школы».
@@ -109,24 +119,45 @@ def render_school_analysis_tab(
     Аргументы:
         df              — основной DataFrame с диссертациями
         idx             — индекс имён
-        classifier      — THEMATIC_CLASSIFIER из streamlit_app.py
     """
     st.subheader("Анализ научной школы")
+
+    st.markdown("### Фильтр отраслей наук")
+    default_science_fields = st.session_state.pop(
+        "school_analysis_science_fields_query",
+        hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="school_analysis",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    working_df = filter_df_by_science_fields(df, science_field_ids)
+    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    sf_suffix = science_field_state_suffix(science_field_ids)
 
     # =========================================================================
     # 0. Входные параметры
     # =========================================================================
     st.markdown("### \U0001f464 Выбор научной школы")
 
-    all_supervisors = _get_all_supervisors(df)
+    all_supervisors = _get_all_supervisors(working_df)
     if not all_supervisors:
         st.error("В данных не найдены научные руководители.")
         return
 
     if not st.session_state.get("school_analysis_query_hydrated", False):
+        science_fields_q = hydrate_science_fields_from_query_params()
+        if science_fields_q:
+            st.session_state["school_analysis_science_fields_query"] = science_fields_q
+
         root_q = str(st.query_params.get("analysis_root", "")).strip()
         if root_q and root_q in all_supervisors:
             st.session_state["school_analysis_root"] = root_q
+        source_q = str(st.query_params.get("analysis_profile_source", "")).strip()
+        if source_q:
+            st.session_state["school_analysis_profile_source_query"] = source_q
         scope_q = str(st.query_params.get("analysis_scope", "")).strip()
         scope_keys = list(SCOPE_LABELS.keys())
         if scope_q in scope_keys:
@@ -163,7 +194,7 @@ def render_school_analysis_tab(
     with col_reset:
         if st.button("Сбросить кэш", key="school_analysis_reset",
                      help="Очистить сохранённые результаты и пересчитать"):
-            _clear_school_cache(root, scope)
+            _clear_school_cache(root, scope, sf_suffix)
             st.rerun()
 
     if run_clicked:
@@ -171,26 +202,26 @@ def render_school_analysis_tab(
 
     if not st.session_state.get("school_analysis_run_state", False):
         db_sig = str(get_db_signature())
-        if f"school_subset_{db_sig}_{root}_direct" not in st.session_state:
+        if f"school_subset_{db_sig}_{sf_suffix}_{root}_direct" not in st.session_state:
             return
 
     # =========================================================================
     # Сбор данных с кэшированием в session_state
     # =========================================================================
     db_sig = str(get_db_signature())
-    key_direct = f"school_subset_{db_sig}_{root}_direct"
-    key_all = f"school_subset_{db_sig}_{root}_all"
+    key_direct = f"school_subset_{db_sig}_{sf_suffix}_{root}_direct"
+    key_all = f"school_subset_{db_sig}_{sf_suffix}_{root}_all"
 
     with st.spinner("Сбор диссертаций школы..."):
         if key_direct not in st.session_state:
             with perf_timer("school_analysis.collect_direct_subset"):
                 st.session_state[key_direct] = collect_school_subset(
-                    df, idx, root, "direct", lineage, rows_for
+                    working_df, working_idx, root, "direct", lineage, rows_for
                 )
         if key_all not in st.session_state:
             with perf_timer("school_analysis.collect_all_subset"):
                 st.session_state[key_all] = collect_school_subset(
-                    df, idx, root, "all", lineage, rows_for
+                    working_df, working_idx, root, "all", lineage, rows_for
                 )
 
     subset_direct: pd.DataFrame = st.session_state[key_direct]
@@ -210,9 +241,9 @@ def render_school_analysis_tab(
         overview = compute_overview(
             subset=subset,
             root=root,
-            index=idx,
+            index=working_idx,
             lineage_func=lineage,
-            df_full=df,
+            df_full=working_df,
             scope=scope,
         )
 
@@ -244,8 +275,8 @@ def render_school_analysis_tab(
     with st.spinner("Вычисление метрик..."):
         with perf_timer("school_analysis.compute_metrics"):
             metrics_df, generations_df = compute_metrics(
-                df_full=df,
-                index=idx,
+                df_full=working_df,
+                index=working_idx,
                 root=root,
                 lineage_func=lineage,
                 rows_for_func=rows_for,
@@ -345,34 +376,37 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### 7. Тематический профиль школы")
     st.caption(
-        "Средние баллы по всем диссертациям школы по данным таблицы diss_scores_5_8."
+        "Средние баллы по всем диссертациям школы по выбранной таблице тематических профилей."
     )
 
-    if classifier is None:
-        st.info("Классификатор не передан. Тематический профиль недоступен.")
-        education_df = pd.DataFrame()
-        knowledge_df = pd.DataFrame()
-    else:
-        with st.spinner("Вычисление тематического профиля..."):
-            with perf_timer("school_analysis.compute_thematic_profile"):
-                education_df, knowledge_df = compute_thematic_profile(
+    default_source_id = st.session_state.pop(
+        "school_analysis_profile_source_query",
+        None,
+    ) or hydrate_profile_source_from_query_params(param_name="analysis_profile_source")
+    source = render_profile_source_radio(
+        key="school_analysis_profile_source",
+        default_id=default_source_id,
+    )
+    classifier = get_classifier_by_profile_source(source.id)
+    groups = get_profile_summary_groups(source.id)
+
+    st.caption(f"Активный профиль: {source.label}")
+
+    with st.spinner("Вычисление тематического профиля..."):
+        with perf_timer("school_analysis.compute_thematic_profile"):
+            thematic_groups = compute_thematic_profile(
                 subset=subset,
                 classifier=classifier,
-                group_prefix_education="1.1.1",
-                group_prefix_knowledge="1.1.2",
+                profile_source_id=source.id,
+                groups=groups,
             )
 
-        with st.expander("\U0001f393 Уровень образования (1.1.1)", expanded=False):
-            if education_df.empty:
-                st.info("Нет данных для группы 1.1.1.")
+    for group_label, group_df in thematic_groups.items():
+        with st.expander(group_label, expanded=False):
+            if group_df.empty:
+                st.info(f"Нет данных для группы {group_label}.")
             else:
-                st.dataframe(education_df, use_container_width=True, hide_index=True)
-
-        with st.expander("\U0001f52c Область знания (1.1.2)", expanded=False):
-            if knowledge_df.empty:
-                st.info("Нет данных для группы 1.1.2.")
-            else:
-                st.dataframe(knowledge_df, use_container_width=True, hide_index=True)
+                st.dataframe(group_df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
@@ -385,11 +419,11 @@ def render_school_analysis_tab(
     with st.spinner("Поиск учеников-руководителей..."):
         with perf_timer("school_analysis.compute_continuity"):
             continuity_df = compute_continuity(
-            df_full=df,
-            index=idx,
-            subset_direct=subset_direct,
-            rows_for_func=rows_for,
-        )
+                df_full=working_df,
+                index=working_idx,
+                subset_direct=subset_direct,
+                rows_for_func=rows_for,
+            )
 
     if continuity_df.empty:
         st.info("Среди прямых учеников не найдено ни одного ставшего научным руководителем.")
@@ -403,21 +437,20 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### \U0001f4e5 Скачать полный отчёт")
 
-    excel_signature = f"{db_sig}::{root}::{scope}"
+    excel_signature = f"{db_sig}::{root}::{scope}::{sf_suffix}::{source.id}"
     if st.button("Сформировать Excel-отчёт", key="school_analysis_build_excel"):
         with st.spinner("Формируем Excel-файл..."):
             with perf_timer("school_analysis.build_excel"):
                 excel_bytes = build_excel_report(
-                metrics_df=metrics_df,
-                generations_df=generations_df,
-                yearly_df=yearly_df if not yearly_df.empty else pd.DataFrame(),
-                city_df=city_df if not city_df.empty else pd.DataFrame(),
-                institutional=institutional,
-                opponents_df=compute_top_opponents(subset, top_n=None),
-                education_df=education_df if not education_df.empty else pd.DataFrame(),
-                knowledge_df=knowledge_df if not knowledge_df.empty else pd.DataFrame(),
-                continuity_df=continuity_df if not continuity_df.empty else pd.DataFrame(),
-            )
+                    metrics_df=metrics_df,
+                    generations_df=generations_df,
+                    yearly_df=yearly_df if not yearly_df.empty else pd.DataFrame(),
+                    city_df=city_df if not city_df.empty else pd.DataFrame(),
+                    institutional=institutional,
+                    opponents_df=compute_top_opponents(subset, top_n=None),
+                    continuity_df=continuity_df if not continuity_df.empty else pd.DataFrame(),
+                    thematic_groups=thematic_groups,
+                )
         st.session_state["school_analysis_excel_bytes"] = excel_bytes
         st.session_state["school_analysis_excel_signature"] = excel_signature
 
@@ -439,6 +472,8 @@ def render_school_analysis_tab(
             "tab": "school_analysis",
             "analysis_root": root,
             "analysis_scope": scope,
+            "analysis_profile_source": source.id,
+            **science_fields_to_query_params(science_field_ids),
         },
         key="school_analysis_share",
     )

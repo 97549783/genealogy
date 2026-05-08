@@ -23,7 +23,7 @@ from .search import (
     search_by_codes,
     validate_code_selection,
 )
-from .state import hydrate_topics_query_params, trigger_rerun
+from .state import hydrate_topics_query_params, profile_state_key, trigger_rerun
 
 INSTRUCTION_BY_TOPICS = """
 ## 📊 Поиск по конкретным темам
@@ -94,23 +94,36 @@ def render_search_by_topics(
     scores_df: pd.DataFrame,
     thematic_classifier: List[Tuple[str, str, bool]],
     classifier_dict: Dict[str, str],
+    profile_source_id: str = "pedagogy_5_8",
+    profile_source_label: str = "Педагогические науки — 5.8.x / 13.00.xx",
 ) -> None:
-    hydrate_topics_query_params(classifier_dict)
+    selection_key = profile_state_key(PROFILE_SELECTION_SESSION_KEY, profile_source_id)
+    search_active_key = profile_state_key("profile_search_active", profile_source_id)
+    results_key = profile_state_key("profile_results", profile_source_id)
+    results_full_key = profile_state_key("profile_results_full", profile_source_id)
+    min_score_key = profile_state_key("profile_min_score", profile_source_id)
+    choice_key = profile_state_key("profile_classifier_choice", profile_source_id)
+
+    hydrate_topics_query_params(
+        classifier_dict=classifier_dict,
+        profile_source_id=profile_source_id,
+    )
 
     if st.button("📖 Инструкция", key="instruction_profiles_topics"):
         show_instruction_dialog()
 
     st.subheader("🔍 Поиск по конкретным темам")
+    st.caption(f"Активный профиль: {profile_source_label}")
     st.write(
         f"Выберите до {PROFILE_SELECTION_LIMIT} пунктов классификатора. "
         f"Поиск найдет диссертации, где каждая выбранная тема оценена не менее "
         f"чем на {PROFILE_MIN_SCORE} баллов (по 10-балльной шкале)."
     )
 
-    if PROFILE_SELECTION_SESSION_KEY not in st.session_state:
-        st.session_state[PROFILE_SELECTION_SESSION_KEY] = []
+    if selection_key not in st.session_state:
+        st.session_state[selection_key] = []
 
-    selected_codes: List[str] = list(st.session_state.get(PROFILE_SELECTION_SESSION_KEY, []))
+    selected_codes: List[str] = list(st.session_state.get(selection_key, []))
 
     with st.container():
         st.markdown("### 📋 Выбор тематики")
@@ -119,7 +132,7 @@ def render_search_by_topics(
             "Элемент классификатора",
             options=options,
             format_func=classifier_format,
-            key="profile_classifier_choice",
+            key=choice_key,
         )
 
         add_reason: Optional[str] = None
@@ -139,10 +152,10 @@ def render_search_by_topics(
         add_clicked = st.button(
             "➕ Добавить в подборку",
             disabled=add_disabled,
-            key="profile_add_button",
+            key=f"profile_add_button_{profile_source_id}",
         )
         if add_clicked and add_code is not None:
-            st.session_state[PROFILE_SELECTION_SESSION_KEY] = selected_codes + [add_code]
+            st.session_state[selection_key] = selected_codes + [add_code]
             trigger_rerun()
 
         if add_reason and choice is not None:
@@ -158,16 +171,16 @@ def render_search_by_topics(
             with cols[0]:
                 st.markdown(f"**{classifier_label(code, classifier_dict)}**")
             with cols[1]:
-                if st.button("❌", key=f"profile_remove_{code}", use_container_width=True):
-                    st.session_state[PROFILE_SELECTION_SESSION_KEY] = [
+                if st.button("❌", key=f"profile_remove_{profile_source_id}_{code}", use_container_width=True):
+                    st.session_state[selection_key] = [
                         c for c in selected_codes if c != code
                     ]
                     trigger_rerun()
 
         col_clear, _ = st.columns([0.2, 0.8])
         with col_clear:
-            if st.button("🗑️ Очистить все", key="profile_clear_selection"):
-                st.session_state[PROFILE_SELECTION_SESSION_KEY] = []
+            if st.button("🗑️ Очистить все", key=f"profile_clear_selection_{profile_source_id}"):
+                st.session_state[selection_key] = []
                 trigger_rerun()
     else:
         st.info("Темы не выбраны. Выберите хотя бы один пункт классификатора выше.")
@@ -181,7 +194,7 @@ def render_search_by_topics(
         max_value=10.0,
         value=PROFILE_MIN_SCORE,
         step=0.5,
-        key="profile_min_score",
+        key=min_score_key,
         help="Диссертации с баллом ниже этого порога по любой из выбранных тем будут исключены",
     )
 
@@ -190,12 +203,12 @@ def render_search_by_topics(
         "🔍 Найти диссертации",
         type="primary",
         disabled=not selected_codes,
-        key="profile_run_search",
+        key=f"profile_run_search_{profile_source_id}",
     )
     if run_search_click:
-        st.session_state["profile_search_active"] = True
+        st.session_state[search_active_key] = True
 
-    if st.session_state.get("profile_search_active") and selected_codes:
+    if st.session_state.get(search_active_key) and selected_codes:
         with st.spinner("Поиск диссертаций..."):
             try:
                 all_feature_columns = get_feature_columns(scores_df)
@@ -218,8 +231,8 @@ def render_search_by_topics(
                     selected_codes=selected_codes,
                     classifier_labels=classifier_dict,
                 )
-                st.session_state["profile_results"] = display_df
-                st.session_state["profile_results_full"] = results_full
+                st.session_state[results_key] = display_df
+                st.session_state[results_full_key] = results_full
             except Exception as exc:
                 st.error(f"❌ Ошибка при поиске: {exc}")
                 import traceback
@@ -227,15 +240,20 @@ def render_search_by_topics(
                 st.code(traceback.format_exc())
                 return
 
-        display_df = st.session_state.get("profile_results")
-        results_full = st.session_state.get("profile_results_full")
+        display_df = st.session_state.get(results_key)
+        results_full = st.session_state.get(results_full_key)
         if display_df is not None and not display_df.empty:
             st.markdown("---")
             st.markdown("## 📊 Результаты поиска")
             st.success(f"✅ Найдено диссертаций: {len(display_df)}")
             share_params_button(
-                {"tab": "profiles", "codes": selected_codes, "min_score": min_score},
-                key="profiles_share_results",
+                {
+                    "tab": "profiles",
+                    "profile_source": profile_source_id,
+                    "codes": selected_codes,
+                    "min_score": min_score,
+                },
+                key=f"profiles_share_results_{profile_source_id}",
             )
 
             st.markdown("### 🔍 Фильтр по таблице")

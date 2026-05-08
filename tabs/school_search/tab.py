@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 import matplotlib
 matplotlib.use("Agg")
@@ -14,7 +14,8 @@ import networkx as nx
 import pandas as pd
 import streamlit as st
 
-from core.lineage.graph import lineage, rows_for, slug
+from core.classifier import get_classifier_by_profile_source
+from core.lineage.graph import build_index, lineage, rows_for, slug
 from .search import (
     AUTHOR_COLUMN,
     FUZZY_THRESHOLD,
@@ -40,7 +41,20 @@ from core.ui.table_display import render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
 from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY, TEXT_SEARCH_MODE_LABELS
-from core.db import get_db_signature, fetch_candidate_name_options
+from core.domain.science_fields import filter_df_by_science_fields
+from core.ui.filters import (
+    hydrate_profile_source_from_query_params,
+    hydrate_science_fields_from_query_params,
+    render_profile_source_radio,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_fields_to_query_params,
+)
+from core.db import (
+    fetch_candidate_name_options,
+    get_db_signature,
+    get_score_columns_for_classifier_node,
+)
 
 
 # ==============================================================================
@@ -308,7 +322,6 @@ def _render_results(
 def render_school_search_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
-    classifier: Optional[List[Tuple[str, str, bool]]] = None,
 ) -> None:
     """
     Отрисовывает вкладку «Поиск научных школ».
@@ -316,7 +329,6 @@ def render_school_search_tab(
     Аргументы:
         df            — основной DataFrame с диссертациями
         idx           — индекс имён
-        classifier    — THEMATIC_CLASSIFIER из streamlit_app.py
     """
     st.subheader("Поиск научных школ")
 
@@ -364,9 +376,17 @@ def render_school_search_tab(
         if text_search_mode_q in {SEARCH_MODE_FAST, SEARCH_MODE_FUZZY}:
             st.session_state["school_search_text_search_mode"] = text_search_mode_q
 
+        science_fields_q = hydrate_science_fields_from_query_params()
+        if science_fields_q:
+            st.session_state["school_search_science_fields_query"] = science_fields_q
+
+        profile_source_q = str(st.query_params.get("profile_source", "")).strip()
+        if profile_source_q:
+            st.session_state["school_search_profile_source_query"] = profile_source_q
+
         classifier_node_q = str(st.query_params.get("classifier_node", "")).strip()
         if classifier_node_q:
-            st.session_state["school_search_classifier_node"] = classifier_node_q
+            st.session_state["school_search_classifier_node_query"] = classifier_node_q
 
         if mode_q:
             st.session_state["school_search_run_state"] = True
@@ -375,6 +395,20 @@ def render_school_search_tab(
     # ==========================================================================
     # 0. Общие параметры поиска
     # ==========================================================================
+    st.markdown("### Фильтр отраслей наук")
+    default_science_fields = st.session_state.pop(
+        "school_search_science_fields_query",
+        hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="school_search",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    working_df = filter_df_by_science_fields(df, science_field_ids)
+    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+
     st.markdown("### ⚙️ Параметры поиска")
 
     col_topn, col_scope, col_mode = st.columns([1, 2, 3])
@@ -485,31 +519,53 @@ def render_school_search_tab(
 
     elif search_mode == "classifier_score":
         st.markdown("### 🔬 Узел классификатора")
-        if classifier is None:
-            st.warning("Классификатор не передан. Режим недоступен.")
-            return
+        default_source_id = st.session_state.pop(
+            "school_search_profile_source_query",
+            None,
+        ) or hydrate_profile_source_from_query_params()
 
-        selectable = [
-            (code, title)
-            for code, title, disabled in classifier
-            if not disabled
-        ]
+        source = render_profile_source_radio(
+            key="school_search_profile_source",
+            default_id=default_source_id,
+        )
+        classifier = get_classifier_by_profile_source(source.id)
+        st.caption(f"Активный профиль: {source.label}")
+
+        selectable = []
+        for code, title, _disabled in classifier:
+            cols = get_score_columns_for_classifier_node(
+                code,
+                table_name=source.score_table,
+                key_column=source.key_column,
+            )
+            if cols:
+                selectable.append((code, title))
+
         if not selectable:
             st.warning("Нет доступных для выбора узлов классификатора.")
             return
 
         node_options = [f"{code} — {title}" for code, title in selectable]
         node_codes = [code for code, _ in selectable]
+        choice_key = f"school_search_classifier_node_{source.id}"
+        node_query = st.session_state.pop("school_search_classifier_node_query", None)
+        if node_query in node_codes:
+            query_label = node_options[node_codes.index(node_query)]
+            if choice_key not in st.session_state:
+                st.session_state[choice_key] = query_label
 
         chosen_label = st.selectbox(
             "Выберите узел классификатора",
             options=node_options,
-            key="school_search_classifier_node",
+            key=choice_key,
             help="Выберите узел — школы будут ранжированы по среднему баллу по всем признакам-потомкам этого узла.",
         )
         chosen_idx = node_options.index(chosen_label)
         classifier_node = node_codes[chosen_idx]
-        extra_params = {"classifier_node": classifier_node}
+        extra_params = {
+            "classifier_node": classifier_node,
+            "profile_source": source.id,
+        }
 
     elif search_mode in ("opponent", "member"):
         label_map = {
@@ -592,6 +648,7 @@ def render_school_search_tab(
         "scope": scope,
         "top_n": top_n,
         **extra_params,
+        **science_fields_to_query_params(science_field_ids),
     }
 
     current_signature = {
@@ -599,6 +656,7 @@ def render_school_search_tab(
         "scope": scope,
         "top_n": top_n,
         "extra_params": extra_params,
+        "science_field_ids": tuple(sorted(science_field_ids)),
         "db_signature": get_db_signature(),
     }
     st.session_state["_school_search_pending_signature"] = current_signature
@@ -666,7 +724,7 @@ def render_school_search_tab(
     if search_mode == "total_members":
         with st.spinner(spinner_msg):
             result_df = search_by_total_members(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
             )
@@ -682,7 +740,7 @@ def render_school_search_tab(
     elif search_mode == "members_in_period":
         with st.spinner(spinner_msg):
             result_df = search_by_members_in_period(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 year_from=extra_params["year_from"],
                 year_to=extra_params["year_to"],
@@ -703,7 +761,7 @@ def render_school_search_tab(
         year_val = extra_params["year"]
         with st.spinner(spinner_msg):
             result_df = search_by_members_in_year(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 year=year_val, scope=scope, top_n=top_n,
             )
@@ -719,7 +777,7 @@ def render_school_search_tab(
     elif search_mode == "depth":
         with st.spinner(spinner_msg):
             result_df = search_by_depth(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 top_n=top_n,
             )
@@ -735,7 +793,7 @@ def render_school_search_tab(
     elif search_mode == "supervisor_rate":
         with st.spinner(spinner_msg):
             result_df = search_by_supervisor_rate(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
             )
@@ -754,7 +812,7 @@ def render_school_search_tab(
     elif search_mode == "city":
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_city(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 city_query=extra_params["city_query"],
                 scope=scope, top_n=top_n,
@@ -772,7 +830,7 @@ def render_school_search_tab(
     elif search_mode == "geo_diversity":
         with st.spinner(spinner_msg):
             result_df = search_by_geo_diversity(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
             )
@@ -791,7 +849,7 @@ def render_school_search_tab(
     elif search_mode == "org_prepared":
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_institution_prepared(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
@@ -809,7 +867,7 @@ def render_school_search_tab(
     elif search_mode == "org_defense":
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_defense_location(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
@@ -827,7 +885,7 @@ def render_school_search_tab(
     elif search_mode == "org_leading":
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_leading_organization(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
@@ -849,10 +907,11 @@ def render_school_search_tab(
         classifier_node = extra_params["classifier_node"]
         with st.spinner(spinner_msg):
             result_df = search_by_classifier_score(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 classifier_node=classifier_node,
                 scope=scope, top_n=top_n,
+                profile_source_id=extra_params["profile_source"],
             )
         _render_results(
             result_df,
@@ -872,7 +931,7 @@ def render_school_search_tab(
     elif search_mode == "opponent":
         with st.spinner(spinner_msg):
             result_df, matched_map = search_by_opponent(
-                df=df, index=idx,
+                df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 person_query=extra_params["person_query"],
                 scope=scope, top_n=top_n,
@@ -892,7 +951,7 @@ def render_school_search_tab(
     elif search_mode == "member":
         with st.spinner(spinner_msg):
             member_results = search_member_lineage_chains(
-                df=df,
+                df=working_df,
                 person_query=extra_params["person_query"],
             )
 
