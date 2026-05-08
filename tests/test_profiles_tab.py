@@ -30,7 +30,7 @@ scores = pd.DataFrame([
     {"Code": "A1", "1.1.1": 5.0}
 ])
 
-profiles_tab.load_basic_scores = lambda profile_source_id="pedagogy_5_8": scores
+profiles_tab.load_dissertation_profile_scores = lambda profile_source_id="pedagogy_5_8": scores
 
 profiles_tab.get_classifier_by_profile_source = lambda source_id: [("1.1.1", "Тема", False)]
 profiles_tab.get_classifier_labels_by_profile_source = lambda source_id: {"1.1.1": "Тема"}

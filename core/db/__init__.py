@@ -3,6 +3,7 @@ from .dissertations import (
     FEEDBACK_FILE,
     SUPERVISOR_COLUMNS,
     load_basic_scores,
+    load_dissertation_profile_scores,
     load_data,
     load_dissertation_filter_options,
     load_dissertation_metadata,

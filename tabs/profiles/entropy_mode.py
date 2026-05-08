@@ -28,7 +28,6 @@ from .entropy import interpret_entropy, search_by_entropy
 # КОНСТАНТЫ
 # ==============================================================================
 
-DEFAULT_SCORES_FOLDER = "basic_scores"
 DEFAULT_MIN_THRESHOLD = 3.0
 MAX_RESULTS_DISPLAY = 100
 

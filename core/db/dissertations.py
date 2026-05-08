@@ -293,9 +293,14 @@ def load_data() -> pd.DataFrame:
     return load_dissertation_metadata()
 
 
-def load_basic_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
-    """Совместимая обёртка для загрузки профилей диссертаций."""
+def load_dissertation_profile_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
+    """Загружает тематические профили диссертаций из SQLite для выбранного источника."""
     return load_dissertation_scores(profile_source_id=profile_source_id)
+
+
+def load_basic_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
+    """Совместимый alias: используйте load_dissertation_profile_scores()."""
+    return load_dissertation_profile_scores(profile_source_id=profile_source_id)
 
 
 def _get_table_columns(table_name: str) -> set[str]:

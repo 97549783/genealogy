@@ -16,7 +16,7 @@ from core.ui.filters import (
 )
 
 from .entropy_mode import render_entropy_specificity_tab
-from .search import get_feature_columns, load_basic_scores
+from .search import get_feature_columns, load_dissertation_profile_scores
 from .topics_mode import render_search_by_topics
 
 
@@ -59,7 +59,7 @@ def render_profiles_tab(
 
     if search_mode == "По конкретным темам":
         try:
-            scores_df = load_basic_scores(profile_source_id=source.id)
+            scores_df = load_dissertation_profile_scores(profile_source_id=source.id)
             all_feature_columns = get_feature_columns(scores_df)
             st.success(
                 f"✅ Загружено {len(scores_df)} профилей, "
