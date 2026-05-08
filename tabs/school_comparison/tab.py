@@ -52,7 +52,6 @@ from .comparison import (
 # КОНСТАНТЫ
 # ==============================================================================
 
-DEFAULT_SCORES_FOLDER = "basic_scores"
 AUTHOR_COLUMN = "candidate_name"
 
 # Ключ в session_state для хранения результатов анализа

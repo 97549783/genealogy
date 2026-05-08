@@ -9,7 +9,23 @@ def _scores_df() -> pd.DataFrame:
     ])
 
 
-def test_profiles_load_basic_scores_accepts_profile_source(monkeypatch):
+def test_profiles_load_dissertation_profile_scores_accepts_profile_source(monkeypatch):
+    from tabs.profiles import search
+
+    captured = {}
+
+    def _fake_load(profile_source_id="pedagogy_5_8"):
+        captured["profile_source_id"] = profile_source_id
+        return _scores_df()
+
+    monkeypatch.setattr(search, "load_dissertation_scores", _fake_load)
+
+    df = search.load_dissertation_profile_scores(profile_source_id="it_2_3")
+    assert captured["profile_source_id"] == "it_2_3"
+    assert "Code" in df.columns
+
+
+def test_load_basic_scores_alias_matches_new_loader(monkeypatch):
     from tabs.profiles import search
 
     captured = {}

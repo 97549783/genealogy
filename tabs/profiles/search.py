@@ -43,9 +43,14 @@ def _build_abstract_url(code: str, author: str) -> str:
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_basic_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
-    """Совместимая обёртка над общим загрузчиком тематических профилей."""
+def load_dissertation_profile_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
+    """Загружает тематические профили диссертаций из SQLite для выбранного источника."""
     return load_dissertation_scores(profile_source_id=profile_source_id)
+
+
+def load_basic_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
+    """Совместимый alias: используйте load_dissertation_profile_scores()."""
+    return load_dissertation_profile_scores(profile_source_id=profile_source_id)
 
 
 def get_feature_columns(scores_df: pd.DataFrame) -> List[str]:
