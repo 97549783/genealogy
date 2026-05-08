@@ -8,6 +8,12 @@ import streamlit as st
 from core.ui.table_display import render_dissertations_widget
 from core.ui.chrome import show_instruction
 from core.ui.links import share_params_button
+from core.ui.filters import (
+    hydrate_science_fields_from_query_params,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_fields_to_query_params,
+)
 
 from .search import build_filter_options, filter_dissertations, get_available_criteria
 from .state import hydrate_dissertations_query_params, request_search
@@ -22,6 +28,20 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
 
     st.subheader("Поиск информации о диссертациях")
     st.write("На этой вкладке доступен поиск диссертаций по формальным критериям.")
+
+    st.markdown("### 0. Фильтр отраслей наук")
+    default_science_fields = st.session_state.pop(
+        "dissertations_science_fields_query",
+        hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="dissertations",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    if st.session_state.get("diss_search_science_field_ids") != science_field_ids:
+        st.session_state.pop("diss_search_result", None)
 
     available_criteria = get_available_criteria()
     filter_options = build_filter_options(df)
@@ -69,7 +89,13 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
         request_search()
 
     if st.session_state.get("diss_search_should_run", False):
-        st.session_state["diss_search_result"] = filter_dissertations(df, search_params, use_fuzzy=use_fuzzy)
+        st.session_state["diss_search_result"] = filter_dissertations(
+            df,
+            search_params,
+            use_fuzzy=use_fuzzy,
+            science_field_ids=science_field_ids,
+        )
+        st.session_state["diss_search_science_field_ids"] = science_field_ids
 
     if "diss_search_result" in st.session_state:
         result_df = st.session_state["diss_search_result"]
@@ -83,6 +109,7 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
                     "diss_criterion": selected_criteria,
                     **{f"diss_{criterion}": search_params.get(criterion, "") for criterion in selected_criteria},
                     **({"diss_text_search_mode": text_search_mode} if any(c in text_criteria for c in selected_criteria) else {}),
+                    **science_fields_to_query_params(science_field_ids),
                 },
                 key="diss_search_share",
             )

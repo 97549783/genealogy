@@ -33,7 +33,12 @@ def filter_dissertations(
     search_params: Dict[str, str],
     *,
     use_fuzzy: bool = False,
+    science_field_ids: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Ищет диссертации через SQLite."""
+    """Ищет диссертации через SQLite с учётом мягкого фильтра отраслей наук."""
     _ = df
-    return search_dissertation_metadata(search_params, use_fuzzy=use_fuzzy)
+    return search_dissertation_metadata(
+        search_params,
+        use_fuzzy=use_fuzzy,
+        science_field_ids=science_field_ids,
+    )

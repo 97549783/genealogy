@@ -13,16 +13,22 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
+from core.domain.science_fields import filter_df_by_science_fields
 from core.classifier import get_classifier_by_profile_source
 from core.db import get_db_signature
 from core.domain.profile_sources import get_profile_summary_groups
 from core.perf import perf_timer
 from core.ui.filters import (
     hydrate_profile_source_from_query_params,
+    hydrate_science_fields_from_query_params,
     render_profile_source_radio,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_field_state_suffix,
+    science_fields_to_query_params,
 )
 
-from core.lineage.graph import lineage, rows_for
+from core.lineage.graph import build_index, lineage, rows_for
 from core.ui.links import share_params_button
 from .analysis import (
     collect_school_subset,
@@ -34,6 +40,7 @@ from .analysis import (
     compute_top_opponents,
     compute_thematic_profile,
     compute_continuity,
+    SUPERVISOR_COLUMNS,
 )
 from .exports import build_excel_report
 
@@ -88,11 +95,11 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
     return fig
 
 
-def _clear_school_cache(root: str, scope: str) -> None:
+def _clear_school_cache(root: str, scope: str, sf_suffix: str) -> None:
     """Очищает кэш школы из session_state."""
     db_sig = str(get_db_signature())
     for s in ("direct", "all"):
-        key = f"school_subset_{db_sig}_{root}_{s}"
+        key = f"school_subset_{db_sig}_{sf_suffix}_{root}_{s}"
         if key in st.session_state:
             del st.session_state[key]
 
@@ -115,17 +122,36 @@ def render_school_analysis_tab(
     """
     st.subheader("Анализ научной школы")
 
+    st.markdown("### Фильтр отраслей наук")
+    default_science_fields = st.session_state.pop(
+        "school_analysis_science_fields_query",
+        hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="school_analysis",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    working_df = filter_df_by_science_fields(df, science_field_ids)
+    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    sf_suffix = science_field_state_suffix(science_field_ids)
+
     # =========================================================================
     # 0. Входные параметры
     # =========================================================================
     st.markdown("### \U0001f464 Выбор научной школы")
 
-    all_supervisors = _get_all_supervisors(df)
+    all_supervisors = _get_all_supervisors(working_df)
     if not all_supervisors:
         st.error("В данных не найдены научные руководители.")
         return
 
     if not st.session_state.get("school_analysis_query_hydrated", False):
+        science_fields_q = hydrate_science_fields_from_query_params()
+        if science_fields_q:
+            st.session_state["school_analysis_science_fields_query"] = science_fields_q
+
         root_q = str(st.query_params.get("analysis_root", "")).strip()
         if root_q and root_q in all_supervisors:
             st.session_state["school_analysis_root"] = root_q
@@ -168,7 +194,7 @@ def render_school_analysis_tab(
     with col_reset:
         if st.button("Сбросить кэш", key="school_analysis_reset",
                      help="Очистить сохранённые результаты и пересчитать"):
-            _clear_school_cache(root, scope)
+            _clear_school_cache(root, scope, sf_suffix)
             st.rerun()
 
     if run_clicked:
@@ -176,26 +202,26 @@ def render_school_analysis_tab(
 
     if not st.session_state.get("school_analysis_run_state", False):
         db_sig = str(get_db_signature())
-        if f"school_subset_{db_sig}_{root}_direct" not in st.session_state:
+        if f"school_subset_{db_sig}_{sf_suffix}_{root}_direct" not in st.session_state:
             return
 
     # =========================================================================
     # Сбор данных с кэшированием в session_state
     # =========================================================================
     db_sig = str(get_db_signature())
-    key_direct = f"school_subset_{db_sig}_{root}_direct"
-    key_all = f"school_subset_{db_sig}_{root}_all"
+    key_direct = f"school_subset_{db_sig}_{sf_suffix}_{root}_direct"
+    key_all = f"school_subset_{db_sig}_{sf_suffix}_{root}_all"
 
     with st.spinner("Сбор диссертаций школы..."):
         if key_direct not in st.session_state:
             with perf_timer("school_analysis.collect_direct_subset"):
                 st.session_state[key_direct] = collect_school_subset(
-                    df, idx, root, "direct", lineage, rows_for
+                    working_df, working_idx, root, "direct", lineage, rows_for
                 )
         if key_all not in st.session_state:
             with perf_timer("school_analysis.collect_all_subset"):
                 st.session_state[key_all] = collect_school_subset(
-                    df, idx, root, "all", lineage, rows_for
+                    working_df, working_idx, root, "all", lineage, rows_for
                 )
 
     subset_direct: pd.DataFrame = st.session_state[key_direct]
@@ -215,9 +241,9 @@ def render_school_analysis_tab(
         overview = compute_overview(
             subset=subset,
             root=root,
-            index=idx,
+            index=working_idx,
             lineage_func=lineage,
-            df_full=df,
+            df_full=working_df,
             scope=scope,
         )
 
@@ -249,8 +275,8 @@ def render_school_analysis_tab(
     with st.spinner("Вычисление метрик..."):
         with perf_timer("school_analysis.compute_metrics"):
             metrics_df, generations_df = compute_metrics(
-                df_full=df,
-                index=idx,
+                df_full=working_df,
+                index=working_idx,
                 root=root,
                 lineage_func=lineage,
                 rows_for_func=rows_for,
@@ -393,8 +419,8 @@ def render_school_analysis_tab(
     with st.spinner("Поиск учеников-руководителей..."):
         with perf_timer("school_analysis.compute_continuity"):
             continuity_df = compute_continuity(
-                df_full=df,
-                index=idx,
+                df_full=working_df,
+                index=working_idx,
                 subset_direct=subset_direct,
                 rows_for_func=rows_for,
             )
@@ -411,7 +437,7 @@ def render_school_analysis_tab(
     # =========================================================================
     st.markdown("### \U0001f4e5 Скачать полный отчёт")
 
-    excel_signature = f"{db_sig}::{root}::{scope}::{source.id}"
+    excel_signature = f"{db_sig}::{root}::{scope}::{sf_suffix}::{source.id}"
     if st.button("Сформировать Excel-отчёт", key="school_analysis_build_excel"):
         with st.spinner("Формируем Excel-файл..."):
             with perf_timer("school_analysis.build_excel"):
@@ -447,6 +473,7 @@ def render_school_analysis_tab(
             "analysis_root": root,
             "analysis_scope": scope,
             "analysis_profile_source": source.id,
+            **science_fields_to_query_params(science_field_ids),
         },
         key="school_analysis_share",
     )

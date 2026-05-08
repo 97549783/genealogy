@@ -12,6 +12,7 @@
 
 Экспорт/сборка отчетов вынесены в `tabs.school_analysis.exports`.
 Модуль не импортирует streamlit и не содержит UI-кода.
+Функции ожидают, что subset/df_full/index уже отфильтрованы по отраслям наук на уровне вкладки.
 """
 
 from __future__ import annotations

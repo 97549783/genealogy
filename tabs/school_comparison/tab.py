@@ -12,15 +12,22 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
+from core.domain.science_fields import filter_df_by_science_fields
 from core.classifier import get_classifier_labels_by_profile_source
 from core.ui.filters import (
     hydrate_profile_source_from_query_params,
+    hydrate_science_fields_from_query_params,
     render_profile_source_radio,
+    render_science_field_filter,
+    science_field_filter_caption,
+    science_field_state_suffix,
+    science_fields_to_query_params,
 )
 
-from core.lineage.graph import lineage, rows_for
+from core.lineage.graph import build_index, lineage, rows_for
 from core.ui.chrome import download_data_dialog
 from core.ui.links import share_params_button
+from core.db import SUPERVISOR_COLUMNS
 from .comparison import (
     DistanceMetric,
     ComparisonScope,
@@ -159,6 +166,10 @@ def render_school_comparison_tab(
         if nodes_q:
             st.session_state["school_comp_nodes_prefill_query"] = nodes_q
 
+        science_fields_q = hydrate_science_fields_from_query_params()
+        if science_fields_q:
+            st.session_state["school_comp_science_fields_query"] = science_fields_q
+
         source_q = str(st.query_params.get("school_comp_profile_source", "")).strip()
         if source_q:
             st.session_state["school_comp_profile_source_query"] = source_q
@@ -192,7 +203,21 @@ def render_school_comparison_tab(
         default_id=default_source_id,
     )
     classifier_labels = get_classifier_labels_by_profile_source(source.id)
-    results_key = f"{_RESULTS_KEY}_{source.id}"
+
+    default_science_fields = st.session_state.pop(
+        "school_comp_science_fields_query",
+        hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="school_comp",
+        default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+
+    working_df = filter_df_by_science_fields(df, science_field_ids)
+    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    sf_suffix = science_field_state_suffix(science_field_ids)
+    results_key = f"{_RESULTS_KEY}_{source.id}_{sf_suffix}"
 
     # =========================================================================
     # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
@@ -219,7 +244,7 @@ def render_school_comparison_tab(
     # =========================================================================
     st.markdown("### 👥 Выбор научных школ для сравнения")
 
-    all_supervisors_sorted = get_all_supervisors(df)
+    all_supervisors_sorted = get_all_supervisors(working_df)
     if not all_supervisors_sorted:
         st.error("❌ В данных не найдено научных руководителей")
         return
@@ -417,8 +442,8 @@ def render_school_comparison_tab(
             for i, school_name in enumerate(selected_schools):
                 try:
                     dataset, missing_info, total_count = gather_school_dataset(
-                        df=df,
-                        index=idx,
+                        df=working_df,
+                        index=working_idx,
                         root=school_name,
                         scores=scores_df,
                         scope=selected_scope,
@@ -516,6 +541,7 @@ def render_school_comparison_tab(
             "classifier_labels": classifier_labels,
             "profile_source_id": source.id,
             "profile_source_label": source.label,
+            "science_field_ids": science_field_ids,
         }
 
     # =========================================================================
@@ -526,6 +552,9 @@ def render_school_comparison_tab(
         return
 
     if results.get("profile_source_id") != source.id:
+        st.session_state.pop(results_key, None)
+        return
+    if results.get("science_field_ids", []) != science_field_ids:
         st.session_state.pop(results_key, None)
         return
 
@@ -708,6 +737,7 @@ def render_school_comparison_tab(
             "school_comp_nodes": selected_nodes or [],
             "school_comp_decay": decay_factor,
             "school_comp_profile_source": source.id,
+            **science_fields_to_query_params(science_field_ids),
         },
         key="school_comp_share",
     )

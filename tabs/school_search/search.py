@@ -33,6 +33,7 @@
     - build_excel_search_results   — Excel-отчёт по результатам поиска
 
 Модуль не импортирует streamlit и не содержит UI-кода.
+Функции ожидают, что df и index уже отфильтрованы по отраслям наук на уровне UI-вкладки.
 """
 
 from __future__ import annotations

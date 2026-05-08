@@ -109,7 +109,7 @@ import streamlit as st
 import pandas as pd
 import tabs.dissertations.tab as diss_tab
 
-def _fake_filter(df, search_params, use_fuzzy=False):
+def _fake_filter(df, search_params, use_fuzzy=False, science_field_ids=None):
     st.session_state["_captured_use_fuzzy"] = use_fuzzy
     return pd.DataFrame([{"Code": "1", "candidate_name": "Иванов И.И.", "title": "Тест"}])
 
