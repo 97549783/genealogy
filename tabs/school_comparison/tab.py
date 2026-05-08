@@ -626,7 +626,6 @@ def render_school_comparison_tab(
             hide_index=True,
             height=600,
         )
-        # Кнопки скачивания рендерятся прямо через download_data_dialog (inline, без диалога)
         download_data_dialog(
             df=node_scores_df_full,
             file_base="оценки_узлов_школ",
@@ -734,9 +733,8 @@ def render_school_comparison_tab(
             "school_comp_metric": selected_metric,
             "school_comp_basis": basis_choice,
             "school_comp_nodes": selected_nodes or [],
-            "school_comp_decay": decay_factor,
             "school_comp_profile_source": source.id,
-            **science_fields_to_query_params(science_field_ids),
+            **science_fields_to_query_params(science_field_ids, prefix="school_comp_"),
         },
         key="school_comp_share",
     )

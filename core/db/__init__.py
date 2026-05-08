@@ -19,7 +19,6 @@ from .scores import (
     get_numeric_code_feature_columns,
     load_article_scores,
     load_dissertation_scores,
-    load_dissertation_profile_scores,
     load_dissertation_scores_for_source,
     get_score_feature_columns_from_table,
     get_score_columns_for_classifier_node,
@@ -30,3 +29,4 @@ from .scores import (
 )
 from .articles import load_articles_data, load_articles_metadata, load_articles_scores
 from .connection import get_db_signature
+from tabs.profiles.search import load_dissertation_profile_scores
