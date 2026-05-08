@@ -3,6 +3,38 @@ from __future__ import annotations
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
+from tabs.profiles.search import load_basic_scores, load_dissertation_profile_scores
+
+
+# ==============================================================================
+# ТЕСТ СОВМЕСТИМОСТИ ALIAS
+# ==============================================================================
+
+def test_load_basic_scores_alias_kept_for_compatibility() -> None:
+    """load_basic_scores сохранён как совместимый alias — он должен существовать."""
+    assert load_basic_scores is not None
+
+
+def test_load_basic_scores_alias_matches_new_loader() -> None:
+    """load_basic_scores и load_dissertation_profile_scores возвращают одно и то же при одинаковом входе."""
+    import unittest.mock as mock
+
+    fake_df = pd.DataFrame([{"Code": "X1", "1.1": 5.0}])
+
+    with mock.patch(
+        "tabs.profiles.search.load_dissertation_scores",
+        return_value=fake_df,
+    ) as patched:
+        result_new = load_dissertation_profile_scores(profile_source_id="pedagogy_5_8")
+        result_alias = load_basic_scores(profile_source_id="pedagogy_5_8")
+
+    assert patched.call_count == 2
+    pd.testing.assert_frame_equal(result_new, result_alias)
+
+
+# ==============================================================================
+# ТЕСТЫ МАРШРУТИЗАЦИИ ВКЛАДКИ
+# ==============================================================================
 
 def test_profiles_tab_routes_to_selected_mode() -> None:
     app = AppTest.from_string(
@@ -30,7 +62,7 @@ scores = pd.DataFrame([
     {"Code": "A1", "1.1.1": 5.0}
 ])
 
-profiles_tab.load_basic_scores = lambda profile_source_id="pedagogy_5_8": scores
+profiles_tab.load_dissertation_profile_scores = lambda profile_source_id="pedagogy_5_8": scores
 
 profiles_tab.get_classifier_by_profile_source = lambda source_id: [("1.1.1", "Тема", False)]
 profiles_tab.get_classifier_labels_by_profile_source = lambda source_id: {"1.1.1": "Тема"}

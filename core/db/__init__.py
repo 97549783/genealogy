@@ -19,6 +19,7 @@ from .scores import (
     get_numeric_code_feature_columns,
     load_article_scores,
     load_dissertation_scores,
+    load_dissertation_profile_scores,
     load_dissertation_scores_for_source,
     get_score_feature_columns_from_table,
     get_score_columns_for_classifier_node,
