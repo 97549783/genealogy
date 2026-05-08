@@ -49,7 +49,7 @@ def render_science_field_filter(
         label,
         options=["all", "selected"],
         index=1 if default_selected_ids else 0,
-        format_func=lambda value: "Все диссертации" if value == "all" else "Выбрать отрасли",
+        format_func=lambda value: "Все отрасли" if value == "all" else "Выбрать определенные отрасли",
         horizontal=True,
         key=f"{key_prefix}_science_field_mode",
     )
