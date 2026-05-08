@@ -79,3 +79,11 @@ def test_it_classifier_disabled_flags_are_derived_from_children():
     assert classifier["2.5.4.4"] is False
     assert classifier["3.3.6"] is True
     assert classifier["3.3.6.4"] is False
+
+
+def test_profile_source_classifiers_are_distinct():
+    ped = get_classifier_labels_by_profile_source("pedagogy_5_8")
+    it = get_classifier_labels_by_profile_source("it_2_3")
+
+    assert ped != it
+    assert it["1.1"] == "Типы систем"

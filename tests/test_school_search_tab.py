@@ -36,8 +36,7 @@ sample_df = pd.DataFrame([
 
 school_search_tab.render_school_search_tab(
     df=sample_df,
-    idx={},
-    classifier=None,
+    idx={}
 )
 """
     )
@@ -86,7 +85,7 @@ st.session_state["school_search_last_signature"] = {"mode": "old"}
 st.session_state["school_search_last_payload"] = {"excel_bytes": b"old-excel"}
 
 sample_df = pd.DataFrame([{"candidate_name": "Иванов И.И.", "city": "Москва", "supervisors_1.name": "Петров П.П."}])
-school_search_tab.render_school_search_tab(df=sample_df, idx={}, classifier=None)
+school_search_tab.render_school_search_tab(df=sample_df, idx={})
 """
     )
     app.query_params["mode"] = "city"
@@ -112,7 +111,7 @@ def _fake_search_by_city(**kwargs):
 
 school_search_tab.search_by_city = _fake_search_by_city
 sample_df = pd.DataFrame([{"candidate_name": "Иванов И.И.", "city": "Москва", "supervisors_1.name": "Петров П.П."}])
-school_search_tab.render_school_search_tab(df=sample_df, idx={}, classifier=None)
+school_search_tab.render_school_search_tab(df=sample_df, idx={})
 """
     )
     app.query_params["mode"] = "city"
@@ -137,7 +136,7 @@ def _fake_search_by_city(**kwargs):
 
 school_search_tab.search_by_city = _fake_search_by_city
 sample_df = pd.DataFrame([{"candidate_name": "Иванов И.И.", "city": "Москва", "supervisors_1.name": "Петров П.П."}])
-school_search_tab.render_school_search_tab(df=sample_df, idx={}, classifier=None)
+school_search_tab.render_school_search_tab(df=sample_df, idx={})
 """
     )
     app.query_params["mode"] = "city"

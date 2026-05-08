@@ -115,7 +115,7 @@ comp_tab.render_school_comparison_tab(sample_df, idx={})
 
     assert app.session_state["school_comp_query_hydrated"] is True
     assert app.session_state["school_comp_selection"] == ["Иванов И.И.", "Петров П.П."]
-    assert app.session_state["school_comp_results"] is not None
+    assert app.session_state["school_comp_results_pedagogy_5_8"] is not None
     assert app.session_state["_school_comp_share_key"] == "school_comp_share"
     assert app.session_state["_school_comp_share_payload"] == {
         "tab": "school_comparison",
@@ -125,6 +125,7 @@ comp_tab.render_school_comparison_tab(sample_df, idx={})
         "school_comp_basis": "selected",
         "school_comp_nodes": ["1"],
         "school_comp_decay": 0.5,
+        "school_comp_profile_source": "pedagogy_5_8",
     }
 
 

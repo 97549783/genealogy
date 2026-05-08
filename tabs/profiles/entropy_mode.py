@@ -175,9 +175,9 @@ def show_instruction_dialog() -> None:
     _show()
 
 
-def load_scores_from_db() -> pd.DataFrame:
+def load_scores_from_db(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
     """Совместимая обёртка над загрузчиком профилей из SQLite."""
-    return load_dissertation_scores_core()
+    return load_dissertation_scores_core(profile_source_id=profile_source_id)
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:
@@ -218,6 +218,8 @@ def render_entropy_specificity_tab(
     classifier_labels: Optional[Dict[str, str]] = None,
     thematic_classifier: Optional[List[tuple]] = None,
     supervisor_columns: Optional[List[str]] = None,
+    profile_source_id: str = "pedagogy_5_8",
+    profile_source_label: str = "Педагогические науки — 5.8.x / 13.00.xx",
 ) -> None:
     """
     Отрисовывает вкладку поиска по мере общности/специфичности.
@@ -229,11 +231,15 @@ def render_entropy_specificity_tab(
     if supervisor_columns is None:
         supervisor_columns = ["supervisors_1.name", "supervisors_2.name"]
 
+    entropy_results_key = f"entropy_results_{profile_source_id}"
+    entropy_params_key = f"entropy_params_{profile_source_id}"
+
     # --- Кнопка инструкции ---
     if st.button("📖 Инструкция", key="instruction_entropy"):
         show_instruction_dialog()
 
     st.subheader("📊 Поиск по мере общности/специфичности")
+    st.caption(f"Активный профиль: {profile_source_label}")
 
     st.markdown("""
     Найдите диссертации по степени **узости** или **широты** исследования в рамках 
@@ -244,7 +250,7 @@ def render_entropy_specificity_tab(
     # ЗАГРУЗКА ДАННЫХ ПРОФИЛЕЙ
     # =========================================================================
     try:
-        scores_df = load_scores_from_db()
+        scores_df = load_scores_from_db(profile_source_id=profile_source_id)
 
         all_feature_columns = get_feature_columns(scores_df)
         st.success(
@@ -399,7 +405,7 @@ def render_entropy_specificity_tab(
             selected_node_labels = st.multiselect(
                 "Выберите узлы классификатора:",
                 options=[f"{code} · {title}" for code, title in parent_nodes],
-                key="entropy_selected_nodes",
+                key=f"entropy_selected_nodes_{profile_source_id}",
                 help="Можно выбрать несколько узлов. Анализ будет включать выбранные узлы и все их подузлы."
             )
 
@@ -426,6 +432,8 @@ def render_entropy_specificity_tab(
         analysis_columns = []
         for node_code in selected_nodes:
             branch_codes = get_all_nodes_of_branch(node_code, all_feature_columns)
+            if not branch_codes:
+                st.warning(f"Для узла {node_code} нет признаков в таблице {profile_source_label}")
             analysis_columns.extend(branch_codes)
 
         # Убираем дубликаты
@@ -524,8 +532,8 @@ def render_entropy_specificity_tab(
                         results = results.merge(df_meta, on="Code", how="left")
 
                 # Сохраняем результаты в session_state
-                st.session_state["entropy_results"] = results
-                st.session_state["entropy_params"] = {
+                st.session_state[entropy_results_key] = results
+                st.session_state[entropy_params_key] = {
                     "use_hierarchical": use_hierarchical,
                     "min_threshold": min_threshold,
                     "sort_order": sort_order,
@@ -533,6 +541,8 @@ def render_entropy_specificity_tab(
                     "first_level_only": first_level_only,
                     "classifier_mode": classifier_mode,
                     "selected_nodes": selected_nodes,
+                    "profile_source_id": profile_source_id,
+                    "profile_source_label": profile_source_label,
                 }
 
                 st.success(f"✅ Найдено {len(results)} диссертаций")
@@ -547,9 +557,9 @@ def render_entropy_specificity_tab(
     # ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
     # =========================================================================
 
-    if "entropy_results" in st.session_state:
-        results = st.session_state["entropy_results"]
-        params = st.session_state.get("entropy_params", {})
+    if entropy_results_key in st.session_state:
+        results = st.session_state[entropy_results_key]
+        params = st.session_state.get(entropy_params_key, {})
 
         st.markdown("---")
         st.markdown("## 📈 Результаты")

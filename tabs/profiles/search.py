@@ -43,9 +43,9 @@ def _build_abstract_url(code: str, author: str) -> str:
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_basic_scores() -> pd.DataFrame:
+def load_basic_scores(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
     """Совместимая обёртка над общим загрузчиком тематических профилей."""
-    return load_dissertation_scores()
+    return load_dissertation_scores(profile_source_id=profile_source_id)
 
 
 def get_feature_columns(scores_df: pd.DataFrame) -> List[str]:

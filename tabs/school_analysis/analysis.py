@@ -7,7 +7,7 @@
 - временно́й и географической статистики
 - институциональных распределений
 - топ оппонентов
-- тематического профиля по таблице diss_scores_5_8
+- тематического профиля по выбранной таблице тематических профилей
 - преемственности (ученики, ставшие руководителями)
 
 Экспорт/сборка отчетов вынесены в `tabs.school_analysis.exports`.
@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 from core.db import get_all_feature_columns, load_dissertation_scores
 from core.db import get_db_signature
+from core.domain.profile_sources import get_profile_summary_groups
 from core.lineage.membership import get_school_subset, get_school_lineage
 
 # ---------------------------------------------------------------------------
@@ -495,30 +496,19 @@ def _is_child_of(code: str, parent: str) -> bool:
 def compute_thematic_profile(
     subset: pd.DataFrame,
     classifier: List[Tuple[str, str, bool]],
-    group_prefix_level: str = "",
-    group_prefix_education: str = "1.1.1",
-    group_prefix_knowledge: str = "1.1.2",
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Вычисляет средние баллы по тематическим группам для всей школы.
+    profile_source_id: str = "pedagogy_5_8",
+    groups: Optional[Tuple[Tuple[str, str], ...]] = None,
+    min_avg: float = 2.0,
+) -> Dict[str, pd.DataFrame]:
+    """Вычисляет средние баллы по тематическим группам для всей школы."""
+    if groups is None:
+        groups = get_profile_summary_groups(profile_source_id)
 
-    Параметры:
-        subset                  — диссертации школы
-        classifier              — THEMATIC_CLASSIFIER из streamlit_app.py
-        group_prefix_level      — не используется (оставлен для совместимости)
-        group_prefix_education  — префикс группы «Уровень образования» (1.1.1)
-        group_prefix_knowledge  — префикс группы «Область знания» (1.1.2)
-
-    Возвращает:
-        education_df  — таблица: Название | Средний балл  (группа 1.1.1)
-        knowledge_df  — таблица: Название | Средний балл  (группа 1.1.2)
-    """
+    empty = pd.DataFrame(columns=["Название", "Средний балл"])
     if subset.empty or "Code" not in subset.columns:
-        empty = pd.DataFrame(columns=["Название", "Средний балл"])
-        return empty, empty
+        return {group_label: empty.copy() for _prefix, group_label in groups}
 
-    # Загружаем оценки из SQLite
-    scores = load_dissertation_scores()
+    scores = load_dissertation_scores(profile_source_id=profile_source_id)
     scores = scores.dropna(subset=["Code"])
     scores["Code"] = scores["Code"].astype(str).str.strip()
     scores = scores[scores["Code"].str.len() > 0]
@@ -527,20 +517,15 @@ def compute_thematic_profile(
     feature_cols = get_all_feature_columns(scores, key_column="Code")
     scores[feature_cols] = scores[feature_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
 
-    # Оставляем только коды, присутствующие в выборке школы
     school_codes = (
         subset["Code"].dropna().astype(str).str.strip().pipe(lambda s: s[s != ""]).unique()
     )
     school_scores = scores[scores["Code"].isin(school_codes)]
 
     if school_scores.empty:
-        empty = pd.DataFrame(columns=["Название", "Средний балл"])
-        return empty, empty
+        return {group_label: empty.copy() for _prefix, group_label in groups}
 
-    # Среднее по всем диссертациям школы для каждого признака
     means: Dict[str, float] = {col: float(school_scores[col].mean()) for col in feature_cols}
-
-    # Словарь: код → название
     code_to_name = {code: title for code, title, _ in classifier}
 
     def _build_group_df(prefix: str) -> pd.DataFrame:
@@ -548,17 +533,14 @@ def compute_thematic_profile(
         for col, avg in means.items():
             if _is_child_of(col, prefix) and col != prefix:
                 name = code_to_name.get(col, col)
-                if avg >= 2:
+                if avg >= min_avg:
                     rows.append({"Название": name, "Средний балл": round(avg, 2)})
         if not rows:
-            return pd.DataFrame(columns=["Название", "Средний балл"])
+            return empty.copy()
         result = pd.DataFrame(rows).sort_values("Средний балл", ascending=False)
         return result.reset_index(drop=True)
 
-    education_df = _build_group_df(group_prefix_education)
-    knowledge_df = _build_group_df(group_prefix_knowledge)
-
-    return education_df, knowledge_df
+    return {group_label: _build_group_df(prefix) for prefix, group_label in groups}
 
 
 # ---------------------------------------------------------------------------

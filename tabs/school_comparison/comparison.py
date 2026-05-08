@@ -196,9 +196,9 @@ def compute_distance_matrix(
 # ЗАГРУЗКА ДАННЫХ
 # ==============================================================================
 
-def load_scores_from_db() -> pd.DataFrame:
+def load_scores_from_db(profile_source_id: str = "pedagogy_5_8") -> pd.DataFrame:
     """Совместимая обёртка над загрузчиком профилей из SQLite."""
-    return load_dissertation_scores_core()
+    return load_dissertation_scores_core(profile_source_id=profile_source_id)
 
 
 def get_feature_columns(scores: pd.DataFrame) -> List[str]:

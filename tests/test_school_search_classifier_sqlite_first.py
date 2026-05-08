@@ -16,7 +16,7 @@ def test_classifier_mode_uses_targeted_node_scores(monkeypatch):
     monkeypatch.setattr(
         ss,
         "fetch_dissertation_node_score_by_codes",
-        lambda codes, classifier_node: pd.DataFrame(
+        lambda codes, classifier_node, profile_source_id="pedagogy_5_8": pd.DataFrame(
             [{"Code": "1", "node_score": 5.0}, {"Code": "2", "node_score": 1.0}, {"Code": "3", "node_score": 10.0}]
         ),
     )
