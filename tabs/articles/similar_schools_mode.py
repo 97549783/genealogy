@@ -13,6 +13,7 @@ from .author_matching import compute_selectable_people
 from .blocks import get_available_block_columns
 from .data import build_articles_dataset_for_school
 from .metrics import build_school_vector, compute_keyword_overlap, cosine_similarity_safe, get_article_feature_columns, normalize_keyword
+from .query_params import parse_float_param, parse_int_param
 
 
 def _keywords_for_dataset(dataset: pd.DataFrame, article_keywords: pd.DataFrame) -> Set[str]:
@@ -46,6 +47,11 @@ def render_similar_schools_mode(
     st.markdown("### Исходная школа")
     df_articles = load_articles_data()
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
+    hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
+    if hidden_ambiguous:
+        st.caption("Неоднозначные варианты с совпадающими инициалами временно скрыты, чтобы избежать ошибочного сопоставления авторов.")
+    options = [option for option in options if options_meta.get(option) != "initials_ambiguous"]
+    options_meta = {option: kind for option, kind in options_meta.items() if option in options}
     if not options:
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
@@ -78,11 +84,11 @@ def render_similar_schools_mode(
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        min_articles = st.number_input("Минимальное количество статей в школе", min_value=1, max_value=1000, value=int(st.query_params.get("aa_min_articles", 1)), step=1, key="aa_min_articles")
+        min_articles = st.number_input("Минимальное количество статей в школе", min_value=1, max_value=1000, value=max(1, min(1000, parse_int_param(st.query_params.get("aa_min_articles", 1), 1))), step=1, key="aa_min_articles")
     with c2:
-        top_n = st.number_input("Количество похожих школ", min_value=1, max_value=100, value=int(st.query_params.get("aa_top_n", 20)), step=1, key="aa_top_n")
+        top_n = st.number_input("Количество похожих школ", min_value=1, max_value=100, value=max(1, min(100, parse_int_param(st.query_params.get("aa_top_n", 20), 20))), step=1, key="aa_top_n")
     with c3:
-        threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.query_params.get("aa_threshold", 3.0)), step=0.1, key="aa_similar_threshold")
+        threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0))), step=0.1, key="aa_similar_threshold")
 
     source_dataset = build_articles_dataset_for_school(source_school, options_meta, df_lineage, idx_lineage, df_articles, scope)
     if source_dataset.empty:

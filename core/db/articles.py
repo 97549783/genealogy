@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pandas as pd
 import streamlit as st
 
@@ -108,8 +110,10 @@ def _load_article_authors_cached(db_signature: tuple[str, float, int]) -> pd.Dat
     try:
         with get_sqlite_connection() as conn:
             return pd.read_sql_query("SELECT * FROM article_authors", conn)
-    except Exception:
-        return _empty_article_authors()
+    except (sqlite3.OperationalError, pd.errors.DatabaseError) as exc:
+        if "no such table" in str(exc).lower():
+            return _empty_article_authors()
+        raise
 
 
 def load_article_keywords() -> pd.DataFrame:
@@ -124,5 +128,7 @@ def _load_article_keywords_cached(db_signature: tuple[str, float, int]) -> pd.Da
     try:
         with get_sqlite_connection() as conn:
             return pd.read_sql_query("SELECT * FROM article_keywords", conn)
-    except Exception:
-        return _empty_article_keywords()
+    except (sqlite3.OperationalError, pd.errors.DatabaseError) as exc:
+        if "no such table" in str(exc).lower():
+            return _empty_article_keywords()
+        raise

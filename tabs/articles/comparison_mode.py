@@ -53,7 +53,7 @@ def _canon_initials(name: str) -> str:
     s = _RE_DOTS_SPACES.sub(".", s)
     s = _RE_INIT_SPACES.sub(r"\1.\2.", s)
     s = _RE_MULTI_SPACE.sub(" ", s)
-    return s.lower()
+    return s.lower().replace("ё", "е")
 
 def _display_initials(canon_key: str) -> str:
     if not isinstance(canon_key, str):
@@ -824,6 +824,7 @@ def render_articles_comparison_mode(
         share_params_button(
             {
                 "tab": "articles_comparison",
+                "articles_mode": "comparison",
                 "ac_people": selected_options,
                 "ac_scope": scope,
                 "ac_metric": metric_choice,

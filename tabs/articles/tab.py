@@ -52,6 +52,8 @@ def render_articles_analysis_tab(
 ) -> None:
     """Отрисовывает вкладку «Анализ статей (демо)» и выбранный режим."""
     _hydrate_mode_from_query()
+    if classifier_labels is None:
+        classifier_labels = load_articles_classifier()
 
     st.markdown("## Анализ статей (демо)")
     st.caption("В данный момент анализ основан только на статьях журнала «Информатика и образование».")

@@ -9,11 +9,12 @@ import pandas as pd
 import streamlit as st
 
 from core.db.articles import load_article_authors, load_article_keywords, load_articles_data
-from .author_matching import canon_initials, compute_selectable_people, fio_to_short, get_school_member_initials, get_school_member_names
+from .author_matching import canon_initials, compute_selectable_people, fio_to_short, get_school_member_initials
 from .blocks import get_available_block_columns
 from .charts import create_block_scores_chart, create_yearly_articles_chart
 from .data import build_articles_dataset_for_school
 from .metrics import compute_block_score_summary, normalize_keyword
+from .query_params import parse_float_param
 from .results_table import prepare_articles_results_table
 
 
@@ -25,6 +26,19 @@ def _keywords_from_metadata(df: pd.DataFrame) -> pd.DataFrame:
             if value:
                 rows.append({"Article_id": row.get("Article_id"), "Keyword": value})
     return pd.DataFrame(rows)
+
+
+def compute_found_school_author_initials(dataset: pd.DataFrame, member_initials: Set[str]) -> Set[str]:
+    """Возвращает участников школы, фактически найденных среди авторов статей."""
+    found: Set[str] = set()
+    if dataset is None or dataset.empty or "Authors" not in dataset.columns:
+        return found
+    for raw in dataset["Authors"].fillna("").astype(str):
+        for part in raw.split(";"):
+            key = canon_initials(part)
+            if key in member_initials:
+                found.add(key)
+    return found
 
 
 def _render_results_table(df: pd.DataFrame) -> None:
@@ -49,6 +63,11 @@ def render_single_school_mode(
     st.markdown("### Выбор научной школы")
     df_articles = load_articles_data()
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
+    hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
+    if hidden_ambiguous:
+        st.caption("Неоднозначные варианты с совпадающими инициалами временно скрыты, чтобы избежать ошибочного сопоставления авторов.")
+    options = [option for option in options if options_meta.get(option) != "initials_ambiguous"]
+    options_meta = {option: kind for option, kind in options_meta.items() if option in options}
     if not options:
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
@@ -67,7 +86,7 @@ def render_single_school_mode(
         index=scope_index,
         key="aa_single_scope",
     )
-    threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.query_params.get("aa_threshold", 3.0)), step=0.1, key="aa_single_threshold")
+    threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0))), step=0.1, key="aa_single_threshold")
     show_all = st.checkbox("Показать все тематические блоки", value=False, key="aa_single_show_all_blocks")
 
     dataset = build_articles_dataset_for_school(selected, options_meta, df_lineage, idx_lineage, df_articles, scope)
@@ -76,10 +95,10 @@ def render_single_school_mode(
         return
 
     member_initials = get_school_member_initials(selected, options_meta, df_lineage, idx_lineage, scope)
-    member_names = get_school_member_names(selected, options_meta, df_lineage, idx_lineage, scope)
     article_authors = load_article_authors()
     article_keywords = load_article_keywords()
 
+    found_member_initials = compute_found_school_author_initials(dataset, member_initials)
     doi_count = int(dataset.get("DOI", pd.Series(dtype=object)).fillna("").astype(str).str.strip().ne("").sum())
     years = pd.to_numeric(dataset.get("Year"), errors="coerce").dropna()
     period = f"{int(years.min())}–{int(years.max())}" if not years.empty else "—"
@@ -91,7 +110,7 @@ def render_single_school_mode(
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Статей найдено", len(dataset))
-    c2.metric("Авторов школы в статьях", len(member_initials))
+    c2.metric("Авторов школы в статьях", len(found_member_initials))
     c3.metric("Уникальных ключевых слов", len(unique_keywords))
     c4.metric("Период публикаций", period)
     c5.metric("Статей с DOI", doi_count)
@@ -113,7 +132,7 @@ def render_single_school_mode(
                 "Город": "; ".join(sorted({str(v) for v in group.get("City", pd.Series(dtype=object)).dropna() if str(v).strip()})),
             })
     if not author_rows:
-        for key in sorted(member_initials):
+        for key in sorted(found_member_initials):
             count = int(dataset["Authors"].astype(str).apply(lambda raw: key in {canon_initials(part) for part in raw.split(";")}).sum())
             if count:
                 author_rows.append({"Автор": key, "Количество статей": count, "Годы публикаций": period, "Аффилиация": "", "Город": ""})
@@ -127,8 +146,8 @@ def render_single_school_mode(
         st.info("Ключевые слова для выбранных статей не найдены.")
     else:
         kw_counts = kw_source.assign(_kw=kw_source["Keyword"].apply(normalize_keyword))
-        kw_counts = kw_counts[kw_counts["_kw"] != ""].groupby("Keyword")["Article_id"].nunique().reset_index()
-        kw_counts = kw_counts.rename(columns={"Keyword": "Ключевое слово", "Article_id": "Количество статей"}).sort_values("Количество статей", ascending=False)
+        kw_counts = kw_counts[kw_counts["_kw"] != ""].groupby("_kw")["Article_id"].nunique().reset_index()
+        kw_counts = kw_counts.rename(columns={"_kw": "Ключевое слово", "Article_id": "Количество статей"}).sort_values("Количество статей", ascending=False)
         st.dataframe(kw_counts, hide_index=True, use_container_width=True)
 
     st.markdown("### Тематический профиль школы по статьям")
