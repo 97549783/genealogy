@@ -30,7 +30,8 @@ from scipy.spatial.distance import cdist
 
 METADATA_COLS = {
     "Article_id", "Authors", "Title", "Journal",
-    "Volume", "Issue", "school", "Year", "Year_num"
+    "Volume", "Issue", "school", "Year", "Year_num",
+    "ISSN", "Abstract", "Keywords", "DOI", "Pages", "Funding"
 }
 
 DistanceMetric = Literal[
@@ -54,6 +55,12 @@ CLASSIFIER_PATHS = [
     "core/classifier/articles_classifier.json",
     "articles_classifier.json",
     "db_articles/articles_classifier.json",
+]
+
+CLASSIFIER_OVERRIDE_PATHS = [
+    "core/classifier/articles_classifier_overrides.json",
+    "articles_classifier_overrides.json",
+    "db_articles/articles_classifier_overrides.json",
 ]
 
 ARTICLES_HELP_TEXT = """
@@ -90,19 +97,33 @@ CLASSIFIER_LIST_TEXT = """
 # ЗАГРУЗКА КЛАССИФИКАТОРА
 # ==============================================================================
 
-def load_articles_classifier() -> Dict[str, str]:
-    """Загружает классификатор статей из JSON файла."""
-    for path_str in CLASSIFIER_PATHS:
+def _load_first_existing_json(paths: List[str], required: bool) -> Dict[str, str]:
+    """Загружает первый найденный JSON-словарь из списка путей."""
+    for path_str in paths:
         path = Path(path_str)
-        if path.exists():
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Ошибка загрузки классификатора из {path}: {e}")
-                continue
-    print("⚠️ Файл core/classifier/articles_classifier.json не найден, классификатор будет пустым")
+        if not path.exists():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items()}
+            print(f"Ошибка загрузки классификатора из {path}: JSON должен быть объектом")
+        except Exception as exc:
+            print(f"Ошибка загрузки классификатора из {path}: {exc}")
+    if required:
+        print("⚠️ Файл core/classifier/articles_classifier.json не найден, классификатор будет пустым")
     return {}
+
+
+def load_articles_classifier() -> Dict[str, str]:
+    """Загружает классификатор статей и применяет уточняющие подписи."""
+    classifier = _load_first_existing_json(CLASSIFIER_PATHS, required=True)
+    overrides = _load_first_existing_json(CLASSIFIER_OVERRIDE_PATHS, required=False)
+    if overrides:
+        classifier = classifier.copy()
+        classifier.update(overrides)
+    return classifier
 
 # ==============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ИЕРАРХИЯ)
