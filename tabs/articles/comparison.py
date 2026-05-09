@@ -30,7 +30,8 @@ from scipy.spatial.distance import cdist
 
 METADATA_COLS = {
     "Article_id", "Authors", "Title", "Journal",
-    "Volume", "Issue", "school", "Year", "Year_num"
+    "Volume", "Issue", "school", "Year", "Year_num",
+    "ISSN", "Abstract", "Keywords", "DOI", "Pages", "Funding"
 }
 
 DistanceMetric = Literal[

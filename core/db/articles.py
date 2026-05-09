@@ -18,6 +18,19 @@ REQUIRED_ARTICLE_METADATA_COLUMNS = {
     "Year",
 }
 
+ARTICLE_AUTHORS_COLUMNS = ["id", "Article_id", "ISSN", "Author_order", "Name", "Affiliation", "Country", "City", "Details"]
+ARTICLE_KEYWORDS_COLUMNS = ["id", "Article_id", "ISSN", "Keyword_order", "Keyword"]
+
+
+def _empty_article_authors() -> pd.DataFrame:
+    """Возвращает пустую таблицу авторов статей с ожидаемыми столбцами."""
+    return pd.DataFrame(columns=ARTICLE_AUTHORS_COLUMNS)
+
+
+def _empty_article_keywords() -> pd.DataFrame:
+    """Возвращает пустую таблицу ключевых слов статей с ожидаемыми столбцами."""
+    return pd.DataFrame(columns=ARTICLE_KEYWORDS_COLUMNS)
+
 
 def load_articles_metadata() -> pd.DataFrame:
     """Загружает метаданные статей и проверяет обязательные поля."""
@@ -81,3 +94,35 @@ def _load_articles_data_cached(db_signature: tuple[str, float, int]) -> pd.DataF
     metadata = load_articles_metadata()
     scores = load_articles_scores()
     return metadata.merge(scores, on="Article_id", how="inner", validate="one_to_one")
+
+
+def load_article_authors() -> pd.DataFrame:
+    """Загружает расширенные сведения об авторах статей из SQLite."""
+    return _load_article_authors_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_article_authors_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает авторов статей с кэшированием и мягким отсутствием таблицы."""
+    _ = db_signature
+    try:
+        with get_sqlite_connection() as conn:
+            return pd.read_sql_query("SELECT * FROM article_authors", conn)
+    except Exception:
+        return _empty_article_authors()
+
+
+def load_article_keywords() -> pd.DataFrame:
+    """Загружает ключевые слова статей из SQLite."""
+    return _load_article_keywords_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_article_keywords_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает ключевые слова статей с кэшированием и мягким отсутствием таблицы."""
+    _ = db_signature
+    try:
+        with get_sqlite_connection() as conn:
+            return pd.read_sql_query("SELECT * FROM article_keywords", conn)
+    except Exception:
+        return _empty_article_keywords()
