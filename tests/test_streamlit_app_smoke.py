@@ -27,6 +27,7 @@ def test_streamlit_app_imports_and_builds_tabs(monkeypatch, tmp_path) -> None:
     app = AppTest.from_file("streamlit_app.py")
     app.run(timeout=30)
     assert not app.exception
+    assert any(tab.label == "Анализ статей (демо)" for tab in app.tabs)
 
 
 def test_streamlit_app_respects_tab_query_param(monkeypatch, tmp_path) -> None:
