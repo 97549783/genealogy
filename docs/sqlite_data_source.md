@@ -28,6 +28,21 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 
 ## Обязательные таблицы
 
+Минимальный набор таблиц, без которого runtime-аналитика не считается рабочей:
+
+- `diss_metadata`;
+- `diss_scores_5_8`;
+- `diss_scores_2_3`;
+- `articles_metadata`;
+- `articles_scores_inf_edu`.
+
+В текущей публичной базе дополнительно есть расширенные таблицы вкладки «Анализ статей (демо)»:
+
+- `article_authors`;
+- `article_keywords`.
+
+Загрузчики `load_article_authors()` и `load_article_keywords()` допускают мягкое отсутствие этих двух таблиц и возвращают пустые датафреймы с ожидаемыми столбцами. Это нужно для совместимости со старыми копиями базы. В актуальной `genealogy.db` эти таблицы должны присутствовать, потому что они используются для расширенных метрик по авторам школы, аффилиациям, городам и ключевым словам.
+
 ### `diss_metadata`
 
 Метаданные диссертаций.
@@ -48,7 +63,6 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 - `Code` — ключ диссертации, связывающий профиль с `diss_metadata`.
 
 Остальные поля — числовые признаки соответствующего тематического классификатора. Служебные или метаданные поля не должны использоваться как тематические признаки.
-
 
 ## Выбор тематического профиля в UI
 
@@ -73,6 +87,17 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 - `Issue`;
 - `Year`.
 
+Вкладка «Анализ статей (демо)» также использует дополнительные поля, если они есть в таблице:
+
+- `ISSN`;
+- `Abstract`;
+- `Keywords`;
+- `DOI`;
+- `Pages`;
+- `Funding`.
+
+`Article_id` является ключом статьи и связывает `articles_metadata` с таблицами `articles_scores_inf_edu`, `article_authors` и `article_keywords`.
+
 ### `articles_scores_inf_edu`
 
 Тематические профили статей журнала по информатике и образованию.
@@ -81,8 +106,37 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 
 - `Article_id` — ключ статьи, связывающий профиль с `articles_metadata`.
 
-Остальные поля — числовые признаки тематического классификатора статей.
+Остальные поля — числовые признаки тематического классификатора статей. Код приложения обрабатывает их динамически как все столбцы, кроме ключа `Article_id` и служебных полей.
 
+### `article_authors`
+
+Нормализованные сведения об авторах статей. Таблица отделяет автора статьи от агрегированной строки `Authors` в `articles_metadata` и позволяет вкладке «Анализ статей (демо)» считать найденных авторов школы, показывать аффилиации и города.
+
+Ожидаемые поля:
+
+- `id` — технический идентификатор строки;
+- `Article_id` — ключ статьи;
+- `ISSN` — ISSN журнала или выпуска;
+- `Author_order` — порядок автора в статье;
+- `Name` — имя автора;
+- `Affiliation` — аффилиация автора;
+- `Country` — страна;
+- `City` — город;
+- `Details` — дополнительные сведения об авторе.
+
+### `article_keywords`
+
+Нормализованные ключевые слова статей. Таблица используется для расчёта уникальных ключевых слов и частот по статьям выбранной научной школы.
+
+Ожидаемые поля:
+
+- `id` — технический идентификатор строки;
+- `Article_id` — ключ статьи;
+- `ISSN` — ISSN журнала или выпуска;
+- `Keyword_order` — порядок ключевого слова в статье;
+- `Keyword` — ключевое слово.
+
+Если `article_keywords` отсутствует или пуста, вкладка может построить резервный набор ключевых слов из строкового поля `Keywords` таблицы `articles_metadata`, если это поле присутствует.
 
 ## Фильтрация по отраслям наук
 
@@ -102,8 +156,10 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 
 Этот раздел фиксирует снимок структуры рабочей SQLite-базы, чтобы сведения о таблицах и типах столбцов не терялись при изменениях кода.
 
-В текущей базе есть пять таблиц:
+В текущей базе есть семь таблиц:
 
+- `article_authors` — нормализованные авторы статей;
+- `article_keywords` — нормализованные ключевые слова статей;
 - `articles_metadata` — метаданные статей;
 - `articles_scores_inf_edu` — тематические профили статей;
 - `diss_metadata` — метаданные диссертаций;
@@ -112,8 +168,33 @@ SQLITE_DB_PATH=/путь/к/genealogy.db streamlit run streamlit_app.py
 
 Runtime-код поддерживает обе таблицы диссертационных тематических профилей: `diss_scores_5_8` и `diss_scores_2_3`. Выбор таблицы выполняется через registry источников профилей в `core/domain/profile_sources.py`. Канонический ИТ-классификатор хранится в `core/classifier/it_2_3_classifier.json`; Python-код загружает его и вычисляет признак selectable/disabled по наличию дочерних узлов.
 
+### `article_authors`
+
+```text
+id            INTEGER
+Article_id    TEXT
+ISSN          TEXT
+Author_order  INTEGER
+Name          TEXT
+Affiliation   TEXT
+Country       TEXT
+City          TEXT
+Details       TEXT
+```
+
+### `article_keywords`
+
+```text
+id             INTEGER
+Article_id     TEXT
+ISSN           TEXT
+Keyword_order  INTEGER
+Keyword        TEXT
+```
 
 ### `articles_metadata`
+
+Базовые обязательные поля:
 
 ```text
 Article_id  TEXT
@@ -125,6 +206,17 @@ Volume      INTEGER
 Issue       INTEGER
 ```
 
+Дополнительные поля, которые используются вкладкой статей при наличии:
+
+```text
+ISSN      TEXT
+Abstract  TEXT
+Keywords  TEXT
+DOI       TEXT
+Pages     TEXT
+Funding   TEXT
+```
+
 ### `articles_scores_inf_edu`
 
 Ключевой столбец:
@@ -133,7 +225,7 @@ Issue       INTEGER
 Article_id  TEXT
 ```
 
-Остальные столбцы — целочисленные тематические признаки классификатора. Имена признаков являются кодами узлов классификатора, например:
+Остальные столбцы — целочисленные или числовые тематические признаки классификатора. Имена признаков являются кодами узлов классификатора, например:
 
 ```text
 1.1.1.1          INTEGER
@@ -275,7 +367,34 @@ conn.close()
 
 missing = required - actual
 if missing:
-    raise RuntimeError(f"Не найдены таблицы: {sorted(missing)}")
+    raise RuntimeError(f"Не найдены обязательные таблицы: {sorted(missing)}")
+```
+
+Проверка актуальной публичной базы с расширенными таблицами вкладки статей:
+
+```python
+import sqlite3
+
+expected_current = {
+    "diss_metadata",
+    "diss_scores_5_8",
+    "diss_scores_2_3",
+    "articles_metadata",
+    "articles_scores_inf_edu",
+    "article_authors",
+    "article_keywords",
+}
+
+conn = sqlite3.connect("genealogy.db")
+actual = {
+    row[0]
+    for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+}
+conn.close()
+
+missing = expected_current - actual
+if missing:
+    raise RuntimeError(f"В актуальной базе не найдены таблицы: {sorted(missing)}")
 ```
 
 Проверка фактической схемы всех таблиц:
