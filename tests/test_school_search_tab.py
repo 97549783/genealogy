@@ -146,3 +146,54 @@ school_search_tab.render_school_search_tab(df=sample_df, idx={})
     app.run()
     assert app.session_state["school_search_text_search_mode"] == "fast"
     assert app.session_state["_last_use_fuzzy"] is False
+
+
+def test_clean_optional_text_removes_pseudo_empty_values() -> None:
+    import numpy as np
+
+    from tabs.school_search.tab import _clean_optional_text
+
+    assert _clean_optional_text(np.nan) == ""
+    assert _clean_optional_text(None) == ""
+    assert _clean_optional_text("nan") == ""
+    assert _clean_optional_text(" Иванов ") == "Иванов"
+
+
+def test_reverse_lineage_rows_hide_empty_second_supervisor() -> None:
+    import numpy as np
+    import pandas as pd
+
+    from tabs.school_search.tab import _build_reverse_lineage_rows
+
+    df = pd.DataFrame([
+        {
+            "candidate_name": "Петров Петр Петрович",
+            "supervisors_1.name": "Иванов Иван Иванович",
+            "supervisors_2.name": np.nan,
+        }
+    ])
+
+    result = _build_reverse_lineage_rows(df)
+
+    assert "nan" not in result.to_string().lower()
+    assert "Научный руководитель" in result.columns
+    assert "Научный руководитель 2" not in result.columns
+
+
+def test_reverse_lineage_rows_keep_non_empty_second_supervisor() -> None:
+    import pandas as pd
+
+    from tabs.school_search.tab import _build_reverse_lineage_rows
+
+    df = pd.DataFrame([
+        {
+            "candidate_name": "Петров Петр Петрович",
+            "supervisors_1.name": "Иванов Иван Иванович",
+            "supervisors_2.name": "Сидоров Сидор Сидорович",
+        }
+    ])
+
+    result = _build_reverse_lineage_rows(df)
+
+    assert "Научный руководитель 2" in result.columns
+    assert "Сидоров Сидор Сидорович" in result["Научный руководитель 2"].values

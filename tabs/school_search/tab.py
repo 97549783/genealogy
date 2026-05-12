@@ -51,7 +51,6 @@ from core.ui.filters import (
     science_fields_to_query_params,
 )
 from core.db import (
-    fetch_candidate_name_options,
     get_db_signature,
     get_score_columns_for_classifier_node,
 )
@@ -149,8 +148,17 @@ def _show_matched_variants(
             )
 
 
+def _clean_optional_text(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"nan", "none", "null", "nat"}:
+        return ""
+    return text
+
+
 def _normalize_name(name: str) -> str:
-    return " ".join(str(name).strip().lower().replace("ё", "е").split())
+    return " ".join(_clean_optional_text(name).lower().replace("ё", "е").split())
 
 
 def _build_reverse_lineage_rows(subset: pd.DataFrame) -> pd.DataFrame:
@@ -159,30 +167,44 @@ def _build_reverse_lineage_rows(subset: pd.DataFrame) -> pd.DataFrame:
 
     rows: List[Dict[str, str]] = []
     for _, row in subset.iterrows():
-        dissertation_name = str(row.get(AUTHOR_COLUMN, "")).strip()
+        dissertation_name = _clean_optional_text(row.get(AUTHOR_COLUMN, ""))
         if not dissertation_name:
             continue
-        sup_1 = str(row.get(SUPERVISOR_COLUMNS[0], "")).strip() if SUPERVISOR_COLUMNS[0] in subset.columns else ""
-        sup_2 = str(row.get(SUPERVISOR_COLUMNS[1], "")).strip() if SUPERVISOR_COLUMNS[1] in subset.columns else ""
+        sup_1 = (
+            _clean_optional_text(row.get(SUPERVISOR_COLUMNS[0], ""))
+            if SUPERVISOR_COLUMNS[0] in subset.columns
+            else ""
+        )
+        sup_2 = (
+            _clean_optional_text(row.get(SUPERVISOR_COLUMNS[1], ""))
+            if SUPERVISOR_COLUMNS[1] in subset.columns
+            else ""
+        )
         if not sup_1 and not sup_2:
             continue
         rows.append(
             {
                 "Диссертант": dissertation_name,
                 "Научный руководитель": sup_1 or "—",
-                "Научный руководитель 2": sup_2 or "—",
+                "Научный руководитель 2": sup_2,
             }
         )
 
     if not rows:
         return pd.DataFrame(columns=["Диссертант", "Научный руководитель", "Научный руководитель 2"])
 
-    return pd.DataFrame(rows).drop_duplicates(ignore_index=True)
+    result = pd.DataFrame(rows).drop_duplicates(ignore_index=True)
+    if (
+        "Научный руководитель 2" in result.columns
+        and not result["Научный руководитель 2"].astype(str).str.strip().any()
+    ):
+        result = result.drop(columns=["Научный руководитель 2"])
+    return result
 
 
 def _build_reverse_lineage_graph(subset: pd.DataFrame, root_name: str) -> nx.DiGraph:
     graph = nx.DiGraph()
-    root_name = str(root_name).strip()
+    root_name = _clean_optional_text(root_name)
     if not root_name:
         return graph
 
@@ -192,7 +214,7 @@ def _build_reverse_lineage_graph(subset: pd.DataFrame, root_name: str) -> nx.DiG
 
     by_author_rows: Dict[str, List[pd.Series]] = {}
     for _, row in subset.iterrows():
-        author = str(row.get(AUTHOR_COLUMN, "")).strip()
+        author = _clean_optional_text(row.get(AUTHOR_COLUMN, ""))
         if not author:
             continue
         by_author_rows.setdefault(_normalize_name(author), []).append(row)
@@ -211,7 +233,7 @@ def _build_reverse_lineage_graph(subset: pd.DataFrame, root_name: str) -> nx.DiG
             visited.add(cur_norm)
             for row in by_author_rows.get(cur_norm, []):
                 for sup_col in SUPERVISOR_COLUMNS:
-                    supervisor = str(row.get(sup_col, "")).strip()
+                    supervisor = _clean_optional_text(row.get(sup_col, ""))
                     if not supervisor:
                         continue
                     graph.add_edge(current_name, supervisor)
@@ -369,7 +391,7 @@ def render_school_search_tab(
         person_q = str(st.query_params.get("person_query", "")).strip()
         if person_q:
             if mode_q == "member":
-                st.session_state["school_search_person_member_select"] = person_q
+                st.session_state["school_search_person_member"] = person_q
             elif mode_q == "opponent":
                 st.session_state["school_search_person_opponent"] = person_q
         text_search_mode_q = str(st.query_params.get("text_search_mode", "")).strip()
@@ -578,18 +600,11 @@ def render_school_search_tab(
         }
         st.markdown("### 👤 Лицо")
         if search_mode == "member":
-            st.caption("Выберите автора диссертации из списка.")
-            candidate_options = fetch_candidate_name_options()
-            person_query_q = str(st.query_params.get("person_query", "")).strip()
-            default_index = 0
-            if person_query_q and person_query_q in candidate_options:
-                default_index = candidate_options.index(person_query_q) + 1
-            person_query = st.selectbox(
+            st.caption("Введите точное ФИО автора диссертации.")
+            person_query = st.text_input(
                 label_map[search_mode],
-                options=[""] + candidate_options,
-                index=default_index,
-                key=f"school_search_person_{search_mode}_select",
-                placeholder="Начните вводить ФИО и выберите вариант из списка",
+                placeholder=placeholder_map[search_mode],
+                key="school_search_person_member",
             )
         else:
             person_query = st.text_input(

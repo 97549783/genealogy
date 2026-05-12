@@ -67,3 +67,17 @@ def test_org_modes_and_opponent_use_prefilter_by_mode(monkeypatch):
     r4, _ = ss.search_by_opponent(df, {}, None, None, "Петров", use_fuzzy=True)
     assert not r1.empty and not r2.empty and not r4.empty
     assert all(flag is False for _, flag in calls)
+
+
+def test_member_lineage_uses_exact_normalized_author_match() -> None:
+    df = pd.DataFrame([
+        {"candidate_name": "Иванов Иван Иванович", "supervisors_1.name": "Петров Петр Петрович", "supervisors_2.name": ""},
+        {"candidate_name": "Иванов Иван", "supervisors_1.name": "Сидоров Сидор Сидорович", "supervisors_2.name": ""},
+        {"candidate_name": "Петров Петр Петрович", "supervisors_1.name": "", "supervisors_2.name": ""},
+    ])
+
+    partial_results = ss.search_member_lineage_chains(df, "Иванов Иван")
+    exact_results = ss.search_member_lineage_chains(df, "Иванов Иван Иванович")
+
+    assert [result["author_name"] for result in partial_results] == ["Иванов Иван"]
+    assert [result["author_name"] for result in exact_results] == ["Иванов Иван Иванович"]
