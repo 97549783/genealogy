@@ -871,8 +871,12 @@ def search_member_lineage_chains(
     if AUTHOR_COLUMN not in df.columns:
         return []
 
+    query_norm = _norm_initials(person_query)
+    if not query_norm:
+        return []
+
     author_series = df[AUTHOR_COLUMN].fillna("").astype(str)
-    matched_mask = _fuzzy_match(author_series, person_query)
+    matched_mask = author_series.map(_norm_initials).eq(query_norm)
     if not matched_mask.any():
         return []
 
