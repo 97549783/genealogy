@@ -10,7 +10,7 @@ import streamlit as st
 
 from core.db.articles import load_article_authors, load_article_keywords, load_articles_data
 from core.ui.links import share_params_button
-from .author_matching import canon_article_author_name, canon_initials, compute_selectable_people, fio_to_short, get_school_member_initials
+from .author_matching import canon_article_author_name, compute_selectable_people, get_school_member_initials
 from .blocks import get_available_block_columns, load_article_analysis_block_groups
 from .charts import create_block_scores_chart, create_yearly_articles_chart
 from .data import build_articles_dataset_for_school
@@ -29,17 +29,61 @@ def _keywords_from_metadata(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def compute_found_school_author_initials(dataset: pd.DataFrame, member_initials: Set[str]) -> Set[str]:
-    """Возвращает участников школы, фактически найденных среди авторов статей."""
-    found: Set[str] = set()
-    if dataset is None or dataset.empty or "Authors" not in dataset.columns:
-        return found
-    for raw in dataset["Authors"].fillna("").astype(str):
-        for part in raw.split(";"):
-            key = canon_initials(part)
-            if key in member_initials:
-                found.add(key)
-    return found
+def _dataset_article_ids(dataset: pd.DataFrame) -> Set[str]:
+    """Возвращает нормализованные идентификаторы статей из набора анализа."""
+    if dataset is None or dataset.empty or "Article_id" not in dataset.columns:
+        return set()
+    return {str(value).strip() for value in dataset["Article_id"].dropna().astype(str) if str(value).strip()}
+
+
+def _school_article_authors(
+    dataset: pd.DataFrame,
+    article_authors: pd.DataFrame,
+    member_initials: Set[str],
+) -> pd.DataFrame:
+    """Фильтрует `article_authors` до авторов выбранной школы и статей датасета."""
+    if not member_initials or article_authors is None or article_authors.empty:
+        return pd.DataFrame()
+    if "Article_id" not in article_authors.columns or "Name" not in article_authors.columns:
+        return pd.DataFrame()
+    article_ids = _dataset_article_ids(dataset)
+    if not article_ids:
+        return pd.DataFrame()
+    sub_authors = article_authors.copy()
+    sub_authors["_article_id"] = sub_authors["Article_id"].astype(str).str.strip()
+    sub_authors["_canon"] = sub_authors["Name"].apply(canon_article_author_name)
+    return sub_authors[sub_authors["_article_id"].isin(article_ids) & sub_authors["_canon"].isin(member_initials)].copy()
+
+
+def compute_found_school_author_initials(
+    dataset: pd.DataFrame,
+    article_authors: pd.DataFrame,
+    member_initials: Set[str],
+) -> Set[str]:
+    """Возвращает участников школы, найденных в `article_authors` для статей датасета."""
+    school_authors = _school_article_authors(dataset, article_authors, member_initials)
+    if school_authors.empty or "_canon" not in school_authors.columns:
+        return set()
+    return {str(value).strip() for value in school_authors["_canon"].dropna().astype(str) if str(value).strip()}
+
+
+def compute_yearly_school_author_counts(dataset: pd.DataFrame, school_article_authors: pd.DataFrame) -> pd.DataFrame:
+    """Считает годовую динамику статей и авторов школы по данным `article_authors`."""
+    columns = ["Год", "Количество статей", "Количество авторов школы"]
+    if dataset is None or dataset.empty or "Year" not in dataset.columns:
+        return pd.DataFrame(columns=columns)
+    rows = []
+    prepared = dataset.copy()
+    prepared["_article_id"] = prepared["Article_id"].astype(str).str.strip() if "Article_id" in prepared.columns else ""
+    prepared = prepared.assign(_year=pd.to_numeric(prepared["Year"], errors="coerce")).dropna(subset=["_year"])
+    for year, group in prepared.groupby("_year"):
+        article_ids = {str(value).strip() for value in group["_article_id"].dropna().astype(str) if str(value).strip()}
+        school_authors = set()
+        if school_article_authors is not None and not school_article_authors.empty and "_article_id" in school_article_authors.columns:
+            year_authors = school_article_authors[school_article_authors["_article_id"].isin(article_ids)]
+            school_authors = {str(value).strip() for value in year_authors.get("_canon", pd.Series(dtype=object)).dropna().astype(str) if str(value).strip()}
+        rows.append({"Год": int(year), "Количество статей": len(group), "Количество авторов школы": len(school_authors)})
+    return pd.DataFrame(rows).sort_values("Год") if rows else pd.DataFrame(columns=columns)
 
 
 def _render_results_table(df: pd.DataFrame) -> None:
@@ -117,7 +161,8 @@ def render_single_school_mode(
     article_authors = load_article_authors()
     article_keywords = load_article_keywords()
 
-    found_member_initials = compute_found_school_author_initials(dataset, member_initials)
+    school_authors = _school_article_authors(dataset, article_authors, member_initials)
+    found_member_initials = compute_found_school_author_initials(dataset, article_authors, member_initials)
     doi_count = int(dataset.get("DOI", pd.Series(dtype=object)).fillna("").astype(str).str.strip().ne("").sum())
     years = pd.to_numeric(dataset.get("Year"), errors="coerce").dropna()
     period = f"{int(years.min())}–{int(years.max())}" if not years.empty else "—"
@@ -136,13 +181,10 @@ def render_single_school_mode(
 
     st.markdown("### Авторы школы, найденные в статьях")
     author_rows = []
-    if not article_authors.empty:
-        sub_authors = article_authors[article_authors["Article_id"].astype(str).isin(dataset["Article_id"].astype(str))].copy()
-        sub_authors["_canon"] = sub_authors["Name"].apply(canon_article_author_name)
-        sub_authors = sub_authors[sub_authors["_canon"].isin(member_initials)]
-        for name, group in sub_authors.groupby("Name", dropna=True):
-            article_ids = set(group["Article_id"].astype(str))
-            years_for_author = pd.to_numeric(dataset[dataset["Article_id"].astype(str).isin(article_ids)]["Year"], errors="coerce").dropna()
+    if not school_authors.empty:
+        for name, group in school_authors.groupby("Name", dropna=True):
+            article_ids = {str(value).strip() for value in group["_article_id"].dropna().astype(str) if str(value).strip()}
+            years_for_author = pd.to_numeric(dataset[dataset["Article_id"].astype(str).str.strip().isin(article_ids)]["Year"], errors="coerce").dropna()
             author_rows.append({
                 "Автор": name,
                 "Количество статей": len(article_ids),
@@ -150,11 +192,6 @@ def render_single_school_mode(
                 "Аффилиация": "; ".join(sorted({str(v) for v in group.get("Affiliation", pd.Series(dtype=object)).dropna() if str(v).strip()})),
                 "Город": "; ".join(sorted({str(v) for v in group.get("City", pd.Series(dtype=object)).dropna() if str(v).strip()})),
             })
-    if not author_rows:
-        for key in sorted(found_member_initials):
-            count = int(dataset["Authors"].astype(str).apply(lambda raw: key in {canon_initials(part) for part in raw.split(";")}).sum())
-            if count:
-                author_rows.append({"Автор": key, "Количество статей": count, "Годы публикаций": period, "Аффилиация": "", "Город": ""})
     st.dataframe(pd.DataFrame(author_rows), hide_index=True, use_container_width=True)
 
     st.markdown("### Результаты")
@@ -186,13 +223,7 @@ def render_single_school_mode(
         st.write(f"Кодов без подписи в классификаторе: {len(unsigned_codes)}")
 
     st.markdown("### Динамика по годам")
-    yearly_rows = []
-    for year, group in dataset.assign(_year=pd.to_numeric(dataset["Year"], errors="coerce")).dropna(subset=["_year"]).groupby("_year"):
-        school_authors = set()
-        for raw in group["Authors"].astype(str):
-            school_authors.update({canon_initials(part) for part in raw.split(";") if canon_initials(part) in member_initials})
-        yearly_rows.append({"Год": int(year), "Количество статей": len(group), "Количество авторов школы": len(school_authors)})
-    yearly_df = pd.DataFrame(yearly_rows).sort_values("Год") if yearly_rows else pd.DataFrame(columns=["Год", "Количество статей", "Количество авторов школы"])
+    yearly_df = compute_yearly_school_author_counts(dataset, school_authors)
     st.dataframe(yearly_df, hide_index=True, use_container_width=True)
     st.pyplot(create_yearly_articles_chart(yearly_df))
 
