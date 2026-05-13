@@ -13,10 +13,12 @@ from core.lineage.graph import lineage
 from core.ui.links import share_params_button
 from .author_matching import (
     build_initials_to_fullnames as _shared_build_initials_to_fullnames,
+    canon_article_author_name as _shared_canon_article_author_name,
     canon_initials as _shared_canon_initials,
     compute_selectable_people as _shared_compute_selectable_people,
     display_initials as _shared_display_initials,
     fio_to_short as _shared_fio_to_short,
+    resolve_article_author_to_lineage_root as _shared_resolve_article_author_to_lineage_root,
 )
 from .data import build_articles_dataset_for_schools
 from .query_params import parse_bool_param, parse_float_param, query_params_signature, should_hydrate_query
@@ -472,16 +474,15 @@ def render_articles_comparison_mode(
             st.session_state["ac_abort"] = False
             return
 
-        initials_to_full = _build_initials_to_fullnames(df_lineage)
         ambiguous: Dict[str, List[str]] = {}
 
         for opt in selected_options:
-            if options_meta.get(opt) == "initials_ambiguous":
-                key = _canon_initials(opt)
-                fulls = initials_to_full.get(key, [])
+            resolution = _shared_resolve_article_author_to_lineage_root(opt, df_lineage)
+            if resolution.ambiguous_full_names and not resolution.root_name:
+                key = _shared_canon_article_author_name(opt)
                 resolved = st.session_state.get("ac_disambiguation", {}).get(key)
-                if not resolved and len(fulls) > 1:
-                    ambiguous[key] = fulls
+                if not resolved:
+                    ambiguous[key] = list(resolution.ambiguous_full_names)
 
         if ambiguous:
             _show_disambiguation_dialog(ambiguous)

@@ -10,7 +10,7 @@ import streamlit as st
 
 from core.db.articles import load_article_authors, load_article_keywords, load_articles_data
 from core.ui.links import share_params_button
-from .author_matching import canon_article_author_name, compute_selectable_people, get_school_member_initials
+from .author_matching import canon_article_author_name, compute_selectable_people, get_school_member_initials, resolve_article_author_to_lineage_root
 from .blocks import get_available_block_columns, load_article_analysis_block_groups
 from .charts import create_block_scores_chart, create_yearly_articles_chart
 from .data import build_articles_dataset_for_school
@@ -107,11 +107,6 @@ def render_single_school_mode(
     """Отрисовывает режим анализа одной школы."""
     st.markdown("### Выбор научной школы")
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
-    hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
-    if hidden_ambiguous:
-        st.caption("Неоднозначные варианты с совпадающими инициалами временно скрыты, чтобы избежать ошибочного сопоставления авторов.")
-    options = [option for option in options if options_meta.get(option) != "initials_ambiguous"]
-    options_meta = {option: kind for option, kind in options_meta.items() if option in options}
     if not options:
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
@@ -138,6 +133,18 @@ def render_single_school_mode(
     if selected is None:
         st.info("Выберите научную школу для анализа.")
         return
+
+    resolution = resolve_article_author_to_lineage_root(selected, df_lineage)
+    if resolution.ambiguous_full_names and not resolution.root_name:
+        st.warning("Имя автора статьи соответствует нескольким людям в генеалогии. Выберите, чью школу использовать, или оставьте анализ только по этому автору.")
+        choices = ["Анализировать только автора", *resolution.ambiguous_full_names]
+        choice = st.selectbox("Уточнение автора в генеалогии", choices, key="aa_single_disambiguation")
+        disambiguation = dict(st.session_state.get("ac_disambiguation", {}))
+        if choice == "Анализировать только автора":
+            disambiguation.pop(resolution.canon_key, None)
+        else:
+            disambiguation[resolution.canon_key] = choice
+        st.session_state["ac_disambiguation"] = disambiguation
 
     scope_value = st.session_state.get("aa_single_scope", "direct")
     scope = st.radio(

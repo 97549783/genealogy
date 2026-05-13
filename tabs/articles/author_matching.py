@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple
 
 import pandas as pd
@@ -10,12 +11,22 @@ import streamlit as st
 
 from core.db.articles import load_article_authors
 from core.lineage.graph import lineage
-from .comparison import load_articles_data
 
 AUTHOR_COLUMN = "candidate_name"
 _RE_MULTI_SPACE = re.compile(r"\s+")
 _RE_DOTS_SPACES = re.compile(r"\s*\.\s*")
 _RE_INIT_SPACES = re.compile(r"([A-Za-zА-Яа-я])\.\s+([A-Za-zА-Яа-я])\.")
+
+
+@dataclass(frozen=True)
+class LineageAuthorResolution:
+    """Результат разрешения имени автора статьи в корень генеалогии."""
+
+    display_name: str
+    canon_key: str
+    root_name: str | None
+    ambiguous_full_names: tuple[str, ...]
+    is_exact_match: bool
 
 
 def canon_initials(name: str) -> str:
@@ -129,46 +140,85 @@ def compute_selectable_people(
     df_lineage: pd.DataFrame,
     include_without_descendants: bool,
 ) -> Tuple[List[str], Dict[str, str]]:
-    """Формирует список отображаемых имён строго из `article_authors.Name`."""
+    """Возвращает все непустые имена авторов из `article_authors.Name`.
+
+    Параметры генеалогии и флаг `include_without_descendants` оставлены для
+    совместимости с прежними вызовами, но не участвуют в фильтрации списка.
+    """
     article_author_names = _extract_author_names_from_article_authors()
-    initials_to_full = build_initials_to_fullnames(df_lineage)
-
-    leaders: Set[str] = set()
-    for col in supervisor_columns(df_lineage):
-        leaders.update(str(v).strip() for v in df_lineage[col].dropna().astype(str).unique() if str(v).strip())
-    leader_keys = {canon_initials(fio_to_short(full)) for full in leaders if canon_initials(fio_to_short(full))}
-
-    options: List[str] = []
-    meta: Dict[str, str] = {}
-    for display, key in sorted(article_author_names.items(), key=lambda item: item[0]):
-        fulls = initials_to_full.get(key, [])
-        if len(fulls) > 1:
-            kind = "initials_ambiguous"
-        elif key in leader_keys:
-            kind = "leader"
-        elif fulls:
-            kind = "person_no_desc"
-        else:
-            kind = "initials_only"
-
-        if kind != "leader" and not include_without_descendants:
-            continue
-        options.append(display)
-        meta[display] = kind
-
+    options = sorted(article_author_names.keys())
+    meta = {option: "article_author" for option in options}
     return options, meta
 
 
-def _resolve_lineage_full_name(selected_option: str, df_lineage: pd.DataFrame) -> str:
-    """Находит внутреннее полное ФИО из генеалогии по имени из `article_authors`."""
-    key = canon_article_author_name(selected_option)
-    fulls = build_initials_to_fullnames(df_lineage).get(key, [])
+def _lineage_full_names(df_lineage: pd.DataFrame) -> Set[str]:
+    """Собирает полные ФИО людей, присутствующих в таблице генеалогии."""
+    names: Set[str] = set()
+    if df_lineage is None or df_lineage.empty:
+        return names
+    if AUTHOR_COLUMN in df_lineage.columns:
+        names.update(str(v).strip() for v in df_lineage[AUTHOR_COLUMN].dropna().astype(str) if str(v).strip())
+    for col in supervisor_columns(df_lineage):
+        names.update(str(v).strip() for v in df_lineage[col].dropna().astype(str) if str(v).strip())
+    return names
+
+
+def resolve_article_author_to_lineage_root(
+    selected_option: str,
+    df_lineage: pd.DataFrame,
+) -> LineageAuthorResolution:
+    """Разрешает отображаемое имя автора статьи в корень генеалогии, если это возможно.
+
+    Точное совпадение полного ФИО имеет приоритет над совпадениями по инициалам.
+    Если краткая форма неоднозначна, корень не выбирается автоматически.
+    """
+    display_name = str(selected_option or "").strip()
+    canon_key = canon_article_author_name(display_name)
+    full_names = _lineage_full_names(df_lineage)
+
+    if display_name in full_names:
+        return LineageAuthorResolution(
+            display_name=display_name,
+            canon_key=canon_key,
+            root_name=display_name,
+            ambiguous_full_names=(),
+            is_exact_match=True,
+        )
+
+    fulls = tuple(build_initials_to_fullnames(df_lineage).get(canon_key, []))
     if len(fulls) == 1:
-        return fulls[0]
-    resolved = st.session_state.get("ac_disambiguation", {}).get(key)
-    if resolved:
+        return LineageAuthorResolution(
+            display_name=display_name,
+            canon_key=canon_key,
+            root_name=fulls[0],
+            ambiguous_full_names=(),
+            is_exact_match=False,
+        )
+    if len(fulls) > 1:
+        return LineageAuthorResolution(
+            display_name=display_name,
+            canon_key=canon_key,
+            root_name=None,
+            ambiguous_full_names=fulls,
+            is_exact_match=False,
+        )
+    return LineageAuthorResolution(
+        display_name=display_name,
+        canon_key=canon_key,
+        root_name=None,
+        ambiguous_full_names=(),
+        is_exact_match=False,
+    )
+
+
+def _session_resolved_lineage_root(resolution: LineageAuthorResolution) -> str | None:
+    """Возвращает выбранное пользователем ФИО для неоднозначных инициалов."""
+    if not resolution.ambiguous_full_names:
+        return None
+    resolved = st.session_state.get("ac_disambiguation", {}).get(resolution.canon_key)
+    if resolved in resolution.ambiguous_full_names:
         return resolved
-    return selected_option
+    return None
 
 
 def get_school_member_names(
@@ -178,16 +228,13 @@ def get_school_member_names(
     idx_lineage: Dict[str, Set[int]],
     scope: str,
 ) -> Set[str]:
-    """Возвращает участников школы, внутренне разрешая имя из `article_authors` в ФИО генеалогии."""
-    kind = options_meta.get(selected_option, "")
-    root_name = _resolve_lineage_full_name(selected_option, df_lineage)
-    if kind not in {"leader", "person_no_desc"}:
-        return {root_name}
+    """Возвращает имена участников школы через общий расчёт генеалогической линии."""
+    resolution = resolve_article_author_to_lineage_root(selected_option, df_lineage)
+    root_name = resolution.root_name or _session_resolved_lineage_root(resolution)
+    if not root_name:
+        return {resolution.display_name} if resolution.display_name else set()
 
-    try:
-        graph, _ = lineage(df_lineage, idx_lineage, root_name)
-    except TypeError:
-        graph, _ = lineage(df_lineage, idx_lineage, root_name)
+    graph, _ = lineage(df_lineage, idx_lineage, root_name)
     if graph is None or not getattr(graph, "has_node", lambda _: False)(root_name):
         return {root_name}
     if scope == "direct":
@@ -206,12 +253,12 @@ def get_school_member_initials(
     idx_lineage: Dict[str, Set[int]],
     scope: str,
 ) -> Set[str]:
-    """Возвращает нормализованные инициалы участников выбранной школы."""
-    kind = options_meta.get(selected_option, "")
-    selected_key = canon_article_author_name(selected_option)
-    if kind in {"initials_only", "initials_ambiguous"}:
-        resolved = st.session_state.get("ac_disambiguation", {}).get(selected_key)
-        if resolved:
-            return {canon_initials(fio_to_short(resolved))}
-        return {selected_key} - {""}
-    return {canon_initials(fio_to_short(name)) for name in get_school_member_names(selected_option, options_meta, df_lineage, idx_lineage, scope) if canon_initials(fio_to_short(name))}
+    """Возвращает нормализованные инициалы участников выбранной школы или автора без школы."""
+    resolution = resolve_article_author_to_lineage_root(selected_option, df_lineage)
+    if not resolution.root_name and not _session_resolved_lineage_root(resolution):
+        return {resolution.canon_key} - {""}
+    return {
+        canon_initials(fio_to_short(name))
+        for name in get_school_member_names(selected_option, options_meta, df_lineage, idx_lineage, scope)
+        if canon_initials(fio_to_short(name))
+    }
