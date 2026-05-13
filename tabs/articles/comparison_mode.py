@@ -11,6 +11,15 @@ import streamlit as st
 
 from core.lineage.graph import lineage
 from core.ui.links import share_params_button
+from .author_matching import (
+    build_initials_to_fullnames as _shared_build_initials_to_fullnames,
+    canon_initials as _shared_canon_initials,
+    compute_selectable_people as _shared_compute_selectable_people,
+    display_initials as _shared_display_initials,
+    fio_to_short as _shared_fio_to_short,
+)
+from .data import build_articles_dataset_for_schools
+from .query_params import parse_bool_param, parse_float_param, query_params_signature, should_hydrate_query
 from .comparison import (
     DistanceMetric,
     DISTANCE_METRIC_LABELS,
@@ -44,46 +53,13 @@ _RE_DOTS_SPACES = re.compile(r"\s*\.\s*")
 _RE_INIT_SPACES = re.compile(r"([A-Za-zА-Яа-я])\.\s+([A-Za-zА-Яа-я])\.")
 
 def _canon_initials(name: str) -> str:
-    if not isinstance(name, str):
-        return ""
-    s = name.strip()
-    if not s:
-        return ""
-    s = _RE_MULTI_SPACE.sub(" ", s)
-    s = _RE_DOTS_SPACES.sub(".", s)
-    s = _RE_INIT_SPACES.sub(r"\1.\2.", s)
-    s = _RE_MULTI_SPACE.sub(" ", s)
-    return s.lower().replace("ё", "е")
+    return _shared_canon_initials(name)
 
 def _display_initials(canon_key: str) -> str:
-    if not isinstance(canon_key, str):
-        return ""
-    s = canon_key.strip()
-    if not s:
-        return ""
-    parts = s.split(maxsplit=1)
-    if len(parts) == 1:
-        return parts[0].title()
-    surname, init = parts[0], parts[1]
-    return f"{surname.title()} {init.upper()}".strip()
+    return _shared_display_initials(canon_key)
 
 def _fio_to_short(full_name: str) -> str:
-    if not isinstance(full_name, str):
-        return ""
-    s = full_name.strip()
-    if not s:
-        return ""
-    s = s.replace(".", " ")
-    parts = [p for p in s.split() if p]
-    if not parts:
-        return ""
-    surname = parts[0]
-    initials = ""
-    if len(parts) >= 2:
-        initials += parts[1][0] + "."
-    if len(parts) >= 3:
-        initials += parts[2][0] + "."
-    return f"{surname} {initials}".strip()
+    return _shared_fio_to_short(full_name)
 
 def _is_initials_only_option(label: str) -> bool:
     if not isinstance(label, str):
@@ -104,106 +80,18 @@ def _supervisor_columns(df_lineage: pd.DataFrame) -> List[str]:
         if "supervisor" in col.lower() and "name" in col.lower()
     ]
 
-@st.cache_data(show_spinner=False)
-def _extract_authors_initials_from_articles() -> Set[str]:
-    df_articles = load_articles_data()
-    if df_articles is None or df_articles.empty or "Authors" not in df_articles.columns:
-        return set()
-    authors_set: Set[str] = set()
-    for raw in df_articles["Authors"].dropna().astype(str).tolist():
-        for part in re.split(r"[;]", raw):
-            c = _canon_initials(part)
-            if c:
-                authors_set.add(c)
-    return authors_set
 
-@st.cache_data(show_spinner=False)
 def _build_initials_to_fullnames(df_lineage: pd.DataFrame) -> Dict[str, List[str]]:
-    names: Set[str] = set()
+    """Совместимая обёртка над общим сопоставлением ФИО."""
+    return _shared_build_initials_to_fullnames(df_lineage)
 
-    if AUTHOR_COLUMN in df_lineage.columns:
-        names.update(
-            str(v).strip() for v in df_lineage[AUTHOR_COLUMN].dropna().astype(str).tolist()
-            if str(v).strip()
-        )
 
-    for col in _supervisor_columns(df_lineage):
-        names.update(
-            str(v).strip() for v in df_lineage[col].dropna().astype(str).tolist()
-            if str(v).strip()
-        )
-
-    mapping: Dict[str, List[str]] = {}
-    for full in names:
-        short = _fio_to_short(full)
-        key = _canon_initials(short)
-        if not key:
-            continue
-        mapping.setdefault(key, [])
-        if full not in mapping[key]:
-            mapping[key].append(full)
-
-    for k in list(mapping.keys()):
-        mapping[k] = sorted(mapping[k])
-    return mapping
-
-@st.cache_data(show_spinner=False)
 def _compute_selectable_people(
     df_lineage: pd.DataFrame,
     include_without_descendants: bool,
 ) -> Tuple[List[str], Dict[str, str]]:
-    authors_in_articles = _extract_authors_initials_from_articles()
-    initials_to_full = _build_initials_to_fullnames(df_lineage)
-
-    supervisor_cols = _supervisor_columns(df_lineage)
-    leaders: Set[str] = set()
-    for col in supervisor_cols:
-        leaders.update(
-            str(v).strip() for v in df_lineage[col].dropna().astype(str).unique()
-            if str(v).strip()
-        )
-
-    leader_options: List[str] = []
-    for full in sorted(leaders):
-        key = _canon_initials(_fio_to_short(full))
-        if key and key in authors_in_articles:
-            leader_options.append(full)
-
-    meta: Dict[str, str] = {o: "leader" for o in leader_options}
-
-    if not include_without_descendants:
-        return leader_options, meta
-
-    all_fullnames: Set[str] = set()
-    for fulls in initials_to_full.values():
-        all_fullnames.update(fulls)
-
-    person_no_desc: List[str] = []
-    for full in sorted(all_fullnames):
-        if full in leaders:
-            continue
-        key = _canon_initials(_fio_to_short(full))
-        if key and key in authors_in_articles:
-            person_no_desc.append(full)
-
-    for o in person_no_desc:
-        meta[o] = "person_no_desc"
-
-    initials_only: List[str] = []
-    initials_amb: List[str] = []
-    for key in sorted(authors_in_articles):
-        fulls = initials_to_full.get(key, [])
-        if len(fulls) == 0:
-            display = _display_initials(key)
-            initials_only.append(display)
-            meta[display] = "initials_only"
-        elif len(fulls) > 1:
-            display = _display_initials(key)
-            initials_amb.append(display)
-            meta[display] = "initials_ambiguous"
-
-    options = [*leader_options, *person_no_desc, *initials_only, *initials_amb]
-    return options, meta
+    """Совместимая обёртка выбора людей по таблице `article_authors`."""
+    return _shared_compute_selectable_people(df_lineage, include_without_descendants)
 
 # ------------------------------------------------------------------------------
 # ОБНОВЛЕНИЕ: Фильтрация признаков с поддержкой "Весь базис"
@@ -325,7 +213,7 @@ def _show_disambiguation_dialog(ambiguous: Dict[str, List[str]]) -> None:
     @st.dialog("⚠️ Уточнение соответствия автора (инициалы → полное ФИО)", width="large")
     def _dlg():
         st.markdown(
-            "Для некоторых авторов в `articles_scores_inf_edu` инициалы совпадают сразу с несколькими "
+            "Для некоторых авторов в `article_authors` инициалы совпадают сразу с несколькими "
             "полными ФИО в базе. Выберите корректное ФИО для продолжения анализа "
             "или откажитесь от анализа."
         )
@@ -371,84 +259,15 @@ def _build_articles_dataset(
     df_articles: pd.DataFrame,
     scope: str,
 ) -> pd.DataFrame:
-    if df_articles is None or df_articles.empty:
-        return pd.DataFrame()
-
-    work_articles = df_articles.copy()
-    if "Year" in work_articles.columns:
-        work_articles["Year_num"] = pd.to_numeric(work_articles["Year"], errors="coerce").fillna(0)
-    else:
-        work_articles["Year_num"] = 0
-
-    if "_authors_set" not in work_articles.columns:
-        work_articles["_authors_set"] = work_articles["Authors"].astype(str).apply(
-            lambda s: {_canon_initials(x) for x in re.split(r"[;]", s) if _canon_initials(x)}
-        )
-
-    initials_to_full = _build_initials_to_fullnames(df_lineage)
-    combined: List[pd.DataFrame] = []
-
-    for opt in selected_options:
-        kind = options_meta.get(opt, "")
-        school_label = opt
-
-        members_initials: Set[str] = set()
-        if kind in ("leader", "person_no_desc"):
-            root_full = opt
-            if scope == "direct" or scope == "all":
-                try:
-                    G, _ = lineage(df_lineage, idx_lineage, root_full)
-                except TypeError:
-                    G, _ = lineage(df_lineage, idx_lineage, root_full)
-                if G is not None and getattr(G, "has_node", lambda _: False)(root_full):
-                    if scope == "direct":
-                        names = set(getattr(G, "successors")(root_full))
-                        names.add(root_full)
-                    else:
-                        names = set(getattr(G, "nodes")())
-                        names.add(root_full)
-                else:
-                    names = {root_full}
-            else:
-                names = {root_full}
-
-            members_initials = {_canon_initials(_fio_to_short(n)) for n in names if _fio_to_short(n)}
-            members_initials = {m for m in members_initials if m}
-
-        elif kind in ("initials_only", "initials_ambiguous"):
-            init_key = _canon_initials(opt)
-            resolved = st.session_state.get("ac_disambiguation", {}).get(init_key)
-            if resolved:
-                school_label = resolved
-                members_initials = {_canon_initials(_fio_to_short(resolved))}
-            else:
-                members_initials = {init_key}
-
-        else:
-            init_key = _canon_initials(opt)
-            members_initials = {init_key} if init_key else set()
-
-        if not members_initials:
-            continue
-
-        mask = work_articles["_authors_set"].apply(lambda s: not s.isdisjoint(members_initials))
-        sub = work_articles[mask].copy()
-
-        if sub.empty:
-            continue
-
-        sub["school"] = school_label
-        combined.append(sub)
-
-    if not combined:
-        return pd.DataFrame()
-
-    out = pd.concat(combined, ignore_index=True)
-
-    if "_authors_set" in out.columns:
-        out = out.drop(columns=["_authors_set"], errors="ignore")
-
-    return out
+    """Совместимая обёртка построения датасета по таблице `article_authors`."""
+    return build_articles_dataset_for_schools(
+        selected_options=selected_options,
+        options_meta=options_meta,
+        df_lineage=df_lineage,
+        idx_lineage=idx_lineage,
+        df_articles=df_articles,
+        scope=scope,
+    )
 
 # ------------------------------------------------------------------------------
 # ОБНОВЛЕНИЕ: Основной рендер с опцией "Весь базис"
@@ -471,10 +290,18 @@ def render_articles_comparison_mode(
     if classifier_labels is None:
         classifier_labels = load_articles_classifier()
 
-    if not st.session_state.get("ac_query_hydrated", False):
+    signature = query_params_signature([
+        "articles_mode",
+        "ac_people",
+        "ac_scope",
+        "ac_metric",
+        "ac_decay",
+        "ac_include_without_desc",
+        "ac_nodes",
+    ])
+    if should_hydrate_query("ac_query_signature", signature):
         people_q = [p.strip() for p in st.query_params.get_all("ac_people") if str(p).strip()]
-        if people_q:
-            st.session_state["ac_selected_options_query"] = people_q
+        st.session_state["ac_selected_options_query"] = people_q
 
         scope_q = str(st.query_params.get("ac_scope", "")).strip()
         if scope_q in {"direct", "all"}:
@@ -485,26 +312,15 @@ def render_articles_comparison_mode(
         if metric_q in metric_options:
             st.session_state["ac_metric"] = metric_options.index(metric_q)
 
-        decay_q = str(st.query_params.get("ac_decay", "")).strip()
-        if decay_q:
-            try:
-                decay_val = float(decay_q)
-                if 0.0 <= decay_val <= 1.0:
-                    st.session_state["ac_decay_factor"] = decay_val
-            except ValueError:
-                pass
+        decay_val = parse_float_param(st.query_params.get("ac_decay", ""), st.session_state.get("ac_decay_factor", 0.5))
+        if 0.0 <= decay_val <= 1.0:
+            st.session_state["ac_decay_factor"] = decay_val
 
-        include_q = str(st.query_params.get("ac_include_without_desc", "")).strip().lower()
-        if include_q in {"true", "1", "yes", "y"}:
-            st.session_state["ac_include_without_desc"] = True
-        elif include_q in {"false", "0", "no", "n"}:
-            st.session_state["ac_include_without_desc"] = False
+        if "ac_include_without_desc" in st.query_params:
+            st.session_state["ac_include_without_desc"] = parse_bool_param(st.query_params.get("ac_include_without_desc"), False)
 
-        nodes_q = [n.strip() for n in st.query_params.get_all("ac_nodes") if str(n).strip()]
-        if nodes_q:
-            st.session_state["ac_selected_nodes_query"] = nodes_q
-
-        st.session_state["ac_query_hydrated"] = True
+        st.session_state["ac_selected_nodes_query"] = [n.strip() for n in st.query_params.get_all("ac_nodes") if str(n).strip()]
+        st.session_state["ac_run_state"] = False
 
     # Пролог
     top_left, top_right = st.columns([1, 1])
@@ -530,7 +346,7 @@ def render_articles_comparison_mode(
         help=(
             "Если выключено — доступны только руководители, у которых есть диссертанты в базе.\n\n"
             "Если включено — дополнительно доступны (а) люди из базы без диссертантов и (б) авторы из "
-            "`articles_scores_inf_edu`, которых нет в базе (отображаются как 'Фамилия И.О.')."
+            "`article_authors`, которых нет в базе (отображаются как 'Фамилия И.О.')."
         ),
     )
 
@@ -558,7 +374,7 @@ def render_articles_comparison_mode(
         default=st.session_state.get("ac_selected_options", []),
         key="ac_selected_options",
         help=(
-            "Список ограничен теми, чьи 'Фамилия И.О.' встречаются в articles_scores_inf_edu.\n\n"
+            "Список ограничен теми, чьи 'Фамилия И.О.' встречаются в article_authors.\n\n"
             "Элементы вида 'Фамилия И.О.' — авторы, которых нет в базе диссертаций."
         ),
     )

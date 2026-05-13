@@ -23,6 +23,7 @@ from .comparison_mode import (
 )
 from .single_school_mode import render_single_school_mode
 from .similar_schools_mode import render_similar_schools_mode
+from .query_params import query_params_signature, should_hydrate_query
 
 ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
@@ -33,15 +34,21 @@ ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
 
 def _hydrate_mode_from_query() -> None:
-    """Загружает выбранный режим из параметров адресной строки."""
-    if st.session_state.get("aa_mode_query_hydrated", False):
+    """Загружает режим из URL при изменении сигнатуры query-параметров."""
+    signature = query_params_signature(["articles_mode", "ac_people", "aa_school", "aa_source_school"])
+    if not should_hydrate_query("aa_mode_query_signature", signature):
         return
     mode = str(st.query_params.get("articles_mode", "")).strip()
     if mode in ARTICLE_MODE_LABELS:
         st.session_state["aa_mode"] = mode
     elif st.query_params.get_all("ac_people"):
         st.session_state["aa_mode"] = "comparison"
-    st.session_state["aa_mode_query_hydrated"] = True
+    elif st.query_params.get_all("aa_source_school"):
+        st.session_state["aa_mode"] = "similar_schools"
+    elif st.query_params.get_all("aa_school"):
+        st.session_state["aa_mode"] = "single_school"
+    elif "aa_mode" not in st.session_state:
+        st.session_state["aa_mode"] = "single_school"
 
 
 def render_articles_analysis_tab(
