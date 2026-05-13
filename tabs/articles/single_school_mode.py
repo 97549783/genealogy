@@ -9,13 +9,12 @@ import pandas as pd
 import streamlit as st
 
 from core.db.articles import load_article_authors, load_article_keywords, load_articles_data
-from core.ui.links import share_params_button
-from .author_matching import canon_article_author_name, compute_selectable_people, get_school_member_initials
+from .author_matching import canon_initials, compute_selectable_people, fio_to_short, get_school_member_initials
 from .blocks import get_available_block_columns, load_article_analysis_block_groups
 from .charts import create_block_scores_chart, create_yearly_articles_chart
 from .data import build_articles_dataset_for_school
 from .metrics import compute_block_score_summary, normalize_keyword
-from .query_params import parse_bool_param, parse_float_param, query_params_signature, should_hydrate_query
+from .query_params import parse_float_param
 from .results_table import prepare_articles_results_table
 
 
@@ -29,61 +28,17 @@ def _keywords_from_metadata(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _dataset_article_ids(dataset: pd.DataFrame) -> Set[str]:
-    """Возвращает нормализованные идентификаторы статей из набора анализа."""
-    if dataset is None or dataset.empty or "Article_id" not in dataset.columns:
-        return set()
-    return {str(value).strip() for value in dataset["Article_id"].dropna().astype(str) if str(value).strip()}
-
-
-def _school_article_authors(
-    dataset: pd.DataFrame,
-    article_authors: pd.DataFrame,
-    member_initials: Set[str],
-) -> pd.DataFrame:
-    """Фильтрует `article_authors` до авторов выбранной школы и статей датасета."""
-    if not member_initials or article_authors is None or article_authors.empty:
-        return pd.DataFrame()
-    if "Article_id" not in article_authors.columns or "Name" not in article_authors.columns:
-        return pd.DataFrame()
-    article_ids = _dataset_article_ids(dataset)
-    if not article_ids:
-        return pd.DataFrame()
-    sub_authors = article_authors.copy()
-    sub_authors["_article_id"] = sub_authors["Article_id"].astype(str).str.strip()
-    sub_authors["_canon"] = sub_authors["Name"].apply(canon_article_author_name)
-    return sub_authors[sub_authors["_article_id"].isin(article_ids) & sub_authors["_canon"].isin(member_initials)].copy()
-
-
-def compute_found_school_author_initials(
-    dataset: pd.DataFrame,
-    article_authors: pd.DataFrame,
-    member_initials: Set[str],
-) -> Set[str]:
-    """Возвращает участников школы, найденных в `article_authors` для статей датасета."""
-    school_authors = _school_article_authors(dataset, article_authors, member_initials)
-    if school_authors.empty or "_canon" not in school_authors.columns:
-        return set()
-    return {str(value).strip() for value in school_authors["_canon"].dropna().astype(str) if str(value).strip()}
-
-
-def compute_yearly_school_author_counts(dataset: pd.DataFrame, school_article_authors: pd.DataFrame) -> pd.DataFrame:
-    """Считает годовую динамику статей и авторов школы по данным `article_authors`."""
-    columns = ["Год", "Количество статей", "Количество авторов школы"]
-    if dataset is None or dataset.empty or "Year" not in dataset.columns:
-        return pd.DataFrame(columns=columns)
-    rows = []
-    prepared = dataset.copy()
-    prepared["_article_id"] = prepared["Article_id"].astype(str).str.strip() if "Article_id" in prepared.columns else ""
-    prepared = prepared.assign(_year=pd.to_numeric(prepared["Year"], errors="coerce")).dropna(subset=["_year"])
-    for year, group in prepared.groupby("_year"):
-        article_ids = {str(value).strip() for value in group["_article_id"].dropna().astype(str) if str(value).strip()}
-        school_authors = set()
-        if school_article_authors is not None and not school_article_authors.empty and "_article_id" in school_article_authors.columns:
-            year_authors = school_article_authors[school_article_authors["_article_id"].isin(article_ids)]
-            school_authors = {str(value).strip() for value in year_authors.get("_canon", pd.Series(dtype=object)).dropna().astype(str) if str(value).strip()}
-        rows.append({"Год": int(year), "Количество статей": len(group), "Количество авторов школы": len(school_authors)})
-    return pd.DataFrame(rows).sort_values("Год") if rows else pd.DataFrame(columns=columns)
+def compute_found_school_author_initials(dataset: pd.DataFrame, member_initials: Set[str]) -> Set[str]:
+    """Возвращает участников школы, фактически найденных среди авторов статей."""
+    found: Set[str] = set()
+    if dataset is None or dataset.empty or "Authors" not in dataset.columns:
+        return found
+    for raw in dataset["Authors"].fillna("").astype(str):
+        for part in raw.split(";"):
+            key = canon_initials(part)
+            if key in member_initials:
+                found.add(key)
+    return found
 
 
 def _render_results_table(df: pd.DataFrame) -> None:
@@ -106,6 +61,7 @@ def render_single_school_mode(
 ) -> None:
     """Отрисовывает режим анализа одной школы."""
     st.markdown("### Выбор научной школы")
+    df_articles = load_articles_data()
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
     hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
     if hidden_ambiguous:
@@ -116,42 +72,23 @@ def render_single_school_mode(
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
 
-    signature = query_params_signature(["articles_mode", "aa_school", "aa_scope", "aa_threshold", "aa_show_all_blocks"])
-    if should_hydrate_query("aa_single_query_signature", signature):
-        query_school = str(st.query_params.get("aa_school", "")).strip()
-        st.session_state["aa_single_school"] = query_school if query_school in options else None
-        scope_q = str(st.query_params.get("aa_scope", "direct")).strip()
-        st.session_state["aa_single_scope"] = scope_q if scope_q in {"direct", "all"} else "direct"
-        st.session_state["aa_single_threshold"] = max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0)))
-        st.session_state["aa_single_show_all_blocks"] = parse_bool_param(st.query_params.get("aa_show_all_blocks"), False)
+    query_school = str(st.query_params.get("aa_school", "")).strip()
+    default_index = options.index(query_school) if query_school in options else 0
+    selected = st.selectbox("Научная школа", options=options, index=default_index, key="aa_single_school")
 
-    selected_value = st.session_state.get("aa_single_school")
-    selected_index = options.index(selected_value) if selected_value in options else None
-    selected = st.selectbox(
-        "Научная школа",
-        options=options,
-        index=selected_index,
-        placeholder="Выберите научную школу",
-        key="aa_single_school",
-    )
-
-    if selected is None:
-        st.info("Выберите научную школу для анализа.")
-        return
-
-    scope_value = st.session_state.get("aa_single_scope", "direct")
+    scope_q = str(st.query_params.get("aa_scope", "direct")).strip()
+    scope_index = 1 if scope_q == "all" else 0
     scope = st.radio(
         "Охват участников школы:",
         options=["direct", "all"],
         format_func=lambda value: "Только прямые ученики (1-й уровень)" if value == "direct" else "Все поколения школы",
         horizontal=True,
-        index=1 if scope_value == "all" else 0,
+        index=scope_index,
         key="aa_single_scope",
     )
-    threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.session_state.get("aa_single_threshold", 3.0)), step=0.1, key="aa_single_threshold")
-    show_all = st.checkbox("Показать все тематические блоки", value=bool(st.session_state.get("aa_single_show_all_blocks", False)), key="aa_single_show_all_blocks")
+    threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0))), step=0.1, key="aa_single_threshold")
+    show_all = st.checkbox("Показать все тематические блоки", value=False, key="aa_single_show_all_blocks")
 
-    df_articles = load_articles_data()
     dataset = build_articles_dataset_for_school(selected, options_meta, df_lineage, idx_lineage, df_articles, scope)
     if dataset.empty:
         st.info("Для выбранной школы статьи не найдены.")
@@ -161,8 +98,7 @@ def render_single_school_mode(
     article_authors = load_article_authors()
     article_keywords = load_article_keywords()
 
-    school_authors = _school_article_authors(dataset, article_authors, member_initials)
-    found_member_initials = compute_found_school_author_initials(dataset, article_authors, member_initials)
+    found_member_initials = compute_found_school_author_initials(dataset, member_initials)
     doi_count = int(dataset.get("DOI", pd.Series(dtype=object)).fillna("").astype(str).str.strip().ne("").sum())
     years = pd.to_numeric(dataset.get("Year"), errors="coerce").dropna()
     period = f"{int(years.min())}–{int(years.max())}" if not years.empty else "—"
@@ -181,10 +117,13 @@ def render_single_school_mode(
 
     st.markdown("### Авторы школы, найденные в статьях")
     author_rows = []
-    if not school_authors.empty:
-        for name, group in school_authors.groupby("Name", dropna=True):
-            article_ids = {str(value).strip() for value in group["_article_id"].dropna().astype(str) if str(value).strip()}
-            years_for_author = pd.to_numeric(dataset[dataset["Article_id"].astype(str).str.strip().isin(article_ids)]["Year"], errors="coerce").dropna()
+    if not article_authors.empty:
+        sub_authors = article_authors[article_authors["Article_id"].astype(str).isin(dataset["Article_id"].astype(str))].copy()
+        sub_authors["_canon"] = sub_authors["Name"].apply(lambda value: canon_initials(value) if str(value).count(".") else canon_initials(fio_to_short(str(value))))
+        sub_authors = sub_authors[sub_authors["_canon"].isin(member_initials)]
+        for name, group in sub_authors.groupby("Name", dropna=True):
+            article_ids = set(group["Article_id"].astype(str))
+            years_for_author = pd.to_numeric(dataset[dataset["Article_id"].astype(str).isin(article_ids)]["Year"], errors="coerce").dropna()
             author_rows.append({
                 "Автор": name,
                 "Количество статей": len(article_ids),
@@ -192,6 +131,11 @@ def render_single_school_mode(
                 "Аффилиация": "; ".join(sorted({str(v) for v in group.get("Affiliation", pd.Series(dtype=object)).dropna() if str(v).strip()})),
                 "Город": "; ".join(sorted({str(v) for v in group.get("City", pd.Series(dtype=object)).dropna() if str(v).strip()})),
             })
+    if not author_rows:
+        for key in sorted(found_member_initials):
+            count = int(dataset["Authors"].astype(str).apply(lambda raw: key in {canon_initials(part) for part in raw.split(";")}).sum())
+            if count:
+                author_rows.append({"Автор": key, "Количество статей": count, "Годы публикаций": period, "Аффилиация": "", "Город": ""})
     st.dataframe(pd.DataFrame(author_rows), hide_index=True, use_container_width=True)
 
     st.markdown("### Результаты")
@@ -223,18 +167,12 @@ def render_single_school_mode(
         st.write(f"Кодов без подписи в классификаторе: {len(unsigned_codes)}")
 
     st.markdown("### Динамика по годам")
-    yearly_df = compute_yearly_school_author_counts(dataset, school_authors)
+    yearly_rows = []
+    for year, group in dataset.assign(_year=pd.to_numeric(dataset["Year"], errors="coerce")).dropna(subset=["_year"]).groupby("_year"):
+        school_authors = set()
+        for raw in group["Authors"].astype(str):
+            school_authors.update({canon_initials(part) for part in raw.split(";") if canon_initials(part) in member_initials})
+        yearly_rows.append({"Год": int(year), "Количество статей": len(group), "Количество авторов школы": len(school_authors)})
+    yearly_df = pd.DataFrame(yearly_rows).sort_values("Год") if yearly_rows else pd.DataFrame(columns=["Год", "Количество статей", "Количество авторов школы"])
     st.dataframe(yearly_df, hide_index=True, use_container_width=True)
     st.pyplot(create_yearly_articles_chart(yearly_df))
-
-    share_params_button(
-        {
-            "tab": "articles_comparison",
-            "articles_mode": "single_school",
-            "aa_school": selected,
-            "aa_scope": scope,
-            "aa_threshold": float(threshold),
-            "aa_show_all_blocks": bool(show_all),
-        },
-        key="aa_single_share",
-    )
