@@ -9,11 +9,12 @@ import pandas as pd
 import streamlit as st
 
 from core.db.articles import load_article_keywords, load_articles_data
+from core.ui.links import share_params_button
 from .author_matching import compute_selectable_people
 from .blocks import get_available_block_columns
 from .data import build_articles_dataset_for_school
 from .metrics import build_school_vector, compute_keyword_overlap, cosine_similarity_safe, get_article_feature_columns, normalize_keyword
-from .query_params import parse_float_param, parse_int_param
+from .query_params import parse_float_param, parse_int_param, query_params_signature, should_hydrate_query
 
 
 def _keywords_for_dataset(dataset: pd.DataFrame, article_keywords: pd.DataFrame) -> Set[str]:
@@ -45,7 +46,6 @@ def render_similar_schools_mode(
 ) -> None:
     """Отрисовывает режим поиска похожих школ."""
     st.markdown("### Исходная школа")
-    df_articles = load_articles_data()
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
     hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
     if hidden_ambiguous:
@@ -56,40 +56,70 @@ def render_similar_schools_mode(
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
 
-    source_q = str(st.query_params.get("aa_source_school", "")).strip()
-    default_index = options.index(source_q) if source_q in options else 0
-    source_school = st.selectbox("Исходная научная школа", options=options, index=default_index, key="aa_source_school")
+    mode_options = ["profile", "keywords", "combined"]
+    mode_labels = {"profile": "По тематическому профилю", "keywords": "По ключевым словам", "combined": "Комбинированный поиск"}
+    signature = query_params_signature([
+        "articles_mode",
+        "aa_source_school",
+        "aa_scope",
+        "aa_similarity_mode",
+        "aa_min_articles",
+        "aa_top_n",
+        "aa_threshold",
+    ])
+    if should_hydrate_query("aa_similar_query_signature", signature):
+        source_q = str(st.query_params.get("aa_source_school", "")).strip()
+        st.session_state["aa_source_school"] = source_q if source_q in options else None
+        scope_q = str(st.query_params.get("aa_scope", "direct")).strip()
+        st.session_state["aa_similar_scope"] = scope_q if scope_q in {"direct", "all"} else "direct"
+        mode_q = str(st.query_params.get("aa_similarity_mode", "profile")).strip()
+        st.session_state["aa_similarity_mode"] = mode_q if mode_q in mode_options else "profile"
+        st.session_state["aa_min_articles"] = max(1, min(1000, parse_int_param(st.query_params.get("aa_min_articles", 1), 1)))
+        st.session_state["aa_top_n"] = max(1, min(100, parse_int_param(st.query_params.get("aa_top_n", 20), 20)))
+        st.session_state["aa_similar_threshold"] = max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0)))
 
-    scope_q = str(st.query_params.get("aa_scope", "direct")).strip()
+    selected_value = st.session_state.get("aa_source_school")
+    selected_index = options.index(selected_value) if selected_value in options else None
+    source_school = st.selectbox(
+        "Исходная научная школа",
+        options=options,
+        index=selected_index,
+        placeholder="Выберите исходную научную школу",
+        key="aa_source_school",
+    )
+    if source_school is None:
+        st.info("Выберите исходную научную школу для поиска похожих школ.")
+        return
+
+    scope_value = st.session_state.get("aa_similar_scope", "direct")
     scope = st.radio(
         "Охват участников школы:",
         options=["direct", "all"],
         format_func=lambda value: "Только прямые ученики (1-й уровень)" if value == "direct" else "Все поколения школы",
         horizontal=True,
-        index=1 if scope_q == "all" else 0,
+        index=1 if scope_value == "all" else 0,
         key="aa_similar_scope",
     )
 
-    mode_options = ["profile", "keywords", "combined"]
-    mode_labels = {"profile": "По тематическому профилю", "keywords": "По ключевым словам", "combined": "Комбинированный поиск"}
-    mode_q = str(st.query_params.get("aa_similarity_mode", "profile")).strip()
+    mode_value = st.session_state.get("aa_similarity_mode", "profile")
     similarity_mode = st.radio(
         "Способ поиска:",
         options=mode_options,
         format_func=lambda value: mode_labels[value],
         horizontal=True,
-        index=mode_options.index(mode_q) if mode_q in mode_options else 0,
+        index=mode_options.index(mode_value) if mode_value in mode_options else 0,
         key="aa_similarity_mode",
     )
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        min_articles = st.number_input("Минимальное количество статей в школе", min_value=1, max_value=1000, value=max(1, min(1000, parse_int_param(st.query_params.get("aa_min_articles", 1), 1))), step=1, key="aa_min_articles")
+        min_articles = st.number_input("Минимальное количество статей в школе", min_value=1, max_value=1000, value=int(st.session_state.get("aa_min_articles", 1)), step=1, key="aa_min_articles")
     with c2:
-        top_n = st.number_input("Количество похожих школ", min_value=1, max_value=100, value=max(1, min(100, parse_int_param(st.query_params.get("aa_top_n", 20), 20))), step=1, key="aa_top_n")
+        top_n = st.number_input("Количество похожих школ", min_value=1, max_value=100, value=int(st.session_state.get("aa_top_n", 20)), step=1, key="aa_top_n")
     with c3:
-        threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0))), step=0.1, key="aa_similar_threshold")
+        threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.session_state.get("aa_similar_threshold", 3.0)), step=0.1, key="aa_similar_threshold")
 
+    df_articles = load_articles_data()
     source_dataset = build_articles_dataset_for_school(source_school, options_meta, df_lineage, idx_lineage, df_articles, scope)
     if source_dataset.empty:
         st.info("Для исходной школы статьи не найдены.")
@@ -140,3 +170,17 @@ def render_similar_schools_mode(
     else:
         view = result.sort_values("Итоговая близость", ascending=False).head(int(top_n))[["Школа", "Итоговая близость", "Косинусная близость", "Jaccard", "Общих ключевых слов", "Количество статей"]]
     st.dataframe(view, hide_index=True, use_container_width=True)
+
+    share_params_button(
+        {
+            "tab": "articles_comparison",
+            "articles_mode": "similar_schools",
+            "aa_source_school": source_school,
+            "aa_scope": scope,
+            "aa_similarity_mode": similarity_mode,
+            "aa_min_articles": int(min_articles),
+            "aa_top_n": int(top_n),
+            "aa_threshold": float(threshold),
+        },
+        key="aa_similar_share",
+    )

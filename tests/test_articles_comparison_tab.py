@@ -97,9 +97,9 @@ articles_tab.render_articles_comparison_tab(df_lineage=sample_df, idx_lineage={}
     app.query_params["ac_include_without_desc"] = "true"
     app.query_params["ac_nodes"] = [SPECIAL_OPTION_ALL, SPECIAL_OPTION_YEAR]
 
-    app.run()
+    app.run(timeout=10)
 
-    assert app.session_state["ac_query_hydrated"] is True
+    assert app.session_state["ac_query_signature"]
     assert app.session_state["ac_selected_options"] == ["Иванов И.И.", "Петров П.П."]
     assert app.session_state["ac_run_state"] is True
     assert app.session_state["_ac_share_key"] == "ac_share"
@@ -127,3 +127,41 @@ def test_filter_feature_columns_respects_all_basis_and_year() -> None:
         "Year_num",
     ]
     assert _filter_feature_columns(all_feature_cols, ["1.1", SPECIAL_OPTION_YEAR]) == ["1.1", "1.1.1", "Year_num"]
+
+
+def test_articles_tab_rehydrates_when_query_signature_changes() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.tab as articles_tab
+
+
+def _fake_load_articles_classifier():
+    return {"1": "Раздел 1"}
+
+
+def _fake_compute_selectable_people(df_lineage, include_without_descendants):
+    return ["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "leader", "Петров П.П.": "leader"}
+
+
+articles_tab.load_articles_classifier = _fake_load_articles_classifier
+articles_tab._compute_selectable_people = _fake_compute_selectable_people
+
+sample_df = pd.DataFrame([
+    {"candidate_name": "Иванов И.И.", "supervisors_1.name": ""},
+    {"candidate_name": "Петров П.П.", "supervisors_1.name": ""},
+])
+
+articles_tab.render_articles_comparison_tab(df_lineage=sample_df, idx_lineage={})
+"""
+    )
+    app.query_params["ac_people"] = ["Иванов И.И.", "Петров П.П."]
+    app.query_params["ac_scope"] = "all"
+    app.run(timeout=10)
+    assert app.session_state["ac_scope"] == "all"
+
+    app.query_params["ac_scope"] = "direct"
+    app.run(timeout=10)
+    assert app.session_state["ac_scope"] == "direct"
+    assert app.session_state["ac_selected_options"] == ["Иванов И.И.", "Петров П.П."]
