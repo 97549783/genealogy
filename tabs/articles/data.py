@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Set
 
 import pandas as pd
 
-from .author_matching import canon_initials, get_school_member_initials
+from core.db.articles import load_article_authors
+from .author_matching import canon_article_author_name, get_school_member_initials
 
 ARTICLE_OUTPUT_COLUMNS = [
     "school", "Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "Year",
@@ -28,8 +28,20 @@ def make_elibrary_url(doi: Any) -> str:
     return f"https://elibrary.ru/{value}" if value else ""
 
 
-def _authors_set(raw: Any) -> Set[str]:
-    return {canon_initials(part) for part in re.split(r"[;]", str(raw or "")) if canon_initials(part)}
+def _article_ids_for_initials(
+    member_initials: Set[str],
+    article_authors: pd.DataFrame,
+) -> Set[str]:
+    """Возвращает идентификаторы статей по совпадению авторов из `article_authors`."""
+    if not member_initials or article_authors is None or article_authors.empty:
+        return set()
+    if "Article_id" not in article_authors.columns or "Name" not in article_authors.columns:
+        return set()
+    work = article_authors[["Article_id", "Name"]].dropna(subset=["Article_id", "Name"]).copy()
+    work["_article_id"] = work["Article_id"].astype(str).str.strip()
+    work["_canon"] = work["Name"].astype(str).map(canon_article_author_name)
+    work = work[(work["_article_id"] != "") & work["_canon"].isin(member_initials)]
+    return set(work["_article_id"].astype(str))
 
 
 def _ensure_article_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -48,9 +60,10 @@ def build_articles_dataset_for_school(
     idx_lineage: Dict[str, Set[int]],
     df_articles: pd.DataFrame,
     scope: str,
+    df_article_authors: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Строит набор статей для одной выбранной школы."""
-    return build_articles_dataset_for_schools([selected_option], options_meta, df_lineage, idx_lineage, df_articles, scope)
+    return build_articles_dataset_for_schools([selected_option], options_meta, df_lineage, idx_lineage, df_articles, scope, df_article_authors=df_article_authors)
 
 
 def build_articles_dataset_for_schools(
@@ -60,25 +73,30 @@ def build_articles_dataset_for_schools(
     idx_lineage: Dict[str, Set[int]],
     df_articles: pd.DataFrame,
     scope: str,
+    df_article_authors: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Строит объединённый набор статей для нескольких школ."""
-    if df_articles is None or df_articles.empty or "Authors" not in df_articles.columns:
+    if df_articles is None or df_articles.empty or "Article_id" not in df_articles.columns:
         return pd.DataFrame()
+    article_authors = df_article_authors if df_article_authors is not None else load_article_authors()
     work = _ensure_article_columns(df_articles)
-    work["_authors_set"] = work["Authors"].apply(_authors_set)
+    work["_article_id"] = work["Article_id"].astype(str).str.strip()
     combined: List[pd.DataFrame] = []
     for option in selected_options:
         initials = get_school_member_initials(option, options_meta, df_lineage, idx_lineage, scope)
         if not initials:
             continue
-        sub = work[work["_authors_set"].apply(lambda values: not values.isdisjoint(initials))].copy()
+        article_ids = _article_ids_for_initials(initials, article_authors)
+        if not article_ids:
+            continue
+        sub = work[work["_article_id"].isin(article_ids)].copy()
         if sub.empty:
             continue
         sub["school"] = option
         combined.append(sub)
     if not combined:
         return pd.DataFrame()
-    out = pd.concat(combined, ignore_index=True).drop(columns=["_authors_set"], errors="ignore")
+    out = pd.concat(combined, ignore_index=True).drop(columns=["_article_id"], errors="ignore")
     ordered = [col for col in ARTICLE_OUTPUT_COLUMNS if col in out.columns]
     rest = [col for col in out.columns if col not in ordered]
     return out[ordered + rest]
