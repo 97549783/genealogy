@@ -111,21 +111,11 @@ def _author_name_display_to_canon(article_authors: pd.DataFrame) -> Dict[str, st
 
 @st.cache_data(show_spinner=False)
 def _extract_author_names_from_article_authors() -> Dict[str, str]:
-    """Возвращает только реальные формы имён из `article_authors.Name` с каноническими ключами."""
+    """Возвращает реальные формы имён из `article_authors.Name` с каноническими ключами."""
     article_authors = load_article_authors()
     if article_authors is None or article_authors.empty or "Name" not in article_authors.columns:
         return {}
-
-    work = article_authors.copy()
-    try:
-        df_articles = load_articles_data()
-    except Exception:
-        df_articles = pd.DataFrame()
-    if df_articles is not None and not df_articles.empty and "Article_id" in df_articles.columns and "Article_id" in work.columns:
-        valid_article_ids = {str(value).strip() for value in df_articles["Article_id"].dropna().astype(str) if str(value).strip()}
-        work = work[work["Article_id"].astype(str).str.strip().isin(valid_article_ids)]
-
-    return _author_name_display_to_canon(work)
+    return _author_name_display_to_canon(article_authors)
 
 
 @st.cache_data(show_spinner=False)
