@@ -8,7 +8,6 @@ from typing import Dict, List, Set, Tuple
 import pandas as pd
 import streamlit as st
 
-from core.db.articles import load_article_authors
 from core.lineage.graph import lineage
 from .comparison import load_articles_data
 
@@ -84,35 +83,22 @@ def build_initials_to_fullnames(df_lineage: pd.DataFrame) -> Dict[str, List[str]
     return {key: sorted(values) for key, values in mapping.items()}
 
 
-def canon_article_author_name(name: str) -> str:
-    """Нормализует имя из `article_authors.Name` в ключ вида «фамилия и.о.» ."""
-    if not isinstance(name, str):
-        return ""
-    value = name.strip()
-    if not value:
-        return ""
-    if value.count(".") >= 2 and len(value.split()) <= 2:
-        return canon_initials(value)
-    return canon_initials(fio_to_short(value))
+def extract_authors_initials_from_articles(df_articles: pd.DataFrame) -> Set[str]:
+    """Извлекает нормализованные инициалы авторов из датафрейма статей."""
+    if df_articles is None or df_articles.empty or "Authors" not in df_articles.columns:
+        return set()
+    authors: Set[str] = set()
+    for raw in df_articles["Authors"].dropna().astype(str):
+        for part in re.split(r"[;]", raw):
+            key = canon_initials(part)
+            if key:
+                authors.add(key)
+    return authors
 
 
 @st.cache_data(show_spinner=False)
-def _extract_author_initials_from_article_authors() -> Set[str]:
-    """Извлекает доступные авторские инициалы только из таблицы `article_authors`."""
-    article_authors = load_article_authors()
-    if article_authors is None or article_authors.empty or "Name" not in article_authors.columns:
-        return set()
-
-    work = article_authors.copy()
-    try:
-        df_articles = load_articles_data()
-    except Exception:
-        df_articles = pd.DataFrame()
-    if df_articles is not None and not df_articles.empty and "Article_id" in df_articles.columns and "Article_id" in work.columns:
-        valid_article_ids = {str(value).strip() for value in df_articles["Article_id"].dropna().astype(str) if str(value).strip()}
-        work = work[work["Article_id"].astype(str).str.strip().isin(valid_article_ids)]
-
-    return {key for key in work["Name"].dropna().astype(str).map(canon_article_author_name) if key}
+def _extract_authors_initials_from_loaded_articles() -> Set[str]:
+    return extract_authors_initials_from_articles(load_articles_data())
 
 
 @st.cache_data(show_spinner=False)
@@ -121,7 +107,7 @@ def compute_selectable_people(
     include_without_descendants: bool,
 ) -> Tuple[List[str], Dict[str, str]]:
     """Формирует список людей, по которым есть статьи для анализа."""
-    authors_in_articles = _extract_author_initials_from_article_authors()
+    authors_in_articles = _extract_authors_initials_from_loaded_articles()
     initials_to_full = build_initials_to_fullnames(df_lineage)
 
     leaders: Set[str] = set()

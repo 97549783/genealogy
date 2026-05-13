@@ -5,7 +5,7 @@ import pandas as pd
 
 from tabs.articles.metrics import compute_block_score_summary, compute_keyword_overlap, cosine_similarity_safe
 from tabs.articles.query_params import parse_float_param, parse_int_param
-from tabs.articles.single_school_mode import compute_found_school_author_initials, compute_yearly_school_author_counts, _school_article_authors
+from tabs.articles.single_school_mode import compute_found_school_author_initials
 
 
 def test_compute_block_score_summary_hides_rows_below_default_threshold() -> None:
@@ -38,48 +38,12 @@ def test_cosine_similarity_safe_returns_zero_for_zero_vectors() -> None:
     assert cosine_similarity_safe(np.array([0.0, 0.0]), np.array([1.0, 2.0])) == 0.0
 
 
-def test_compute_found_school_author_initials_counts_only_article_authors() -> None:
-    dataset = pd.DataFrame(
-        {
-            "Article_id": ["A1", "A2"],
-            "Authors": ["Сидоров С.С.", "Иванов И.И."],
-            "Year": ["2020", "2021"],
-        }
-    )
-    article_authors = pd.DataFrame(
-        [
-            {"Article_id": "A1", "Name": "Иванов И.И."},
-            {"Article_id": "A2", "Name": "Сидоров С.С."},
-        ]
-    )
+def test_compute_found_school_author_initials_counts_only_authors_in_articles() -> None:
+    dataset = pd.DataFrame({"Authors": ["Иванов И.И.; Сидоров С.С.", "Петров П.П."]})
 
-    result = compute_found_school_author_initials(dataset, article_authors, {"иванов и.и.", "кузнецов к.к."})
+    result = compute_found_school_author_initials(dataset, {"иванов и.и.", "кузнецов к.к."})
 
     assert result == {"иванов и.и."}
-
-
-def test_yearly_school_author_counts_use_article_authors() -> None:
-    dataset = pd.DataFrame(
-        {
-            "Article_id": ["A1", "A2"],
-            "Authors": ["Сидоров С.С.", "Иванов И.И."],
-            "Year": ["2020", "2021"],
-        }
-    )
-    article_authors = pd.DataFrame(
-        [
-            {"Article_id": "A1", "Name": "Иванов И.И."},
-            {"Article_id": "A2", "Name": "Сидоров С.С."},
-        ]
-    )
-    school_authors = _school_article_authors(dataset, article_authors, {"иванов и.и."})
-
-    result = compute_yearly_school_author_counts(dataset, school_authors)
-
-    assert result.to_dict("records") == [
-        {"Год": 2020, "Количество статей": 1, "Количество авторов школы": 1},
-        {"Год": 2021, "Количество статей": 1, "Количество авторов школы": 0},
-    ]
 
 
 def test_query_param_parsers_use_defaults_for_invalid_values() -> None:
