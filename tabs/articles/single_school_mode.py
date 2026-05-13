@@ -9,12 +9,13 @@ import pandas as pd
 import streamlit as st
 
 from core.db.articles import load_article_authors, load_article_keywords, load_articles_data
-from .author_matching import canon_initials, compute_selectable_people, fio_to_short, get_school_member_initials
+from core.ui.links import share_params_button
+from .author_matching import canon_article_author_name, canon_initials, compute_selectable_people, fio_to_short, get_school_member_initials
 from .blocks import get_available_block_columns, load_article_analysis_block_groups
 from .charts import create_block_scores_chart, create_yearly_articles_chart
 from .data import build_articles_dataset_for_school
 from .metrics import compute_block_score_summary, normalize_keyword
-from .query_params import parse_float_param
+from .query_params import parse_bool_param, parse_float_param, query_params_signature, should_hydrate_query
 from .results_table import prepare_articles_results_table
 
 
@@ -61,7 +62,6 @@ def render_single_school_mode(
 ) -> None:
     """Отрисовывает режим анализа одной школы."""
     st.markdown("### Выбор научной школы")
-    df_articles = load_articles_data()
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
     hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
     if hidden_ambiguous:
@@ -72,23 +72,42 @@ def render_single_school_mode(
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
 
-    query_school = str(st.query_params.get("aa_school", "")).strip()
-    default_index = options.index(query_school) if query_school in options else 0
-    selected = st.selectbox("Научная школа", options=options, index=default_index, key="aa_single_school")
+    signature = query_params_signature(["articles_mode", "aa_school", "aa_scope", "aa_threshold", "aa_show_all_blocks"])
+    if should_hydrate_query("aa_single_query_signature", signature):
+        query_school = str(st.query_params.get("aa_school", "")).strip()
+        st.session_state["aa_single_school"] = query_school if query_school in options else None
+        scope_q = str(st.query_params.get("aa_scope", "direct")).strip()
+        st.session_state["aa_single_scope"] = scope_q if scope_q in {"direct", "all"} else "direct"
+        st.session_state["aa_single_threshold"] = max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0)))
+        st.session_state["aa_single_show_all_blocks"] = parse_bool_param(st.query_params.get("aa_show_all_blocks"), False)
 
-    scope_q = str(st.query_params.get("aa_scope", "direct")).strip()
-    scope_index = 1 if scope_q == "all" else 0
+    selected_value = st.session_state.get("aa_single_school")
+    selected_index = options.index(selected_value) if selected_value in options else None
+    selected = st.selectbox(
+        "Научная школа",
+        options=options,
+        index=selected_index,
+        placeholder="Выберите научную школу",
+        key="aa_single_school",
+    )
+
+    if selected is None:
+        st.info("Выберите научную школу для анализа.")
+        return
+
+    scope_value = st.session_state.get("aa_single_scope", "direct")
     scope = st.radio(
         "Охват участников школы:",
         options=["direct", "all"],
         format_func=lambda value: "Только прямые ученики (1-й уровень)" if value == "direct" else "Все поколения школы",
         horizontal=True,
-        index=scope_index,
+        index=1 if scope_value == "all" else 0,
         key="aa_single_scope",
     )
-    threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0))), step=0.1, key="aa_single_threshold")
-    show_all = st.checkbox("Показать все тематические блоки", value=False, key="aa_single_show_all_blocks")
+    threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.session_state.get("aa_single_threshold", 3.0)), step=0.1, key="aa_single_threshold")
+    show_all = st.checkbox("Показать все тематические блоки", value=bool(st.session_state.get("aa_single_show_all_blocks", False)), key="aa_single_show_all_blocks")
 
+    df_articles = load_articles_data()
     dataset = build_articles_dataset_for_school(selected, options_meta, df_lineage, idx_lineage, df_articles, scope)
     if dataset.empty:
         st.info("Для выбранной школы статьи не найдены.")
@@ -119,7 +138,7 @@ def render_single_school_mode(
     author_rows = []
     if not article_authors.empty:
         sub_authors = article_authors[article_authors["Article_id"].astype(str).isin(dataset["Article_id"].astype(str))].copy()
-        sub_authors["_canon"] = sub_authors["Name"].apply(lambda value: canon_initials(value) if str(value).count(".") else canon_initials(fio_to_short(str(value))))
+        sub_authors["_canon"] = sub_authors["Name"].apply(canon_article_author_name)
         sub_authors = sub_authors[sub_authors["_canon"].isin(member_initials)]
         for name, group in sub_authors.groupby("Name", dropna=True):
             article_ids = set(group["Article_id"].astype(str))
@@ -176,3 +195,15 @@ def render_single_school_mode(
     yearly_df = pd.DataFrame(yearly_rows).sort_values("Год") if yearly_rows else pd.DataFrame(columns=["Год", "Количество статей", "Количество авторов школы"])
     st.dataframe(yearly_df, hide_index=True, use_container_width=True)
     st.pyplot(create_yearly_articles_chart(yearly_df))
+
+    share_params_button(
+        {
+            "tab": "articles_comparison",
+            "articles_mode": "single_school",
+            "aa_school": selected,
+            "aa_scope": scope,
+            "aa_threshold": float(threshold),
+            "aa_show_all_blocks": bool(show_all),
+        },
+        key="aa_single_share",
+    )
