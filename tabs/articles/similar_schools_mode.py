@@ -10,7 +10,7 @@ import streamlit as st
 
 from core.db.articles import load_article_keywords, load_articles_data
 from core.ui.links import share_params_button
-from .author_matching import compute_selectable_people
+from .author_matching import compute_selectable_people, resolve_article_author_to_lineage_root
 from .blocks import get_available_block_columns
 from .data import build_articles_dataset_for_school
 from .metrics import build_school_vector, compute_keyword_overlap, cosine_similarity_safe, get_article_feature_columns, normalize_keyword
@@ -47,11 +47,6 @@ def render_similar_schools_mode(
     """Отрисовывает режим поиска похожих школ."""
     st.markdown("### Исходная школа")
     options, options_meta = compute_selectable_people(df_lineage, include_without_descendants=True)
-    hidden_ambiguous = [option for option in options if options_meta.get(option) == "initials_ambiguous"]
-    if hidden_ambiguous:
-        st.caption("Неоднозначные варианты с совпадающими инициалами временно скрыты, чтобы избежать ошибочного сопоставления авторов.")
-    options = [option for option in options if options_meta.get(option) != "initials_ambiguous"]
-    options_meta = {option: kind for option, kind in options_meta.items() if option in options}
     if not options:
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
@@ -90,6 +85,18 @@ def render_similar_schools_mode(
     if source_school is None:
         st.info("Выберите исходную научную школу для поиска похожих школ.")
         return
+
+    resolution = resolve_article_author_to_lineage_root(source_school, df_lineage)
+    if resolution.ambiguous_full_names and not resolution.root_name:
+        st.warning("Имя автора статьи соответствует нескольким людям в генеалогии. Выберите, чью школу использовать, или оставьте анализ только по этому автору.")
+        choices = ["Анализировать только автора", *resolution.ambiguous_full_names]
+        choice = st.selectbox("Уточнение автора в генеалогии", choices, key="aa_similar_disambiguation")
+        disambiguation = dict(st.session_state.get("ac_disambiguation", {}))
+        if choice == "Анализировать только автора":
+            disambiguation.pop(resolution.canon_key, None)
+        else:
+            disambiguation[resolution.canon_key] = choice
+        st.session_state["ac_disambiguation"] = disambiguation
 
     scope_value = st.session_state.get("aa_similar_scope", "direct")
     scope = st.radio(
