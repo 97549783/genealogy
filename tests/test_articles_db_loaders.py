@@ -74,6 +74,28 @@ def test_load_articles_data_keeps_metadata_only_articles(monkeypatch, tmp_path: 
     assert df.loc[1, "Article_PDF"] == "https://example.test/a.pdf"
 
 
+def test_load_articles_data_marks_all_null_score_row_as_unscored(monkeypatch, tmp_path: Path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_db_without_optional_tables(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO articles_metadata VALUES (
+                '3000','Сидоров С.С.','Пустой профиль','Журнал','0234-0453','40','5',2025,
+                '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+                1, 5, 100, 3, 4, '', ''
+            )
+            """
+        )
+        conn.execute("INSERT INTO articles_scores_inf_edu VALUES ('3000', NULL)")
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
+    df = load_articles_data().set_index("Article_id")
+
+    assert bool(df.loc["3000", "Has_thematic_scores"]) is False
+    assert pd.isna(df.loc["3000", "1.1.1"])
+
+
 def test_load_available_article_journals_returns_aggregates(monkeypatch, tmp_path: Path) -> None:
     db_path = tmp_path / "genealogy.db"
     _create_db_without_optional_tables(db_path)

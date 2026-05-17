@@ -109,15 +109,35 @@ def load_articles_scores() -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def _load_articles_scores_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
-    """Загружает тематические профили статей с кэшированием."""
+    """Загружает нормализованные тематические профили статей с кэшированием."""
     _ = db_signature
     scores = load_article_scores()
+    return _prepare_articles_scores(scores)
+
+
+def load_articles_scores_raw() -> pd.DataFrame:
+    """Загружает тематические профили статей без замены пропусков нулями."""
+    return _load_articles_scores_raw_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_articles_scores_raw_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает сырые тематические профили статей с кэшированием."""
+    _ = db_signature
+    with get_sqlite_connection() as conn:
+        scores = pd.read_sql_query('SELECT * FROM "articles_scores_inf_edu"', conn)
+    return _prepare_articles_scores(scores)
+
+
+def _prepare_articles_scores(scores: pd.DataFrame) -> pd.DataFrame:
+    """Проверяет и приводит таблицу тематических профилей статей."""
     if "Article_id" not in scores.columns:
         raise KeyError("В таблице articles_scores_inf_edu отсутствует столбец 'Article_id'")
 
     scores = scores.dropna(subset=["Article_id"]).copy()
     scores["Article_id"] = scores["Article_id"].astype(str).str.strip().astype(object)
     scores = scores[scores["Article_id"].str.len() > 0]
+    scores = scores.drop_duplicates(subset=["Article_id"], keep="first")
 
     feature_columns = [col for col in scores.columns if col != "Article_id"]
     if not feature_columns:
@@ -137,7 +157,7 @@ def _load_articles_data_cached(db_signature: tuple[str, float, int]) -> pd.DataF
     """Возвращает статьи с метаданными и, при наличии, тематическими профилями."""
     _ = db_signature
     metadata = load_articles_metadata()
-    scores = load_articles_scores()
+    scores = load_articles_scores_raw()
 
     score_columns = [col for col in scores.columns if col != "Article_id"]
     scores = scores.copy()
