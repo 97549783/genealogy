@@ -166,3 +166,39 @@ articles_tab.render_articles_comparison_tab(df_lineage=sample_df, idx_lineage={}
     app.run(timeout=10)
     assert app.session_state["ac_scope"] == "direct"
     assert app.session_state["ac_selected_options"] == ["Иванов И.И.", "Петров П.П."]
+
+
+def test_articles_comparison_reports_when_scored_articles_cover_less_than_two_schools() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.tab as articles_tab
+
+articles_tab.load_articles_classifier = lambda: {"1": "Раздел 1"}
+articles_tab._compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "leader", "Петров П.П.": "leader"})
+articles_tab.load_articles_data = lambda: pd.DataFrame([
+    {"Article_id": "A1", "Authors": "Иванов И.И.", "Title": "T1", "Year": "2020", "Has_thematic_scores": True, "1": 1.0},
+    {"Article_id": "A2", "Authors": "Петров П.П.", "Title": "T2", "Year": "2021", "Has_thematic_scores": False, "1": pd.NA},
+])
+def _fake_build_articles_dataset(**kwargs):
+    return pd.DataFrame([
+        {"school": "Иванов И.И.", "Article_id": "A1", "Authors": "Иванов И.И.", "Title": "T1", "Year": "2020", "Has_thematic_scores": True, "1": 1.0},
+        {"school": "Петров П.П.", "Article_id": "A2", "Authors": "Петров П.П.", "Title": "T2", "Year": "2021", "Has_thematic_scores": False, "1": pd.NA},
+    ])
+articles_tab._build_articles_dataset = _fake_build_articles_dataset
+articles_tab.compute_article_analysis = lambda **kwargs: (_ for _ in ()).throw(AssertionError("Нельзя запускать анализ без двух школ с профилями"))
+sample_df = pd.DataFrame([
+    {"candidate_name": "Иванов И.И.", "supervisors_1.name": "", "supervisors_2.name": ""},
+    {"candidate_name": "Петров П.П.", "supervisors_1.name": "", "supervisors_2.name": ""},
+])
+articles_tab.render_articles_comparison_tab(df_lineage=sample_df, idx_lineage={})
+"""
+    )
+    app.query_params["ac_people"] = ["Иванов И.И.", "Петров П.П."]
+    app.query_params["ac_nodes"] = [SPECIAL_OPTION_ALL]
+    app.run(timeout=10)
+    assert any(
+        "Недостаточно данных для сравнения тематических профилей: статьи с рассчитанными тематическими профилями найдены менее чем для двух школ/авторов." in value.value
+        for value in app.info
+    )

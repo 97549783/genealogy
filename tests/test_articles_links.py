@@ -35,3 +35,20 @@ def test_results_table_uses_stored_article_and_pdf_links() -> None:
 
     assert result.loc[0, "Сайт журнала"] == "https://example.test/article"
     assert result.loc[0, "PDF"] == "https://example.test/article.pdf"
+
+
+def test_results_table_shows_thematic_profile_availability_for_unscored_articles() -> None:
+    df = pd.DataFrame([
+        {
+            "Article_id": "mspu-1",
+            "Article_URL": "https://example.test/article",
+            "Article_PDF": "https://example.test/article.pdf",
+            "Has_thematic_scores": False,
+        }
+    ])
+
+    result = prepare_articles_results_table(df)
+
+    assert result.loc[0, "Есть тематический профиль"] == "Нет"
+    assert result.loc[0, "Сайт журнала"] == "https://example.test/article"
+    assert result.loc[0, "PDF"] == "https://example.test/article.pdf"

@@ -89,3 +89,31 @@ mode.render_single_school_mode(pd.DataFrame(), {})
     app.query_params["aa_school"] = "Петров П.П."
     app.run(timeout=10)
     assert app.session_state["aa_single_school"] == "Петров П.П."
+
+
+def test_single_school_shows_message_when_articles_have_no_scores() -> None:
+    app = AppTest.from_string(
+        """
+import matplotlib.pyplot as plt
+import pandas as pd
+import streamlit as st
+import tabs.articles.single_school_mode as mode
+
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И."], {"Иванов И.И.": "initials_only"})
+mode.load_article_authors = lambda: pd.DataFrame([{"Article_id": "A1", "Name": "Иванов И.И."}])
+mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "ключ"}])
+mode.compute_block_score_summary = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Нельзя считать профиль без баллов"))
+mode.create_yearly_articles_chart = lambda yearly_df: plt.figure()
+mode.share_params_button = lambda payload, key: None
+mode.build_articles_dataset_for_school = lambda *args, **kwargs: pd.DataFrame([
+    {"Article_id": "A1", "Authors": "Иванов И.И.", "Title": "T", "Year": "2020", "Keywords": "ключ", "Has_thematic_scores": False, "1": pd.NA}
+])
+mode.render_single_school_mode(pd.DataFrame(), {})
+"""
+    )
+    app.query_params["aa_school"] = "Иванов И.И."
+    app.run(timeout=10)
+    assert any(
+        "Для выбранной школы найдены статьи, но среди них нет статей с рассчитанными тематическими профилями." in value.value
+        for value in app.info
+    )

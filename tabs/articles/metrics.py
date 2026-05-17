@@ -8,7 +8,13 @@ from typing import Any, Set
 import numpy as np
 import pandas as pd
 
-METADATA_COLS = {"Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "school", "Year", "Year_num", "Abstract", "Keywords", "DOI", "Pages", "Funding"}
+METADATA_COLS = {
+    "Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "school",
+    "Year", "Year_num", "Abstract", "Keywords", "DOI", "Pages", "Funding",
+    "Has_thematic_scores", "Article_URL", "Article_PDF", "Published_at", "Section", "UDK",
+    "Citation", "Issue_URL", "Issue_PDF", "Issue_title", "Issue_serial", "Issue_in_year",
+    "Issue_total_pages", "First_page", "Last_page", "Source_pages_text", "Source_article_url",
+}
 
 
 def get_article_feature_columns(df: pd.DataFrame) -> list[str]:

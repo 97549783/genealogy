@@ -87,3 +87,50 @@ mode.render_similar_schools_mode(pd.DataFrame(), {})
     app.query_params["aa_source_school"] = "Петров П.П."
     app.run(timeout=10)
     assert app.session_state["aa_source_school"] == "Петров П.П."
+
+
+def test_similar_schools_keyword_mode_works_without_scores() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.similar_schools_mode as mode
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
+mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "а"}, {"Article_id": "A2", "Keyword": "а"}])
+mode.get_article_feature_columns = lambda df: ["1"]
+mode.get_available_block_columns = lambda df, classifier_labels=None: []
+mode.share_params_button = lambda payload, key: st.session_state.update({"_share_payload": payload, "_share_key": key})
+def _fake_build(option, *args, **kwargs):
+    article_id = "A1" if option == "Иванов И.И." else "A2"
+    return pd.DataFrame([{"Article_id": article_id, "Authors": option, "Year": "2020", "Keywords": "а", "Has_thematic_scores": False, "1": pd.NA}])
+mode.build_articles_dataset_for_school = _fake_build
+mode.render_similar_schools_mode(pd.DataFrame(), {})
+"""
+    )
+    app.query_params["aa_source_school"] = "Иванов И.И."
+    app.query_params["aa_similarity_mode"] = "keywords"
+    app.run(timeout=10)
+    assert app.session_state["_share_key"] == "aa_similar_share"
+    assert app.session_state["_share_payload"]["aa_similarity_mode"] == "keywords"
+
+
+def test_similar_schools_combined_mode_requires_scored_source_articles() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import tabs.articles.similar_schools_mode as mode
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
+mode.load_article_keywords = lambda: pd.DataFrame()
+mode.get_article_feature_columns = lambda df: ["1"]
+mode.get_available_block_columns = lambda df, classifier_labels=None: []
+mode.build_articles_dataset_for_school = lambda option, *args, **kwargs: pd.DataFrame([{"Article_id": "A1", "Authors": option, "Year": "2020", "Keywords": "а", "Has_thematic_scores": False, "1": pd.NA}])
+mode.render_similar_schools_mode(pd.DataFrame(), {})
+"""
+    )
+    app.query_params["aa_source_school"] = "Иванов И.И."
+    app.query_params["aa_similarity_mode"] = "combined"
+    app.run(timeout=10)
+    assert any(
+        "Для комбинированного поиска у исходной школы должны быть статьи с рассчитанными тематическими профилями." in value.value
+        for value in app.info
+    )

@@ -34,6 +34,8 @@ def prepare_articles_results_table(df: pd.DataFrame) -> pd.DataFrame:
     out["Сайт журнала"] = work.apply(_journal_url, axis=1)
     out["PDF"] = work.get("Article_PDF", pd.Series(index=work.index, dtype=object)).map(_filled_text)
     out["Elibrary"] = work.get("DOI", pd.Series(index=work.index, dtype=object)).apply(make_elibrary_url)
+    if "Has_thematic_scores" in work.columns:
+        out["Есть тематический профиль"] = work["Has_thematic_scores"].fillna(False).map(lambda value: "Да" if bool(value) else "Нет")
     mapping = {
         "Year": "Год", "Title": "Название", "Authors": "Авторы", "Journal": "Журнал",
         "Volume": "Том", "Issue": "Выпуск", "Pages": "Страницы", "DOI": "DOI", "Keywords": "Ключевые слова",

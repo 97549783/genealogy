@@ -13,7 +13,7 @@ from core.ui.links import share_params_button
 from .author_matching import canon_article_author_name, compute_selectable_people, get_school_member_initials, resolve_article_author_to_lineage_root
 from .blocks import get_available_block_columns, load_article_analysis_block_groups
 from .charts import create_block_scores_chart, create_yearly_articles_chart
-from .data import build_articles_dataset_for_school
+from .data import build_articles_dataset_for_school, filter_articles_with_thematic_scores
 from .metrics import compute_block_score_summary, normalize_keyword
 from .query_params import parse_bool_param, parse_float_param, query_params_signature, should_hydrate_query
 from .results_table import prepare_articles_results_table
@@ -182,12 +182,17 @@ def render_single_school_mode(
         kw_source = _keywords_from_metadata(dataset)
     unique_keywords = {normalize_keyword(v) for v in kw_source.get("Keyword", pd.Series(dtype=object)) if normalize_keyword(v)}
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    if "Has_thematic_scores" in dataset.columns:
+        scored_count = int(dataset["Has_thematic_scores"].fillna(False).sum())
+    else:
+        scored_count = len(dataset)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Статей найдено", len(dataset))
-    c2.metric("Авторов школы в статьях", len(found_member_initials))
-    c3.metric("Уникальных ключевых слов", len(unique_keywords))
-    c4.metric("Период публикаций", period)
-    c5.metric("Статей с DOI", doi_count)
+    c2.metric("Статей с тематическим профилем", scored_count)
+    c3.metric("Авторов школы в статьях", len(found_member_initials))
+    c4.metric("Уникальных ключевых слов", len(unique_keywords))
+    c5.metric("Период публикаций", period)
+    c6.metric("Статей с DOI", doi_count)
 
     st.markdown("### Авторы школы, найденные в статьях")
     author_rows = []
@@ -217,20 +222,24 @@ def render_single_school_mode(
         st.dataframe(kw_counts, hide_index=True, use_container_width=True)
 
     st.markdown("### Тематический профиль школы по статьям")
-    blocks = get_available_block_columns(dataset, classifier_labels=classifier_labels)
-    block_scores = compute_block_score_summary(dataset, blocks, threshold=float(threshold), show_all=show_all)
-    if block_scores.empty:
-        st.info("Нет тематических блоков выше выбранного порога.")
+    scored_dataset = filter_articles_with_thematic_scores(dataset)
+    if scored_dataset.empty:
+        st.info("Для выбранной школы найдены статьи, но среди них нет статей с рассчитанными тематическими профилями.")
     else:
-        st.dataframe(block_scores, hide_index=True, use_container_width=True)
-        st.pyplot(create_block_scores_chart(block_scores))
-    block_groups = load_article_analysis_block_groups()
-    configured_codes = [str(code) for group in block_groups.values() for code in group.get("codes", [])]
-    unavailable_codes = [code for code in configured_codes if code not in dataset.columns]
-    unsigned_codes = [code for code in configured_codes if classifier_labels is not None and code in dataset.columns and not str(classifier_labels.get(code, "")).strip()]
-    with st.expander("Диагностика классификатора", expanded=False):
-        st.write(f"Недоступных выбранных кодов в таблице articles_scores_inf_edu: {len(unavailable_codes)}")
-        st.write(f"Кодов без подписи в классификаторе: {len(unsigned_codes)}")
+        blocks = get_available_block_columns(scored_dataset, classifier_labels=classifier_labels)
+        block_scores = compute_block_score_summary(scored_dataset, blocks, threshold=float(threshold), show_all=show_all)
+        if block_scores.empty:
+            st.info("Нет тематических блоков выше выбранного порога.")
+        else:
+            st.dataframe(block_scores, hide_index=True, use_container_width=True)
+            st.pyplot(create_block_scores_chart(block_scores))
+        block_groups = load_article_analysis_block_groups()
+        configured_codes = [str(code) for group in block_groups.values() for code in group.get("codes", [])]
+        unavailable_codes = [code for code in configured_codes if code not in scored_dataset.columns]
+        unsigned_codes = [code for code in configured_codes if classifier_labels is not None and code in scored_dataset.columns and not str(classifier_labels.get(code, "")).strip()]
+        with st.expander("Диагностика классификатора", expanded=False):
+            st.write(f"Недоступных выбранных кодов в таблице articles_scores_inf_edu: {len(unavailable_codes)}")
+            st.write(f"Кодов без подписи в классификаторе: {len(unsigned_codes)}")
 
     st.markdown("### Динамика по годам")
     yearly_df = compute_yearly_school_author_counts(dataset, school_authors)

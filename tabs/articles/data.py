@@ -15,6 +15,7 @@ ARTICLE_OUTPUT_COLUMNS = [
     "school", "Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "Year",
     "Abstract", "Keywords", "DOI", "Pages", "Funding", "Article_URL", "Article_PDF",
     "Published_at", "Section", "UDK", "Citation", "Issue_URL", "Issue_PDF",
+    "Has_thematic_scores",
     "Issue_title", "Issue_serial", "Issue_in_year", "Issue_total_pages", "First_page",
     "Last_page", "Source_pages_text", "Source_article_url", "Year_num",
 ]
@@ -49,6 +50,16 @@ def filter_articles_by_journals(df_articles: pd.DataFrame, selected_journal_keys
 
     return work[mask].copy()
 
+
+
+
+def filter_articles_with_thematic_scores(df: pd.DataFrame) -> pd.DataFrame:
+    """Оставляет только статьи с рассчитанными тематическими профилями."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if "Has_thematic_scores" not in df.columns:
+        return df.copy()
+    return df[df["Has_thematic_scores"].fillna(False)].copy()
 
 def make_journal_article_url(article_id: Any) -> str:
     """Создаёт ссылку на страницу статьи на сайте журнала."""

@@ -20,7 +20,7 @@ from .author_matching import (
     fio_to_short as _shared_fio_to_short,
     resolve_article_author_to_lineage_root as _shared_resolve_article_author_to_lineage_root,
 )
-from .data import build_articles_dataset_for_schools
+from .data import build_articles_dataset_for_schools, filter_articles_with_thematic_scores
 from .query_params import parse_bool_param, parse_float_param, query_params_signature, should_hydrate_query
 from .comparison import (
     DistanceMetric,
@@ -529,28 +529,59 @@ def render_articles_comparison_mode(
         with st.expander("🔎 Диагностика: сколько статей попало в каждую школу", expanded=False):
             st.write(school_counts)
 
+        with st.expander("📄 Список выбранных статей", expanded=False):
+            from .results_table import prepare_articles_results_table
+            view_df = prepare_articles_results_table(dataset)
+            if "Школа" not in view_df.columns and "school" in dataset.columns:
+                view_df.insert(2, "Школа", dataset["school"].astype(str).values)
+            st.dataframe(
+                view_df,
+                column_config={
+                    "Сайт журнала": st.column_config.LinkColumn("Сайт журнала", display_text="Читать"),
+                    "PDF": st.column_config.LinkColumn("PDF", display_text="PDF"),
+                    "Elibrary": st.column_config.LinkColumn("Elibrary", display_text="Библиометрия"),
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        scored_dataset = filter_articles_with_thematic_scores(dataset)
+        excluded_count = int(len(dataset) - len(scored_dataset))
+        if excluded_count > 0:
+            st.info(f"Из анализа тематических профилей исключено статей без рассчитанных тематических профилей: {excluded_count}.")
+        if scored_dataset.empty:
+            st.info("Для выбранных школ найдены статьи, но среди них нет статей с рассчитанными тематическими профилями.")
+            return
+
+        scored_school_counts = scored_dataset["school"].value_counts().to_dict()
+        scored_non_empty_schools = [k for k, v in scored_school_counts.items() if v > 0]
+        if len(scored_non_empty_schools) < 2:
+            st.info("Недостаточно данных для сравнения тематических профилей: статьи с рассчитанными тематическими профилями найдены менее чем для двух школ/авторов.")
+            return
+
         # Подготовка признаков
         meta_cols = {
             "Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "school",
             "Year", "Year_num", "Abstract", "Keywords", "DOI", "Pages", "Funding",
-            "Article_URL", "Article_PDF", "Published_at", "Section", "UDK", "Citation",
+            "Has_thematic_scores", "Article_URL", "Article_PDF", "Published_at", "Section", "UDK", "Citation",
             "Issue_URL", "Issue_PDF", "Issue_title", "Issue_serial", "Issue_in_year",
             "Issue_total_pages", "First_page", "Last_page", "Source_pages_text", "Source_article_url",
         }
-        all_cols = dataset.columns.tolist()
+        all_cols = scored_dataset.columns.tolist()
         classifier_cols = [c for c in all_cols if c not in meta_cols and re.match(r"^[\d\.]+$", str(c))]
         all_feature_cols = [*classifier_cols, "Year_num"]
 
-        # ОБНОВЛЕНИЕ: Используем обновленную функцию фильтрации с поддержкой "Весь базис"
+        # Используем фильтрацию с поддержкой "Весь базис"
         if selected_nodes:
             feature_cols = _filter_feature_columns(all_feature_cols, selected_nodes)
         else:
             # По умолчанию: все тематические коды без года
             feature_cols = classifier_cols
 
-        # Чистим признаки
+        # Чистим признаки после исключения статей без тематических профилей
+        analysis_dataset = scored_dataset.copy()
         for col in feature_cols:
-            dataset[col] = pd.to_numeric(dataset[col], errors="coerce").fillna(0)
+            analysis_dataset[col] = pd.to_numeric(analysis_dataset[col], errors="coerce").fillna(0)
 
         if not feature_cols:
             st.error("❌ Не выбраны признаки для сравнения. Выберите узлы классификатора или 'Год'.")
@@ -576,7 +607,7 @@ def render_articles_comparison_mode(
         # Анализ
         with st.spinner("Расчёт метрик (силуэт, DB, CH)..."):
             results = compute_article_analysis(
-                df=dataset,
+                df=analysis_dataset,
                 feature_columns=feature_cols,
                 metric=metric_choice,
                 decay_factor=float(decay_factor),
@@ -625,27 +656,11 @@ def render_articles_comparison_mode(
                 st.dataframe(dist_df, use_container_width=True)
 
         st.markdown("### 📋 Сводная статистика")
-        summary_df = create_comparison_summary(dataset, feature_cols)
+        summary_df = create_comparison_summary(analysis_dataset, feature_cols)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
         with st.expander("📥 Скачать результаты", expanded=False):
             _download_dataframe(summary_df, "articles_comparison_stats")
-
-        with st.expander("📄 Список проанализированных статей", expanded=False):
-            from .results_table import prepare_articles_results_table
-            view_df = prepare_articles_results_table(dataset)
-            if "Школа" not in view_df.columns and "school" in dataset.columns:
-                view_df.insert(2, "Школа", dataset["school"].astype(str).values)
-            st.dataframe(
-                view_df,
-                column_config={
-                    "Сайт журнала": st.column_config.LinkColumn("Сайт журнала", display_text="Читать"),
-                    "PDF": st.column_config.LinkColumn("PDF", display_text="PDF"),
-                    "Elibrary": st.column_config.LinkColumn("Elibrary", display_text="Библиометрия"),
-                },
-                use_container_width=True,
-                hide_index=True,
-            )
 
         share_params_button(
             {
