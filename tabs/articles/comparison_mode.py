@@ -279,6 +279,7 @@ def render_articles_comparison_mode(
     idx_lineage: Dict[str, Set[int]],
     selected_roots: Optional[List[str]] = None,
     classifier_labels: Optional[Dict[str, str]] = None,
+    df_articles: pd.DataFrame | None = None,
 ) -> None:
     """
     Отрисовывает режим сравнения выбранных школ по статьям.
@@ -294,6 +295,7 @@ def render_articles_comparison_mode(
 
     signature = query_params_signature([
         "articles_mode",
+        "aa_journals",
         "ac_people",
         "ac_scope",
         "ac_metric",
@@ -417,7 +419,7 @@ def render_articles_comparison_mode(
             value=float(st.session_state.get("ac_decay_factor", 0.5)),
             step=0.05,
             key="ac_decay_factor",
-            help="Используется только для 'косоугольного базиса' (oblique).",
+            help="Используется только для косоугольного базиса.",
         )
 
     with col_params2:
@@ -488,9 +490,9 @@ def render_articles_comparison_mode(
             _show_disambiguation_dialog(ambiguous)
             return
 
-        # Загрузка статей
-        with st.spinner("Загрузка базы статей..."):
-            df_articles = load_articles_data()
+        if df_articles is None:
+            with st.spinner("Загрузка базы статей..."):
+                df_articles = load_articles_data()
 
         if df_articles is None or df_articles.empty:
             st.error("❌ Не удалось загрузить данные статей из SQLite. Проверьте таблицы articles_metadata и articles_scores_inf_edu.")
@@ -528,7 +530,13 @@ def render_articles_comparison_mode(
             st.write(school_counts)
 
         # Подготовка признаков
-        meta_cols = {"Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "school", "Year", "Year_num", "Abstract", "Keywords", "DOI", "Pages", "Funding"}
+        meta_cols = {
+            "Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "school",
+            "Year", "Year_num", "Abstract", "Keywords", "DOI", "Pages", "Funding",
+            "Article_URL", "Article_PDF", "Published_at", "Section", "UDK", "Citation",
+            "Issue_URL", "Issue_PDF", "Issue_title", "Issue_serial", "Issue_in_year",
+            "Issue_total_pages", "First_page", "Last_page", "Source_pages_text", "Source_article_url",
+        }
         all_cols = dataset.columns.tolist()
         classifier_cols = [c for c in all_cols if c not in meta_cols and re.match(r"^[\d\.]+$", str(c))]
         all_feature_cols = [*classifier_cols, "Year_num"]
@@ -632,6 +640,7 @@ def render_articles_comparison_mode(
                 view_df,
                 column_config={
                     "Сайт журнала": st.column_config.LinkColumn("Сайт журнала", display_text="Читать"),
+                    "PDF": st.column_config.LinkColumn("PDF", display_text="PDF"),
                     "Elibrary": st.column_config.LinkColumn("Elibrary", display_text="Библиометрия"),
                 },
                 use_container_width=True,
@@ -642,6 +651,7 @@ def render_articles_comparison_mode(
             {
                 "tab": "articles_comparison",
                 "articles_mode": "comparison",
+                "aa_journals": st.session_state.get("aa_selected_journals", ["all"]),
                 "ac_people": selected_options,
                 "ac_scope": scope,
                 "ac_metric": metric_choice,

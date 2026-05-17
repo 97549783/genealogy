@@ -43,6 +43,7 @@ def render_similar_schools_mode(
     df_lineage: pd.DataFrame,
     idx_lineage: Dict[str, Set[int]],
     classifier_labels: Optional[Dict[str, str]] = None,
+    df_articles: pd.DataFrame | None = None,
 ) -> None:
     """Отрисовывает режим поиска похожих школ."""
     st.markdown("### Исходная школа")
@@ -55,6 +56,7 @@ def render_similar_schools_mode(
     mode_labels = {"profile": "По тематическому профилю", "keywords": "По ключевым словам", "combined": "Комбинированный поиск"}
     signature = query_params_signature([
         "articles_mode",
+        "aa_journals",
         "aa_source_school",
         "aa_scope",
         "aa_similarity_mode",
@@ -126,7 +128,8 @@ def render_similar_schools_mode(
     with c3:
         threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.session_state.get("aa_similar_threshold", 3.0)), step=0.1, key="aa_similar_threshold")
 
-    df_articles = load_articles_data()
+    if df_articles is None:
+        df_articles = load_articles_data()
     source_dataset = build_articles_dataset_for_school(source_school, options_meta, df_lineage, idx_lineage, df_articles, scope)
     if source_dataset.empty:
         st.info("Для исходной школы статьи не найдены.")
@@ -182,6 +185,7 @@ def render_similar_schools_mode(
         {
             "tab": "articles_comparison",
             "articles_mode": "similar_schools",
+            "aa_journals": st.session_state.get("aa_selected_journals", ["all"]),
             "aa_source_school": source_school,
             "aa_scope": scope,
             "aa_similarity_mode": similarity_mode,

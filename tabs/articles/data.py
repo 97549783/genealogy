@@ -9,10 +9,45 @@ import pandas as pd
 from core.db.articles import load_article_authors
 from .author_matching import canon_article_author_name, get_school_member_initials
 
+ALL_JOURNALS_KEY = "all"
+
 ARTICLE_OUTPUT_COLUMNS = [
     "school", "Article_id", "Authors", "Title", "Journal", "ISSN", "Volume", "Issue", "Year",
-    "Abstract", "Keywords", "DOI", "Pages", "Funding", "Year_num",
+    "Abstract", "Keywords", "DOI", "Pages", "Funding", "Article_URL", "Article_PDF",
+    "Published_at", "Section", "UDK", "Citation", "Issue_URL", "Issue_PDF",
+    "Issue_title", "Issue_serial", "Issue_in_year", "Issue_total_pages", "First_page",
+    "Last_page", "Source_pages_text", "Source_article_url", "Year_num",
 ]
+
+
+def normalize_journal_key(value: Any) -> str:
+    """Нормализует ISSN или другой ключ журнала для фильтрации."""
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip().lower()
+
+
+def filter_articles_by_journals(df_articles: pd.DataFrame, selected_journal_keys: list[str]) -> pd.DataFrame:
+    """Фильтрует статьи по выбранным журналам."""
+    if df_articles is None or df_articles.empty:
+        return df_articles
+    selected = {normalize_journal_key(value) for value in (selected_journal_keys or [])}
+    selected.discard("")
+    if not selected or normalize_journal_key(ALL_JOURNALS_KEY) in selected:
+        return df_articles
+
+    work = df_articles.copy()
+    if "ISSN" not in work.columns:
+        return work.iloc[0:0].copy()
+
+    issn_keys = work["ISSN"].map(normalize_journal_key)
+    mask = issn_keys.isin(selected)
+
+    if "Journal" in work.columns:
+        journal_fallback_keys = work["Journal"].map(lambda value: f"journal:{normalize_journal_key(value)}")
+        mask = mask | ((issn_keys == "") & journal_fallback_keys.isin(selected))
+
+    return work[mask].copy()
 
 
 def make_journal_article_url(article_id: Any) -> str:

@@ -63,6 +63,7 @@ mode.render_single_school_mode(pd.DataFrame(), {})
     assert app.session_state["_share_payload"] == {
         "tab": "articles_comparison",
         "articles_mode": "single_school",
+        "aa_journals": ["all"],
         "aa_school": "Иванов И.И.",
         "aa_scope": "all",
         "aa_threshold": 2.5,
