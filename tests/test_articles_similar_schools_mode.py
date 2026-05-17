@@ -60,6 +60,7 @@ mode.render_similar_schools_mode(pd.DataFrame(), {})
     assert app.session_state["_share_payload"] == {
         "tab": "articles_comparison",
         "articles_mode": "similar_schools",
+        "aa_journals": ["all"],
         "aa_source_school": "Иванов И.И.",
         "aa_scope": "all",
         "aa_similarity_mode": "combined",

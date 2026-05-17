@@ -28,5 +28,5 @@ from .scores import (
     fetch_scores_by_codes,
     search_dissertation_scores_by_codes_threshold,
 )
-from .articles import load_articles_data, load_articles_metadata, load_articles_scores
+from .articles import load_available_article_journals, load_articles_data, load_articles_metadata, load_articles_scores
 from .connection import get_db_signature

@@ -106,6 +106,7 @@ articles_tab.render_articles_comparison_tab(df_lineage=sample_df, idx_lineage={}
     assert app.session_state["_ac_share_payload"] == {
         "tab": "articles_comparison",
         "articles_mode": "comparison",
+        "aa_journals": ["all"],
         "ac_people": ["Иванов И.И.", "Петров П.П."],
         "ac_scope": "all",
         "ac_metric": "euclidean_oblique",

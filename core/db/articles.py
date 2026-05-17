@@ -34,6 +34,49 @@ def _empty_article_keywords() -> pd.DataFrame:
     return pd.DataFrame(columns=ARTICLE_KEYWORDS_COLUMNS)
 
 
+def load_available_article_journals() -> pd.DataFrame:
+    """Загружает список журналов, доступных в таблице статей."""
+    return _load_available_article_journals_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_available_article_journals_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает агрегированный список журналов с кэшированием."""
+    _ = db_signature
+    with get_sqlite_connection() as conn:
+        metadata = pd.read_sql_query("SELECT * FROM articles_metadata", conn)
+
+    columns = ["ISSN", "Journal", "article_count", "first_year", "last_year"]
+    if metadata.empty:
+        return pd.DataFrame(columns=columns)
+    for column in ["ISSN", "Journal", "Year", "Article_id"]:
+        if column not in metadata.columns:
+            metadata[column] = ""
+
+    work = metadata.copy()
+    work["ISSN"] = work["ISSN"].fillna("").astype(str).str.strip()
+    work["Journal"] = work["Journal"].fillna("").astype(str).str.strip()
+    work = work[(work["ISSN"] != "") | (work["Journal"] != "")]
+    if work.empty:
+        return pd.DataFrame(columns=columns)
+
+    work["_group_key"] = work["ISSN"].where(work["ISSN"] != "", "journal:" + work["Journal"].str.lower())
+    work["_year"] = pd.to_numeric(work["Year"], errors="coerce")
+    rows = []
+    for _, group in work.groupby("_group_key", sort=True):
+        issn_values = [value for value in group["ISSN"].astype(str) if value.strip()]
+        journal_values = [value for value in group["Journal"].astype(str) if value.strip()]
+        years = group["_year"].dropna()
+        rows.append({
+            "ISSN": issn_values[0] if issn_values else "",
+            "Journal": journal_values[0] if journal_values else (issn_values[0] if issn_values else ""),
+            "article_count": int(group["Article_id"].nunique()) if "Article_id" in group.columns else int(len(group)),
+            "first_year": int(years.min()) if not years.empty else pd.NA,
+            "last_year": int(years.max()) if not years.empty else pd.NA,
+        })
+    return pd.DataFrame(rows, columns=columns).sort_values(["Journal", "ISSN"], kind="stable").reset_index(drop=True)
+
+
 def load_articles_metadata() -> pd.DataFrame:
     """Загружает метаданные статей и проверяет обязательные поля."""
     return _load_articles_metadata_cached(get_db_signature())

@@ -92,6 +92,7 @@ def _render_results_table(df: pd.DataFrame) -> None:
         display_df,
         column_config={
             "Сайт журнала": st.column_config.LinkColumn("Сайт журнала", display_text="Читать"),
+            "PDF": st.column_config.LinkColumn("PDF", display_text="PDF"),
             "Elibrary": st.column_config.LinkColumn("Elibrary", display_text="Библиометрия"),
         },
         hide_index=True,
@@ -103,6 +104,7 @@ def render_single_school_mode(
     df_lineage: pd.DataFrame,
     idx_lineage: Dict[str, Set[int]],
     classifier_labels: Optional[Dict[str, str]] = None,
+    df_articles: pd.DataFrame | None = None,
 ) -> None:
     """Отрисовывает режим анализа одной школы."""
     st.markdown("### Выбор научной школы")
@@ -111,7 +113,7 @@ def render_single_school_mode(
         st.warning("Не удалось найти школы или авторов, связанных со статьями.")
         return
 
-    signature = query_params_signature(["articles_mode", "aa_school", "aa_scope", "aa_threshold", "aa_show_all_blocks"])
+    signature = query_params_signature(["articles_mode", "aa_journals", "aa_school", "aa_scope", "aa_threshold", "aa_show_all_blocks"])
     if should_hydrate_query("aa_single_query_signature", signature):
         query_school = str(st.query_params.get("aa_school", "")).strip()
         st.session_state["aa_single_school"] = query_school if query_school in options else None
@@ -158,7 +160,8 @@ def render_single_school_mode(
     threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.session_state.get("aa_single_threshold", 3.0)), step=0.1, key="aa_single_threshold")
     show_all = st.checkbox("Показать все тематические блоки", value=bool(st.session_state.get("aa_single_show_all_blocks", False)), key="aa_single_show_all_blocks")
 
-    df_articles = load_articles_data()
+    if df_articles is None:
+        df_articles = load_articles_data()
     dataset = build_articles_dataset_for_school(selected, options_meta, df_lineage, idx_lineage, df_articles, scope)
     if dataset.empty:
         st.info("Для выбранной школы статьи не найдены.")
@@ -238,6 +241,7 @@ def render_single_school_mode(
         {
             "tab": "articles_comparison",
             "articles_mode": "single_school",
+            "aa_journals": st.session_state.get("aa_selected_journals", ["all"]),
             "aa_school": selected,
             "aa_scope": scope,
             "aa_threshold": float(threshold),
