@@ -157,7 +157,7 @@ def render_articles_analysis_tab(
     selected_journals = render_article_journal_selector(journal_options)
     df_articles_filtered = filter_articles_by_journals(df_articles_all, selected_journals)
     if df_articles_filtered is None or df_articles_filtered.empty:
-        st.warning("Для выбранных журналов нет статей с рассчитанными тематическими профилями.")
+        st.warning("Для выбранных журналов статьи не найдены.")
         return
 
     default_mode = st.session_state.get("aa_mode", "single_school")
