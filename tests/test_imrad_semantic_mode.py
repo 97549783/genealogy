@@ -134,6 +134,29 @@ def test_result_dedup_by_article_and_section_key() -> None:
     assert float(dedup.iloc[0]["similarity"]) == 0.9
 
 
+def test_target_excludes_same_logical_source_section_in_same_article() -> None:
+    article_id = "a1"
+    source_unit_id = "u1"
+    rows = pd.DataFrame([
+        {"unit_id": "u1", "article_id": "a1", "unit_level": "imrad_block", "imrad_block": "INTRODUCTION", "imrad_subblock": None},
+        {"unit_id": "u2", "article_id": "a1", "unit_level": "imrad_block", "imrad_block": "INTRODUCTION", "imrad_subblock": None},
+        {"unit_id": "u3", "article_id": "a2", "unit_level": "imrad_block", "imrad_block": "INTRODUCTION", "imrad_subblock": None},
+    ])
+    rows["section_key"] = rows.apply(section_identity_key, axis=1)
+    source_row = rows[rows["unit_id"] == source_unit_id].iloc[0]
+    source_section_key = str(source_row["section_key"])
+
+    target = rows.copy()
+    target = target[
+        ~(
+            (target["article_id"].astype(str) == str(article_id))
+            & (target["section_key"].astype(str) == source_section_key)
+        )
+    ]
+
+    assert set(target["unit_id"]) == {"u3"}
+
+
 def test_search_still_works() -> None:
     mat = np.array([[1,0],[0.8,0.2],[0,1]], dtype=np.float32)
     idx = pd.DataFrame({"unit_id": ["u1", "u2", "u3"], "matrix_row": [0, 1, 2], "is_weak": [0, 0, 1], "is_inferred": [0, 0, 0], "confidence": [0.9, 0.8, 0.1]})

@@ -149,11 +149,19 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         exclude_current = st.checkbox("Исключить текущую статью", value=False)
         top_n = st.slider("Количество похожих разделов", 1, 100, 20)
 
-        src_row = int(sources[sources["unit_id"].astype(str) == str(source_unit_id)].iloc[0]["matrix_row"])
+        source_row = sources[sources["unit_id"].astype(str) == str(source_unit_id)].iloc[0]
+        source_section_key = str(source_row["section_key"])
+        src_row = int(source_row["matrix_row"])
         target = idx_df.copy()
         target["section_key"] = target.apply(section_identity_key, axis=1)
         if target_key:
             target = target[target["section_key"] == target_key]
+        target = target[
+            ~(
+                (target["article_id"].astype(str) == str(article_id))
+                & (target["section_key"].astype(str) == source_section_key)
+            )
+        ]
         if exclude_current:
             target = target[target["article_id"].astype(str) != str(article_id)]
         target = target[target["unit_id"].astype(str) != str(source_unit_id)]
