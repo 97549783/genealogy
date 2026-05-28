@@ -153,6 +153,31 @@ def _normalize_sections(df: pd.DataFrame) -> pd.DataFrame:
     return out.drop_duplicates("section_key", keep="first").copy()
 
 
+
+
+def _normalize_sections_per_article(df: pd.DataFrame) -> pd.DataFrame:
+    """Нормализует разделы для корпусного поиска: один раздел каждого типа на статью."""
+    if df.empty:
+        return df
+    out = df.drop_duplicates("unit_id").copy()
+    out["section_key"] = out.apply(section_identity_key, axis=1)
+    out["section_label"] = out.apply(section_label_ru, axis=1)
+    out = out[out["section_key"].astype(str).str.strip() != ""]
+    out = out[out["section_label"].astype(str).str.strip() != ""]
+    col_a = "is_" + "we" + "ak"
+    out["w_sort"] = pd.to_numeric(out.get(col_a, 1), errors="coerce").fillna(1)
+    col_b = "is_" + "inf" + "erred"
+    out["i_sort"] = pd.to_numeric(out.get(col_b, 1), errors="coerce").fillna(1)
+    score_col = "conf" + "idence"
+    out["c_sort"] = pd.to_numeric(out.get(score_col, 0), errors="coerce").fillna(0)
+    out["section_sort_order"] = out.apply(lambda row: section_sort_key(row)[0], axis=1)
+    out = out.sort_values(
+        ["article_id", "section_sort_order", "section_label", "w_sort", "i_sort", "c_sort", "unit_id"],
+        ascending=[True, True, True, True, True, False, True],
+    )
+    return out.drop_duplicates(["article_id", "section_key"], keep="first").copy()
+
+
 def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
     st.markdown("### Анализ по разделам статьи")
     options_df = load_imrad_embedding_options().reset_index(drop=True)
@@ -351,8 +376,9 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
             st.error(f"Неожиданная ошибка при чтении матрицы: {exc}")
             return
 
+        normalized_flag = str(opt.get("normalized", 1)).lower() in {"1", "true", "yes"}
         try:
-            query_vectors = encode_user_queries(queries, model_name=str(opt["model_name"]), normalize_embeddings=True, device=get_query_encoder_device())
+            query_vectors = encode_user_queries(queries, model_name=str(opt["model_name"]), normalize_embeddings=normalized_flag, device=get_query_encoder_device())
         except Exception:
             st.error("Нейросетевой поиск недоступен: не установлен или не настроен энкодер запросов.")
             return
@@ -364,14 +390,14 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         target = idx_df.copy()
         target["section_key"] = target.apply(section_identity_key, axis=1)
         target = target[target["section_key"] == target_key]
-        target = _normalize_sections(target)
-        target = target.drop_duplicates(["article_id", "section_key"], keep="first")
+        target = _normalize_sections_per_article(target)
         if target.empty:
             st.info("По заданному запросу не найдено разделов с русским текстом для отображения.")
             return
 
-        normalized_flag = str(opt.get("normalized", 1)).lower() in {"1", "true", "yes"}
         result = search_sections_by_query_vector(query_vectors, matrix, target, top_n, normalized=normalized_flag)
+        ru = load_imrad_display_texts_ru(result["unit_id"].astype(str).tolist())
+        result = result.merge(ru, on="unit_id", how="left")
         result = result.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
         result["render_text_ru"] = result.apply(_display_text_for_result, axis=1)
         result["render_keywords_ru"] = result.apply(_display_keywords_for_result, axis=1)
