@@ -10,6 +10,9 @@ import pandas as pd
 import streamlit as st
 
 
+QUERY_CONTRIBUTION_TEMPERATURE = 0.1
+
+
 def is_query_encoder_enabled() -> bool:
     """Проверяет доступность энкодера пользовательских запросов."""
     return importlib.util.find_spec("sentence_transformers") is not None
@@ -92,7 +95,10 @@ def search_sections_by_query_vector(
         query_sims = target_vectors @ query_vectors.T
         for i in range(query_vectors.shape[0]):
             out[f"query_similarity_{i + 1}"] = query_sims[:, i]
-        weights = np.vstack([softmax_percentages(row) for row in query_sims])
+        weights = np.vstack([
+            softmax_percentages(row, temperature=QUERY_CONTRIBUTION_TEMPERATURE)
+            for row in query_sims
+        ])
         for i in range(query_vectors.shape[0]):
             out[f"query_weight_{i + 1}"] = weights[:, i]
 
