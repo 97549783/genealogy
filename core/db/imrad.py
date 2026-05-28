@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 import pandas as pd
 import streamlit as st
 
@@ -19,11 +17,6 @@ def _list_tables_cached(db_signature: tuple[str, float, int]) -> set[str]:
     return set(df["name"].astype(str).tolist())
 
 
-def _table_exists(name: str) -> bool:
-    """Проверяет наличие таблицы в базе."""
-    return name in _list_tables_cached(get_db_signature())
-
-
 def load_imrad_diagnostics() -> dict:
     """Собирает диагностику по IMRAD-таблицам и файлам матриц."""
     return _load_imrad_diagnostics_cached(get_db_signature())
@@ -31,36 +24,24 @@ def load_imrad_diagnostics() -> dict:
 
 @st.cache_data(show_spinner=False)
 def _load_imrad_diagnostics_cached(db_signature: tuple[str, float, int]) -> dict:
-    """Кэшируемая диагностика IMRAD-слоя."""
     _ = db_signature
     tables = _list_tables_cached(db_signature)
-    diagnostics: dict[str, object] = {
-        "таблицы": sorted(tables),
-        "счётчики": {},
-        "варианты": pd.DataFrame(),
-    }
+    diagnostics: dict[str, object] = {"счётчики": {}, "варианты": pd.DataFrame()}
     with get_sqlite_connection() as conn:
         for table in ["article_imrad_units", "article_imrad_unit_texts", "article_imrad_embeddings"]:
-            if table in tables:
-                value = pd.read_sql_query(f"SELECT COUNT(*) AS c FROM {table}", conn).iloc[0]["c"]
-                diagnostics["счётчики"][table] = int(value)
-            else:
-                diagnostics["счётчики"][table] = None
+            diagnostics["счётчики"][table] = int(pd.read_sql_query(f"SELECT COUNT(*) AS c FROM {table}", conn).iloc[0]["c"]) if table in tables else None
     diagnostics["варианты"] = load_imrad_embedding_options()
     return diagnostics
 
 
 def load_imrad_embedding_options() -> pd.DataFrame:
-    """Загружает доступные комбинации язык/роль/модель и пути матриц."""
     return _load_imrad_embedding_options_cached(get_db_signature())
 
 
 @st.cache_data(show_spinner=False)
 def _load_imrad_embedding_options_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
-    """Кэшируемая загрузка опций для семантического поиска."""
     _ = db_signature
-    needed = {"article_embedding_models", "article_imrad_embedding_files"}
-    if not needed.issubset(_list_tables_cached(db_signature)):
+    if not {"article_embedding_models", "article_imrad_embedding_files"}.issubset(_list_tables_cached(db_signature)):
         return pd.DataFrame()
     with get_sqlite_connection() as conn:
         return pd.read_sql_query(
@@ -77,13 +58,11 @@ def _load_imrad_embedding_options_cached(db_signature: tuple[str, float, int]) -
 
 
 def load_imrad_text_index(language: str, text_role: str, embedding_model_id: str | None = None, matrix_file_id: str | None = None) -> pd.DataFrame:
-    """Загружает индекс IMRAD-текстов, привязанный к строкам матрицы."""
     return _load_imrad_text_index_cached(get_db_signature(), language, text_role, embedding_model_id, matrix_file_id)
 
 
 @st.cache_data(show_spinner=False)
 def _load_imrad_text_index_cached(db_signature: tuple[str, float, int], language: str, text_role: str, embedding_model_id: str | None, matrix_file_id: str | None) -> pd.DataFrame:
-    """Кэшируемая загрузка индекса для поиска похожих зон."""
     _ = db_signature
     needed = {"article_imrad_units", "article_imrad_unit_texts", "article_imrad_embeddings", "article_imrad_embedding_files"}
     if not needed.issubset(_list_tables_cached(db_signature)):
@@ -96,7 +75,6 @@ def _load_imrad_text_index_cached(db_signature: tuple[str, float, int], language
     if matrix_file_id:
         filters.append("e.matrix_file_id = :matrix_file_id")
         params["matrix_file_id"] = matrix_file_id
-    where_sql = " AND ".join(filters)
     with get_sqlite_connection() as conn:
         return pd.read_sql_query(
             f"""
@@ -109,7 +87,7 @@ def _load_imrad_text_index_cached(db_signature: tuple[str, float, int], language
             JOIN article_imrad_units u ON u.unit_id = t.unit_id
             JOIN article_imrad_embeddings e ON e.text_id = t.text_id
             JOIN article_imrad_embedding_files f ON f.matrix_file_id = e.matrix_file_id
-            WHERE {where_sql}
+            WHERE {' AND '.join(filters)}
             """,
             conn,
             params=params,
@@ -117,57 +95,51 @@ def _load_imrad_text_index_cached(db_signature: tuple[str, float, int], language
 
 
 def load_article_imrad_units(article_id: str, language: str | None = None, text_role: str | None = None) -> pd.DataFrame:
-    """Загружает IMRAD-блоки и полезные поля для одной статьи."""
     return _load_article_imrad_units_cached(get_db_signature(), article_id, language, text_role)
 
 
 @st.cache_data(show_spinner=False)
 def _load_article_imrad_units_cached(db_signature: tuple[str, float, int], article_id: str, language: str | None, text_role: str | None) -> pd.DataFrame:
-    """Кэшируемая загрузка IMRAD-данных по статье."""
     _ = db_signature
-    if "article_imrad_units" not in _list_tables_cached(db_signature):
+    tables = _list_tables_cached(db_signature)
+    if "article_imrad_units" not in tables:
         return pd.DataFrame()
-    join_text = ""
-    join_payload = ""
-    if "article_imrad_unit_texts" in _list_tables_cached(db_signature):
-        join_text = "LEFT JOIN article_imrad_unit_texts t ON t.unit_id = u.unit_id"
-    if "article_imrad_unit_payloads" in _list_tables_cached(db_signature):
-        join_payload = "LEFT JOIN article_imrad_unit_payloads p ON p.unit_id = u.unit_id"
-    wh = ["u.article_id = :article_id"]
-    params: dict[str, object] = {"article_id": article_id}
-    if language:
-        wh.append("(t.language = :language OR t.language IS NULL)")
-        params["language"] = language
-    if text_role:
-        wh.append("(t.text_role = :text_role OR t.text_role IS NULL)")
-        params["text_role"] = text_role
+    text_join = ""
+    text_select = "NULL AS text_id, NULL AS language, NULL AS text_role, NULL AS text, NULL AS keywords_json"
+    if "article_imrad_unit_texts" in tables:
+        conds = ["t.unit_id = u.unit_id"]
+        if language:
+            conds.append("t.language = :language")
+        if text_role:
+            conds.append("t.text_role = :text_role")
+        text_join = f"LEFT JOIN article_imrad_unit_texts t ON {' AND '.join(conds)}"
+        text_select = "t.text_id, t.language, t.text_role, t.text, t.keywords_json"
+    payload_join = ""
+    payload_select = "NULL AS key_assertions_json, NULL AS extracted_json, NULL AS evidence_quotes_json, NULL AS keywords_ru_json, NULL AS keywords_en_json"
+    if "article_imrad_unit_payloads" in tables:
+        payload_join = "LEFT JOIN article_imrad_unit_payloads p ON p.unit_id = u.unit_id"
+        payload_select = "p.key_assertions_json, p.extracted_json, p.evidence_quotes_json, p.keywords_ru_json, p.keywords_en_json"
     with get_sqlite_connection() as conn:
-        try:
-            return pd.read_sql_query(
-                f"""
-                SELECT u.*, t.text_id, t.language, t.text_role, t.text, t.keywords_json,
-                       p.key_assertions_json, p.extracted_json, p.evidence_quotes_json, p.keywords_ru_json, p.keywords_en_json
-                FROM article_imrad_units u
-                {join_text}
-                {join_payload}
-                WHERE {' AND '.join(wh)}
-                ORDER BY u.imrad_block, u.imrad_subblock, u.unit_id
-                """,
-                conn,
-                params=params,
-            )
-        except (sqlite3.OperationalError, pd.errors.DatabaseError):
-            return pd.DataFrame()
+        return pd.read_sql_query(
+            f"""
+            SELECT u.*, {text_select}, {payload_select}
+            FROM article_imrad_units u
+            {text_join}
+            {payload_join}
+            WHERE u.article_id = :article_id
+            ORDER BY u.imrad_block, u.imrad_subblock, u.unit_id
+            """,
+            conn,
+            params={"article_id": article_id, "language": language, "text_role": text_role},
+        )
 
 
 def load_imrad_quotes(unit_ids: list[str]) -> pd.DataFrame:
-    """Загружает цитаты для списка unit_id."""
     return _load_imrad_quotes_cached(get_db_signature(), tuple(unit_ids))
 
 
 @st.cache_data(show_spinner=False)
 def _load_imrad_quotes_cached(db_signature: tuple[str, float, int], unit_ids: tuple[str, ...]) -> pd.DataFrame:
-    """Кэшируемая загрузка цитат IMRAD."""
     _ = db_signature
     if not unit_ids or "article_imrad_unit_quotes" not in _list_tables_cached(db_signature):
         return pd.DataFrame()

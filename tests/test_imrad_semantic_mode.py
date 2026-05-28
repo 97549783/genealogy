@@ -81,3 +81,16 @@ def test_tab_mode_and_lazy_import() -> None:
     import tabs.articles.semantic_imrad_mode as mod
     assert hasattr(mod, 'render_semantic_imrad_search_mode')
     assert 'sentence_transformers' not in importlib.sys.modules
+
+
+def test_load_article_units_without_optional_tables(monkeypatch, tmp_path: Path) -> None:
+    db = tmp_path / 'genealogy.db'
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE article_imrad_units (unit_id TEXT, article_id TEXT, unit_level TEXT, imrad_block TEXT, imrad_subblock TEXT, rhetorical_zone_type TEXT, confidence REAL, is_weak INTEGER, is_inferred INTEGER, source_zone_ids_json TEXT, source_file TEXT)")
+    conn.execute("INSERT INTO article_imrad_units VALUES ('u1','a1','unit','intro','gap','zone',0.7,0,0,'[]','src')")
+    conn.commit(); conn.close()
+    monkeypatch.setenv('SQLITE_DB_PATH', str(db))
+    from core.db.imrad import load_article_imrad_units
+    df = load_article_imrad_units('a1', language='en', text_role='compact_en')
+    assert not df.empty
+    assert df.iloc[0]['unit_id'] == 'u1'

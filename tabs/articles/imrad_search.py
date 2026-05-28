@@ -57,6 +57,7 @@ def search_similar_units(source_row: int, matrix: np.ndarray, index_df: pd.DataF
     """Ищет наиболее похожие зоны по скалярному произведению/косинусу."""
     if source_row < 0 or source_row >= len(matrix):
         raise IndexError("Индекс исходной строки матрицы вне диапазона")
+    _ = index_df
     source_vec = matrix[source_row]
     rows = target_df["matrix_row"].astype(int).to_numpy()
     if np.any(rows < 0) or np.any(rows >= len(matrix)):
