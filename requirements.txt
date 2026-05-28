@@ -8,3 +8,5 @@ scikit-learn
 openpyxl
 plotly
 rapidfuzz
+sentence-transformers
+torch
