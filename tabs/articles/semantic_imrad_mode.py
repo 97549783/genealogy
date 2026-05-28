@@ -93,14 +93,24 @@ def _display_keywords_for_result(row: pd.Series) -> str:
         return format_keywords_ru(row.get("Keywords", ""))
     return format_keywords_ru(row.get("display_keywords_ru", ""))
 
+
+def _reset_article_search(query_key: str) -> None:
+    """Очищает поле поиска статьи."""
+    st.session_state[query_key] = ""
+
+
 def _select_article(df_articles: pd.DataFrame, key_prefix: str) -> str | None:
     labels = {str(r.Article_id): format_article_label_ru(r) for _, r in df_articles.iterrows()}
     query_key = f"{key_prefix}_article_query"
     query = st.text_input("Поиск статьи", key=query_key)
-    if query.strip() and st.button("Сбросить поиск", key=f"{key_prefix}_reset_search"):
-        st.session_state[query_key] = ""
-        st.rerun()
-    ids = filter_articles_by_search_query(labels, query)
+    if query.strip():
+        st.button(
+            "Сбросить поиск",
+            key=f"{key_prefix}_reset_search",
+            on_click=_reset_article_search,
+            args=(query_key,),
+        )
+    ids = filter_articles_by_search_query(labels, st.session_state.get(query_key, ""))
     if not ids:
         st.info("Статьи по введённому фрагменту не найдены.")
         return None
@@ -251,13 +261,14 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
             return
         ru = load_imrad_display_texts_ru(result["unit_id"].astype(str).tolist())
         merged = result.merge(ru, on="unit_id", how="left")
-        merged = merged[merged["display_text_ru"].fillna("").astype(str).str.strip() != ""]
         merged["section_key"] = merged.apply(section_identity_key, axis=1)
         merged["section_label"] = merged.apply(section_label_ru, axis=1)
         merged = merged[merged["section_key"].astype(str).str.strip() != ""]
         merged = merged[merged["section_label"].astype(str).str.strip() != ""]
         merged = merged.sort_values("similarity", ascending=False).drop_duplicates(["article_id", "section_key"], keep="first")
         merged = merged.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
+        merged["render_text_ru"] = merged.apply(_display_text_for_result, axis=1)
+        merged = merged[merged["render_text_ru"].astype(str).str.strip() != ""]
 
         for _, r in merged.iterrows():
             with st.expander(f"#{int(r['rank'])} | {r.get('Title','')}"):
@@ -265,7 +276,7 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 st.write(f"**Год:** {_clean(r.get('Year',''))}")
                 st.write(f"**Журнал:** {_clean(r.get('Journal',''))}")
                 st.write(f"**{str(r['section_label'])}**")
-                text = _display_text_for_result(r)
+                text = _clean(r.get("render_text_ru", ""))
                 if text:
                     st.write(text)
                 kw = _display_keywords_for_result(r)
