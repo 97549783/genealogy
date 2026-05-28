@@ -109,14 +109,15 @@ def select_default_imrad_embedding_option(options_df: pd.DataFrame) -> pd.Series
     return work.iloc[0]
 
 
-def load_fully_vectorized_article_ids(language: str, text_role: str, embedding_model_id: str | None = None, matrix_file_id: str | None = None, excluded_blocks: set[str] | None = None) -> set[str]:
+def load_fully_vectorized_article_ids(language: str, text_role: str, embedding_model_id: str | None = None, matrix_file_id: str | None = None, excluded_blocks: set[str] | None = None, required_unit_levels: tuple[str, ...] = ("imrad_block",)) -> set[str]:
     """Возвращает идентификаторы статей, где все релевантные разделы векторизованы."""
     blocks = tuple(sorted(excluded_blocks or {"SUPPLEMENTARY_OR_TEXTUAL"}))
-    return _load_fully_vectorized_article_ids_cached(get_db_signature(), language, text_role, embedding_model_id, matrix_file_id, blocks)
+    levels = tuple(sorted(required_unit_levels))
+    return _load_fully_vectorized_article_ids_cached(get_db_signature(), language, text_role, embedding_model_id, matrix_file_id, blocks, levels)
 
 
 @st.cache_data(show_spinner=False)
-def _load_fully_vectorized_article_ids_cached(db_signature: tuple[str, float, int], language: str, text_role: str, embedding_model_id: str | None, matrix_file_id: str | None, excluded_blocks: tuple[str, ...]) -> set[str]:
+def _load_fully_vectorized_article_ids_cached(db_signature: tuple[str, float, int], language: str, text_role: str, embedding_model_id: str | None, matrix_file_id: str | None, excluded_blocks: tuple[str, ...], required_unit_levels: tuple[str, ...]) -> set[str]:
     _ = db_signature
     needed = {"article_imrad_units", "article_imrad_unit_texts", "article_imrad_embeddings", "article_imrad_embedding_files"}
     if not needed.issubset(_list_tables_cached(db_signature)):
@@ -127,6 +128,11 @@ def _load_fully_vectorized_article_ids_cached(db_signature: tuple[str, float, in
         placeholders = ",".join([f":ex{i}" for i in range(len(excluded_blocks))])
         exclude_sql = f"AND COALESCE(u.imrad_block, '') NOT IN ({placeholders})"
         params.update({f"ex{i}": block for i, block in enumerate(excluded_blocks)})
+    levels_sql = ""
+    if required_unit_levels:
+        level_placeholders = ",".join([f":lvl{i}" for i in range(len(required_unit_levels))])
+        levels_sql = f"AND COALESCE(u.unit_level, '') IN ({level_placeholders})"
+        params.update({f"lvl{i}": level for i, level in enumerate(required_unit_levels)})
     model_sql = ""
     if embedding_model_id:
         model_sql = "AND e.embedding_model_id = :embedding_model_id"
@@ -141,7 +147,7 @@ def _load_fully_vectorized_article_ids_cached(db_signature: tuple[str, float, in
             WITH eligible AS (
                 SELECT u.article_id, COUNT(DISTINCT u.unit_id) AS eligible_count
                 FROM article_imrad_units u
-                WHERE COALESCE(u.imrad_block, '') != '' {exclude_sql}
+                WHERE COALESCE(u.imrad_block, '') != '' {exclude_sql} {levels_sql}
                 GROUP BY u.article_id
             ),
             embedded AS (
@@ -150,7 +156,7 @@ def _load_fully_vectorized_article_ids_cached(db_signature: tuple[str, float, in
                 JOIN article_imrad_unit_texts t ON t.unit_id = u.unit_id
                 JOIN article_imrad_embeddings e ON e.text_id = t.text_id
                 JOIN article_imrad_embedding_files f ON f.matrix_file_id = e.matrix_file_id
-                WHERE t.language = :language AND t.text_role = :text_role {exclude_sql} {model_sql} {matrix_sql}
+                WHERE t.language = :language AND t.text_role = :text_role {exclude_sql} {levels_sql} {model_sql} {matrix_sql}
                 GROUP BY u.article_id
             )
             SELECT el.article_id

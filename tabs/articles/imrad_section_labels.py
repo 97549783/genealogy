@@ -89,17 +89,17 @@ def format_keywords_ru(value: object) -> str:
     return f"{text}." if text else ""
 
 
-def _map_label(value: object, mapping: dict[str, str]) -> str:
+def _map_label(value: object, mapping: dict[str, str], fallback: str) -> str:
     if is_empty_value(value):
         return ""
     raw = str(value).strip()
-    return mapping.get(raw) or mapping.get(raw.lower()) or mapping.get(raw.upper()) or raw.replace("_", " ").title()
+    return mapping.get(raw) or mapping.get(raw.lower()) or mapping.get(raw.upper()) or fallback
 
 
 def section_label_ru(row: pd.Series) -> str:
     """Возвращает русский заголовок раздела/подраздела."""
-    subblock = _map_label(row.get("imrad_subblock"), IMRAD_SUBBLOCK_LABELS_RU)
-    block = _map_label(row.get("imrad_block"), IMRAD_BLOCK_LABELS_RU)
+    subblock = _map_label(row.get("imrad_subblock"), IMRAD_SUBBLOCK_LABELS_RU, "Другой подраздел")
+    block = _map_label(row.get("imrad_block"), IMRAD_BLOCK_LABELS_RU, "Другой раздел")
     if subblock:
         return f"Раздел: {block} / подраздел: {subblock}" if block else f"Подраздел: {subblock}"
     return f"Раздел: {block}" if block else "Раздел"

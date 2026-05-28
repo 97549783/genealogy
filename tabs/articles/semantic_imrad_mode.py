@@ -87,7 +87,26 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         if idx_df.empty:
             st.warning("Нет доступных данных для поиска похожих разделов.")
             return
-        matrix = load_embedding_matrix(resolve_matrix_path(str(opt.get("file_path") or "")))
+        allowed_article_ids = set(df_articles["Article_id"].astype(str))
+        idx_df = idx_df[idx_df["article_id"].astype(str).isin(allowed_article_ids)].copy()
+        if idx_df.empty:
+            st.warning("Нет доступных данных для поиска похожих разделов.")
+            return
+        matrix_file_path = str(opt.get("file_path") or "").strip()
+        if not matrix_file_path:
+            st.error("У выбранного слоя эмбеддингов отсутствует путь к файлу матрицы.")
+            return
+        try:
+            matrix = load_embedding_matrix(resolve_matrix_path(matrix_file_path))
+        except FileNotFoundError as exc:
+            st.error(str(exc))
+            return
+        except (OSError, ValueError) as exc:
+            st.error(f"Не удалось загрузить файл матрицы: {exc}")
+            return
+        except Exception as exc:
+            st.error(f"Неожиданная ошибка при чтении матрицы: {exc}")
+            return
 
         sources = idx_df[idx_df["article_id"].astype(str) == str(article_id)].copy()
         source_display = load_imrad_display_texts_ru(sources["unit_id"].astype(str).tolist())
@@ -119,14 +138,18 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         if target.empty:
             st.warning("После применения фильтров целевые разделы не найдены.")
             return
-        result = search_similar_units(src_row, matrix, idx_df, target, top_n)
+        try:
+            result = search_similar_units(src_row, matrix, idx_df, target, top_n)
+        except IndexError as exc:
+            st.error(f"Ошибка индексов матрицы: {exc}")
+            return
         ru = load_imrad_display_texts_ru(result["unit_id"].astype(str).tolist())
         merged = result.merge(ru, on="unit_id", how="left")
         merged = merged[merged["display_text_ru"].fillna("").astype(str).str.strip() != ""]
         merged = merged.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
 
         for _, r in merged.iterrows():
-            with st.expander(f"#{int(r['rank'])} | {r.get('Title','')} | сходство={float(r.get('similarity',0)):.4f}"):
+            with st.expander(f"#{int(r['rank'])} | {r.get('Title','')}"):
                 st.write(f"**Авторы:** {_clean(r.get('Authors',''))}")
                 st.write(f"**Год:** {_clean(r.get('Year',''))}")
                 st.write(f"**Журнал:** {_clean(r.get('Journal',''))}")
