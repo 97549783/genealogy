@@ -29,6 +29,8 @@ from .imrad_section_labels import format_article_label_ru, format_keywords_ru, s
 
 RUSSIAN_VOWELS = "аеёиоуыэюя"
 MIN_STEM_LENGTH = 3
+SEARCH_PARAMS_KEY = "imrad_neural_submitted_params"
+SEARCH_RUN_KEY = "imrad_neural_search_requested"
 
 
 def normalize_article_search_text(value: object) -> str:
@@ -176,6 +178,23 @@ def _normalize_sections_per_article(df: pd.DataFrame) -> pd.DataFrame:
         ascending=[True, True, True, True, True, False, True],
     )
     return out.drop_duplicates(["article_id", "section_key"], keep="first").copy()
+
+
+def cosine_distance_from_similarity(value: object) -> float:
+    """Возвращает косинусное расстояние по косинусному сходству."""
+    try:
+        return 1.0 - float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _neural_search_current_params(target_key: str, queries: list[str], top_n: int) -> dict[str, object]:
+    """Формирует параметры нейросетевого поиска для сохранения после нажатия кнопки."""
+    return {
+        "target_key": target_key,
+        "queries": queries,
+        "top_n": int(top_n),
+    }
 
 
 def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
@@ -336,6 +355,11 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         count = max(1, min(5, int(st.session_state[query_count_key])))
         st.session_state[query_count_key] = count
 
+        target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x], key="imrad_query_target")
+        st.markdown("Введите ключевые слова, характеризующие Ваш запрос")
+        st.caption("Можно вводить запросы на русском языке. Поиск выполняется смысловым сопоставлением, а не только по точному совпадению слов.")
+        query_values = [st.text_input(f"Запрос {i + 1}", key=f"imrad_neural_query_{i}") for i in range(count)]
+
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Добавить запрос", key="imrad_add_query", disabled=count >= 5):
@@ -346,19 +370,25 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 st.session_state[query_count_key] = max(1, count - 1)
                 st.rerun()
 
-        with st.form("imrad_neural_search_form"):
-            target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x], key="imrad_query_target")
-            st.markdown("Введите ключевые слова, характеризующие Ваш запрос")
-            st.caption("Можно вводить запросы на русском языке. Поиск выполняется смысловым сопоставлением, а не только по точному совпадению слов.")
-            query_values = [st.text_input(f"Запрос {i + 1}", key=f"imrad_neural_query_{i}") for i in range(count)]
-            top_n = st.slider("Количество найденных статей", 1, 100, 20)
-            submitted = st.form_submit_button("Найти")
+        top_n = st.slider("Максимальное количество статей в выдаче", 1, 100, 20)
+        queries = collect_non_empty_queries(query_values)
+        current_params = _neural_search_current_params(target_key, queries, top_n)
+        if st.button("Найти", key="imrad_neural_search_submit", type="primary"):
+            st.session_state[SEARCH_PARAMS_KEY] = current_params
+            st.session_state[SEARCH_RUN_KEY] = True
+        st.caption("Поиск может занять несколько секунд.")
 
-        if not submitted:
+        submitted_params = st.session_state.get(SEARCH_PARAMS_KEY)
+        if not st.session_state.get(SEARCH_RUN_KEY) or not submitted_params:
             st.info("Введите запросы и нажмите «Найти».")
             return
+        if current_params != submitted_params:
+            st.info("Параметры поиска изменены. Нажмите «Найти», чтобы обновить выдачу.")
+            return
 
-        queries = collect_non_empty_queries(query_values)
+        target_key = str(submitted_params["target_key"])
+        queries = list(submitted_params["queries"])
+        top_n = int(submitted_params["top_n"])
         if not queries:
             st.info("Введите хотя бы один запрос.")
             return
@@ -419,6 +449,7 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 st.write(f"**Год:** {_clean(r.get('Year',''))}")
                 st.write(f"**Журнал:** {_clean(r.get('Journal',''))}")
                 st.write(f"**Раздел:** {str(r.get('section_label',''))}")
+                st.write(f"**Косинусное расстояние:** {cosine_distance_from_similarity(r.get('similarity')):.3f}")
                 st.write(_clean(r.get("render_text_ru", "")))
                 kw = _clean(r.get("render_keywords_ru", ""))
                 if kw:
