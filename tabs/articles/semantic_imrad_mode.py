@@ -72,10 +72,21 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         if idx_df.empty:
             st.warning("Индекс IMRAD для выбранной опции пуст.")
             return
+        matrix_file_path = str(opt.get("file_path") or "").strip()
+        if not matrix_file_path:
+            st.error("У выбранного слоя эмбеддингов отсутствует путь к файлу матрицы.")
+            return
         try:
-            matrix = load_embedding_matrix(resolve_matrix_path(str(opt.get("file_path") or "")))
+            matrix = load_embedding_matrix(resolve_matrix_path(matrix_file_path))
         except FileNotFoundError as exc:
-            st.error(str(exc)); return
+            st.error(str(exc))
+            return
+        except (OSError, ValueError) as exc:
+            st.error(f"Не удалось загрузить файл матрицы: {exc}")
+            return
+        except Exception as exc:
+            st.error(f"Неожиданная ошибка при чтении матрицы: {exc}")
+            return
         article_labels = {str(r.Article_id): _label_article(r) for _, r in df_articles.iterrows()}
         source_article_id = st.selectbox("Исходная статья", options=list(article_labels.keys()), format_func=lambda x: article_labels[x])
         sources = idx_df[idx_df["article_id"].astype(str) == str(source_article_id)].copy()
@@ -100,7 +111,11 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         target = target[target["unit_id"].astype(str) != str(source_unit_id)]
         if target.empty:
             st.warning("После применения фильтров целевые зоны не найдены."); return
-        result = search_similar_units(src_row, matrix, idx_df, target, top_n)
+        try:
+            result = search_similar_units(src_row, matrix, idx_df, target, top_n)
+        except IndexError as exc:
+            st.error(f"Ошибка индексов матрицы: {exc}")
+            return
         merged = result.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
         table = merged[["rank","similarity","Title","Authors","Year","Journal","unit_level","imrad_block","imrad_subblock","rhetorical_zone_type","text","keywords_json","confidence","is_weak","is_inferred","Article_URL","Article_PDF"]].rename(columns={"rank":"Ранг","similarity":"Сходство","Title":"Название статьи","Authors":"Авторы","Year":"Год","Journal":"Журнал","unit_level":"Уровень единицы","imrad_block":"Блок IMRAD","imrad_subblock":"Подблок","rhetorical_zone_type":"Риторическая зона","text":"Текст","keywords_json":"Ключевые слова","confidence":"Уверенность","is_weak":"Слабая зона","is_inferred":"Выведенная зона","Article_URL":"Ссылка на статью","Article_PDF":"Ссылка на PDF"})
         st.dataframe(table, use_container_width=True)
