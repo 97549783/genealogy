@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from core.db.imrad import (
     load_fully_vectorized_article_ids,
@@ -18,6 +19,7 @@ from tabs.articles.semantic_imrad_mode import (
     _display_text_for_result,
     _normalize_sections,
     article_label_matches_query,
+    cosine_distance_from_similarity,
     filter_articles_by_search_query,
     make_flexible_search_token,
 )
@@ -253,21 +255,45 @@ def test_article_search_does_not_overstem_short_tokens() -> None:
     assert filter_articles_by_search_query(labels, "") == ["1", "2"]
 
 
-def test_neural_search_uses_submit_button() -> None:
+def test_neural_search_requires_primary_button_and_no_form() -> None:
     import tabs.articles.semantic_imrad_mode as mod
 
     source = Path(mod.__file__).read_text(encoding="utf-8")
-    assert 'form_submit_button("Найти")' in source
+    assert 'st.form("imrad_neural_search_form")' not in source
+    assert "form_submit_button" not in source
+    assert 'st.button("Найти", key="imrad_neural_search_submit", type="primary")' in source
+    assert "Максимальное количество статей в выдаче" in source
+    assert "Количество найденных статей" not in source
+    assert "Косинусное расстояние" in source
+
+
+def test_neural_search_controls_order_in_source() -> None:
+    import tabs.articles.semantic_imrad_mode as mod
+
+    source = Path(mod.__file__).read_text(encoding="utf-8")
+    query_input_pos = source.find('st.text_input(f"Запрос {i + 1}"')
+    add_pos = source.find('st.button("Добавить запрос"')
+    slider_pos = source.find('st.slider("Максимальное количество статей в выдаче"')
+    assert query_input_pos != -1
+    assert add_pos != -1
+    assert slider_pos != -1
+    assert query_input_pos < add_pos < slider_pos
+
+
+def test_cosine_distance_from_similarity() -> None:
+    assert cosine_distance_from_similarity(0.8) == pytest.approx(0.2)
 
 
 def test_heavy_neural_operations_gated_by_submit() -> None:
     import tabs.articles.semantic_imrad_mode as mod
 
     source = Path(mod.__file__).read_text(encoding="utf-8")
-    guard_pos = source.find('if not submitted:\n            st.info("Введите запросы и нажмите «Найти».")\n            return')
+    guard_pos = source.find("if not st.session_state.get(SEARCH_RUN_KEY) or not submitted_params:")
     encode_pos = source.find("encode_user_queries(")
     search_pos = source.find("search_sections_by_query_vector(")
+    load_encoder_pos = source.find("is_query_encoder_enabled(")
 
     assert guard_pos != -1
     assert encode_pos > guard_pos
     assert search_pos > guard_pos
+    assert load_encoder_pos > guard_pos
