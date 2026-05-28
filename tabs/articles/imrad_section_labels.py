@@ -107,6 +107,8 @@ def section_label_ru(row: pd.Series) -> str:
 
 def section_filter_key(row: pd.Series) -> str:
     """Формирует ключ фильтра раздела для внутренних сопоставлений."""
-    block = str(row.get("imrad_block", "") or "").strip()
-    sub = str(row.get("imrad_subblock", "") or "").strip()
+    block_value = row.get("imrad_block")
+    subblock_value = row.get("imrad_subblock")
+    block = "" if is_empty_value(block_value) else str(block_value).strip()
+    sub = "" if is_empty_value(subblock_value) else str(subblock_value).strip()
     return f"{block}::{sub}"

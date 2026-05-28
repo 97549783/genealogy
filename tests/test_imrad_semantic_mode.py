@@ -12,7 +12,7 @@ from core.db.imrad import (
     load_imrad_display_texts_ru,
     select_default_imrad_embedding_option,
 )
-from tabs.articles.imrad_section_labels import format_article_label_ru, format_keywords_ru, section_label_ru
+from tabs.articles.imrad_section_labels import format_article_label_ru, format_keywords_ru, section_filter_key, section_label_ru
 from tabs.articles.imrad_search import filter_imrad_index, resolve_matrix_path, search_similar_units
 from tabs.articles.tab import ARTICLE_MODE_LABELS
 
@@ -96,6 +96,13 @@ def test_index_restriction_by_allowed_article_ids() -> None:
     allowed_article_ids = {"a1", "a3"}
     filtered = idx[idx["article_id"].astype(str).isin(allowed_article_ids)].copy()
     assert set(filtered["article_id"]) == {"a1", "a3"}
+
+
+def test_section_filter_key_handles_empty_subblock() -> None:
+    row_none = pd.Series({"imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": None})
+    assert section_filter_key(row_none) == "METHOD_OR_APPROACH::"
+    row_nan = pd.Series({"imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": float("nan")})
+    assert section_filter_key(row_nan) == "METHOD_OR_APPROACH::"
 
 
 def test_search_still_works() -> None:
