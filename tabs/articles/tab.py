@@ -23,6 +23,7 @@ from .comparison_mode import (
 )
 from .single_school_mode import render_single_school_mode
 from .similar_schools_mode import render_similar_schools_mode
+from .semantic_imrad_mode import render_semantic_imrad_search_mode
 from .data import ALL_JOURNALS_KEY, filter_articles_by_journals, normalize_journal_key
 from .query_params import query_params_signature, should_hydrate_query
 
@@ -30,6 +31,7 @@ ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
+    "semantic_imrad_search": "Семантический поиск по зонам",
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
@@ -185,7 +187,7 @@ def render_articles_analysis_tab(
             classifier_labels=classifier_labels,
             df_articles=df_articles_filtered,
         )
-    else:
+    elif mode == "comparison":
         _sync_comparison_mode_for_tests()
         _comparison_mode.render_articles_comparison_mode(
             df_lineage=df_lineage,
@@ -194,6 +196,10 @@ def render_articles_analysis_tab(
             classifier_labels=classifier_labels,
             df_articles=df_articles_filtered,
         )
+    elif mode == "semantic_imrad_search":
+        render_semantic_imrad_search_mode(df_articles=df_articles_filtered)
+    else:
+        st.warning("Неизвестный режим анализа статей.")
 
 
 def _sync_comparison_mode_for_tests() -> None:
