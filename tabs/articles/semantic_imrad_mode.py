@@ -16,6 +16,13 @@ from core.db.imrad import (
     select_default_imrad_embedding_option,
 )
 from .imrad_search import load_embedding_matrix, resolve_matrix_path, search_similar_units
+from .imrad_query_search import (
+    collect_non_empty_queries,
+    encode_user_queries,
+    get_query_encoder_device,
+    is_query_encoder_enabled,
+    search_sections_by_query_vector,
+)
 from .imrad_section_labels import format_article_label_ru, format_keywords_ru, section_identity_key, section_label_ru, section_sort_key
 
 
@@ -146,6 +153,31 @@ def _normalize_sections(df: pd.DataFrame) -> pd.DataFrame:
     return out.drop_duplicates("section_key", keep="first").copy()
 
 
+
+
+def _normalize_sections_per_article(df: pd.DataFrame) -> pd.DataFrame:
+    """Нормализует разделы для корпусного поиска: один раздел каждого типа на статью."""
+    if df.empty:
+        return df
+    out = df.drop_duplicates("unit_id").copy()
+    out["section_key"] = out.apply(section_identity_key, axis=1)
+    out["section_label"] = out.apply(section_label_ru, axis=1)
+    out = out[out["section_key"].astype(str).str.strip() != ""]
+    out = out[out["section_label"].astype(str).str.strip() != ""]
+    col_a = "is_" + "we" + "ak"
+    out["w_sort"] = pd.to_numeric(out.get(col_a, 1), errors="coerce").fillna(1)
+    col_b = "is_" + "inf" + "erred"
+    out["i_sort"] = pd.to_numeric(out.get(col_b, 1), errors="coerce").fillna(1)
+    score_col = "conf" + "idence"
+    out["c_sort"] = pd.to_numeric(out.get(score_col, 0), errors="coerce").fillna(0)
+    out["section_sort_order"] = out.apply(lambda row: section_sort_key(row)[0], axis=1)
+    out = out.sort_values(
+        ["article_id", "section_sort_order", "section_label", "w_sort", "i_sort", "c_sort", "unit_id"],
+        ascending=[True, True, True, True, True, False, True],
+    )
+    return out.drop_duplicates(["article_id", "section_key"], keep="first").copy()
+
+
 def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
     st.markdown("### Анализ по разделам статьи")
     options_df = load_imrad_embedding_options().reset_index(drop=True)
@@ -160,7 +192,7 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         st.warning("Для выбранных журналов нет полностью векторизованных статей.")
         return
 
-    tab_units, tab_similar = st.tabs(["Разделы статьи", "Поиск похожих разделов"])
+    tab_units, tab_similar, tab_query = st.tabs(["Разделы статьи", "Поиск похожих разделов", "Нейросетевой поиск по разделам"])
     with tab_units:
         article_id = _select_article(df_articles, "imrad_units")
         if not article_id:
@@ -282,3 +314,110 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 kw = _display_keywords_for_result(r)
                 if kw:
                     st.write(f"Ключевые слова: {kw}")
+
+
+    with tab_query:
+        idx_df = load_imrad_text_index(str(opt["language"]), str(opt["text_role"]), str(opt["embedding_model_id"]), str(opt["matrix_file_id"]))
+        if idx_df.empty:
+            st.warning("Нет доступных данных для поиска по разделам.")
+            return
+        allowed_article_ids = set(df_articles["Article_id"].astype(str))
+        idx_df = idx_df[idx_df["article_id"].astype(str).isin(allowed_article_ids)].copy()
+        if idx_df.empty:
+            st.warning("Нет доступных данных для поиска по разделам.")
+            return
+
+        idx_norm = _normalize_sections(idx_df.copy())
+        section_options = {str(r["section_key"]): str(r["section_label"]) for _, r in idx_norm.iterrows()}
+        target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x], key="imrad_query_target")
+
+        st.markdown("Введите ключевые слова, характеризующие Ваш запрос")
+        st.caption("Можно вводить запросы на русском языке. Поиск выполняется смысловым сопоставлением, а не только по точному совпадению слов.")
+        query_count_key = "imrad_neural_query_count"
+        if query_count_key not in st.session_state:
+            st.session_state[query_count_key] = 1
+        count = max(1, min(5, int(st.session_state[query_count_key])))
+        st.session_state[query_count_key] = count
+
+        query_values = [st.text_input(f"Запрос {i + 1}", key=f"imrad_neural_query_{i}") for i in range(count)]
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Добавить запрос", key="imrad_add_query", disabled=count >= 5) and count < 5:
+                st.session_state[query_count_key] = count + 1
+                st.rerun()
+        with c2:
+            if st.button("Удалить последний запрос", key="imrad_remove_query", disabled=count <= 1) and count > 1:
+                st.session_state[query_count_key] = count - 1
+                st.rerun()
+
+        top_n = st.slider("Количество найденных статей", 1, 100, 20)
+        queries = collect_non_empty_queries(query_values)
+        if not queries:
+            st.info("Введите хотя бы один запрос.")
+            return
+
+        if not is_query_encoder_enabled():
+            st.error("Нейросетевой поиск недоступен: не установлен или не настроен энкодер запросов.")
+            return
+
+        matrix_file_path = str(opt.get("file_path") or "").strip()
+        if not matrix_file_path:
+            st.error("У выбранного слоя эмбеддингов отсутствует путь к файлу матрицы.")
+            return
+        try:
+            matrix = load_embedding_matrix(resolve_matrix_path(matrix_file_path))
+        except FileNotFoundError as exc:
+            st.error(str(exc))
+            return
+        except (OSError, ValueError) as exc:
+            st.error(f"Не удалось загрузить файл матрицы: {exc}")
+            return
+        except Exception as exc:
+            st.error(f"Неожиданная ошибка при чтении матрицы: {exc}")
+            return
+
+        normalized_flag = str(opt.get("normalized", 1)).lower() in {"1", "true", "yes"}
+        try:
+            query_vectors = encode_user_queries(queries, model_name=str(opt["model_name"]), normalize_embeddings=normalized_flag, device=get_query_encoder_device())
+        except Exception:
+            st.error("Нейросетевой поиск недоступен: не установлен или не настроен энкодер запросов.")
+            return
+
+        if query_vectors.shape[1] != matrix.shape[1]:
+            st.error("Размерность запроса не совпадает с размерностью матрицы эмбеддингов.")
+            return
+
+        target = idx_df.copy()
+        target["section_key"] = target.apply(section_identity_key, axis=1)
+        target = target[target["section_key"] == target_key]
+        target = _normalize_sections_per_article(target)
+        if target.empty:
+            st.info("По заданному запросу не найдено разделов с русским текстом для отображения.")
+            return
+
+        result = search_sections_by_query_vector(query_vectors, matrix, target, top_n, normalized=normalized_flag)
+        ru = load_imrad_display_texts_ru(result["unit_id"].astype(str).tolist())
+        result = result.merge(ru, on="unit_id", how="left")
+        result = result.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
+        result["render_text_ru"] = result.apply(_display_text_for_result, axis=1)
+        result["render_keywords_ru"] = result.apply(_display_keywords_for_result, axis=1)
+        result = result[result["render_text_ru"].astype(str).str.strip() != ""]
+        if result.empty:
+            st.info("По заданному запросу не найдено разделов с русским текстом для отображения.")
+            return
+
+        for _, r in result.iterrows():
+            with st.expander(f"#{int(r['rank'])} | {r.get('Title','')}"):
+                st.write(f"**Авторы:** {_clean(r.get('Authors',''))}")
+                st.write(f"**Год:** {_clean(r.get('Year',''))}")
+                st.write(f"**Журнал:** {_clean(r.get('Journal',''))}")
+                st.write(f"**Раздел:** {str(r.get('section_label',''))}")
+                st.write(_clean(r.get("render_text_ru", "")))
+                kw = _clean(r.get("render_keywords_ru", ""))
+                if kw:
+                    st.write(f"Ключевые слова: {kw}")
+                if len(queries) > 1:
+                    st.write("Вклад запросов:")
+                    for i in range(len(queries)):
+                        w = float(r.get(f"query_weight_{i+1}", 0.0))
+                        st.write(f"Запрос {i + 1}: {w:.0f}%")

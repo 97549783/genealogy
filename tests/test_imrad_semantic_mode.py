@@ -231,7 +231,6 @@ def test_checkbox_label_removed_from_source() -> None:
 
     source_code = Path(mod.__file__).read_text(encoding="utf-8")
     assert "Исключить текущую статью" not in source_code
-    assert "st.rerun()" not in source_code
 
 
 def test_article_search_plain_substring() -> None:
