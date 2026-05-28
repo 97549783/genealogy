@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 import streamlit as st
 
@@ -17,13 +19,98 @@ from .imrad_search import load_embedding_matrix, resolve_matrix_path, search_sim
 from .imrad_section_labels import format_article_label_ru, format_keywords_ru, section_identity_key, section_label_ru, section_sort_key
 
 
+
+RUSSIAN_VOWELS = "аеёиоуыэюя"
+MIN_STEM_LENGTH = 3
+
+
+def normalize_article_search_text(value: object) -> str:
+    """Нормализует текст для поиска статьи."""
+    text = str(value or "").casefold().replace("ё", "е")
+    text = re.sub(r"[^\w\s]+", " ", text, flags=re.UNICODE)
+    return " ".join(text.split())
+
+
+def _is_cyrillic_token(token: str) -> bool:
+    return bool(re.search(r"[а-я]", token))
+
+
+def make_flexible_search_token(token: str) -> str:
+    """Убирает мягкий знак и до двух конечных гласных для гибкого поиска."""
+    stem = normalize_article_search_text(token)
+    if not stem:
+        return ""
+    if not _is_cyrillic_token(stem):
+        return stem
+    if stem.endswith("ь") and len(stem) > MIN_STEM_LENGTH:
+        stem = stem[:-1]
+    removed = 0
+    while len(stem) > MIN_STEM_LENGTH and removed < 2 and stem[-1] in RUSSIAN_VOWELS:
+        stem = stem[:-1]
+        removed += 1
+    return stem
+
+
+def article_label_matches_query(label: str, query: str) -> bool:
+    """Проверяет, подходит ли метка статьи под пользовательский запрос."""
+    normalized_label = normalize_article_search_text(label)
+    normalized_query = normalize_article_search_text(query)
+    if not normalized_query:
+        return True
+    if normalized_query in normalized_label:
+        return True
+
+    query_tokens = [make_flexible_search_token(t) for t in normalized_query.split() if t.strip()]
+    label_tokens = [t for t in normalized_label.split() if t.strip()]
+    if not query_tokens or not label_tokens:
+        return False
+
+    for q_token in query_tokens:
+        if not q_token:
+            continue
+        if not any(token.startswith(q_token) for token in label_tokens):
+            return False
+    return True
+
+
+def filter_articles_by_search_query(labels: dict[str, str], query: str) -> list[str]:
+    """Возвращает идентификаторы статей, подходящих под запрос."""
+    if not query.strip():
+        return list(labels.keys())
+    return [aid for aid, label in labels.items() if article_label_matches_query(label, query)]
+
+
+def _display_text_for_result(row: pd.Series) -> str:
+    """Возвращает пользовательский русский текст для карточки результата."""
+    if str(row.get("section_key", "")) == "article":
+        return _clean(row.get("Abstract", ""))
+    return _clean(row.get("display_text_ru", ""))
+
+
+def _display_keywords_for_result(row: pd.Series) -> str:
+    """Возвращает пользовательские ключевые слова для карточки результата."""
+    if str(row.get("section_key", "")) == "article":
+        return format_keywords_ru(row.get("Keywords", ""))
+    return format_keywords_ru(row.get("display_keywords_ru", ""))
+
+
+def _reset_article_search(query_key: str) -> None:
+    """Очищает поле поиска статьи."""
+    st.session_state[query_key] = ""
+
+
 def _select_article(df_articles: pd.DataFrame, key_prefix: str) -> str | None:
     labels = {str(r.Article_id): format_article_label_ru(r) for _, r in df_articles.iterrows()}
-    query = st.text_input("Поиск статьи", key=f"{key_prefix}_article_query")
-    ids = list(labels.keys())
+    query_key = f"{key_prefix}_article_query"
+    query = st.text_input("Поиск статьи", key=query_key)
     if query.strip():
-        q = query.casefold()
-        ids = [aid for aid in ids if q in labels[aid].casefold()]
+        st.button(
+            "Сбросить поиск",
+            key=f"{key_prefix}_reset_search",
+            on_click=_reset_article_search,
+            args=(query_key,),
+        )
+    ids = filter_articles_by_search_query(labels, st.session_state.get(query_key, ""))
     if not ids:
         st.info("Статьи по введённому фрагменту не найдены.")
         return None
@@ -89,6 +176,7 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         units = units.merge(display, on="unit_id", how="left") if not units.empty else units
         units = units[units["display_text_ru"].fillna("").astype(str).str.strip() != ""]
         units = _normalize_sections(units)
+        units = units[units["section_key"].astype(str) != "article"].copy()
         if units.empty:
             st.info("Для выбранной статьи нет векторизованных разделов.")
             return
@@ -146,7 +234,6 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         all_sections["key"] = all_sections["section_key"]
         section_options = {"": "Любой раздел", **{str(r["key"]): str(r["name"]) for _, r in all_sections.iterrows() if str(r["name"]).strip()}}
         target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x])
-        exclude_current = st.checkbox("Исключить текущую статью", value=False)
         top_n = st.slider("Количество похожих разделов", 1, 100, 20)
 
         source_row = sources[sources["unit_id"].astype(str) == str(source_unit_id)].iloc[0]
@@ -162,8 +249,7 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 & (target["section_key"].astype(str) == source_section_key)
             )
         ]
-        if exclude_current:
-            target = target[target["article_id"].astype(str) != str(article_id)]
+        target = target[target["article_id"].astype(str) != str(article_id)]
         target = target[target["unit_id"].astype(str) != str(source_unit_id)]
         if target.empty:
             st.warning("После применения фильтров целевые разделы не найдены.")
@@ -175,13 +261,14 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
             return
         ru = load_imrad_display_texts_ru(result["unit_id"].astype(str).tolist())
         merged = result.merge(ru, on="unit_id", how="left")
-        merged = merged[merged["display_text_ru"].fillna("").astype(str).str.strip() != ""]
         merged["section_key"] = merged.apply(section_identity_key, axis=1)
         merged["section_label"] = merged.apply(section_label_ru, axis=1)
         merged = merged[merged["section_key"].astype(str).str.strip() != ""]
         merged = merged[merged["section_label"].astype(str).str.strip() != ""]
         merged = merged.sort_values("similarity", ascending=False).drop_duplicates(["article_id", "section_key"], keep="first")
         merged = merged.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
+        merged["render_text_ru"] = merged.apply(_display_text_for_result, axis=1)
+        merged = merged[merged["render_text_ru"].astype(str).str.strip() != ""]
 
         for _, r in merged.iterrows():
             with st.expander(f"#{int(r['rank'])} | {r.get('Title','')}"):
@@ -189,7 +276,9 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 st.write(f"**Год:** {_clean(r.get('Year',''))}")
                 st.write(f"**Журнал:** {_clean(r.get('Journal',''))}")
                 st.write(f"**{str(r['section_label'])}**")
-                st.write(_clean(r.get("display_text_ru", "")))
-                kw = format_keywords_ru(r.get("display_keywords_ru", ""))
+                text = _clean(r.get("render_text_ru", ""))
+                if text:
+                    st.write(text)
+                kw = _display_keywords_for_result(r)
                 if kw:
                     st.write(f"Ключевые слова: {kw}")

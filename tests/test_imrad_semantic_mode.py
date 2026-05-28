@@ -13,7 +13,14 @@ from core.db.imrad import (
     select_default_imrad_embedding_option,
 )
 from tabs.articles.imrad_section_labels import format_article_label_ru, format_keywords_ru, section_identity_key, section_filter_key, section_label_ru
-from tabs.articles.semantic_imrad_mode import _normalize_sections
+from tabs.articles.semantic_imrad_mode import (
+    _display_keywords_for_result,
+    _display_text_for_result,
+    _normalize_sections,
+    article_label_matches_query,
+    filter_articles_by_search_query,
+    make_flexible_search_token,
+)
 from tabs.articles.imrad_search import filter_imrad_index, resolve_matrix_path, search_similar_units
 from tabs.articles.tab import ARTICLE_MODE_LABELS
 
@@ -181,3 +188,67 @@ def test_mode_module_uses_new_wording() -> None:
     for bad in ["Зоны выбранной статьи", "Поиск похожих зон", "Исходная зона", "IMRAD:", "confidence", "weak", "inferred"]:
         assert bad not in src
     assert 'sentence_transformers' not in importlib.sys.modules
+
+
+def test_article_level_not_shown_in_article_sections_tab() -> None:
+    units = pd.DataFrame([
+        {"unit_id": "u1", "unit_level": "article", "imrad_block": None, "imrad_subblock": None, "display_text_ru": "общий текст", "is_weak": 0, "is_inferred": 0, "confidence": 0.9},
+        {"unit_id": "u2", "unit_level": "imrad_block", "imrad_block": "INTRODUCTION", "imrad_subblock": None, "display_text_ru": "введение", "is_weak": 0, "is_inferred": 0, "confidence": 0.8},
+    ])
+    normalized = _normalize_sections(units)
+    visible = normalized[normalized["section_key"] != "article"]
+    assert "Статья в целом" not in visible["section_label"].tolist()
+
+
+def test_article_level_result_uses_metadata_abstract_and_keywords() -> None:
+    row = pd.Series({
+        "section_key": "article",
+        "Abstract": "Русская аннотация статьи",
+        "Keywords": '["ключ", "данные"]',
+        "display_text_ru": "Title: bad",
+        "display_keywords_ru": '["bad"]',
+    })
+    text = _display_text_for_result(row)
+    keywords = _display_keywords_for_result(row)
+    assert text == "Русская аннотация статьи"
+    assert keywords == "ключ, данные."
+    for bad in ["Title:", "Abstract:", "INTRODUCTION:", "METHOD_OR_APPROACH:", "RESULTS_OR_DEMONSTRATION:", "DISCUSSION_OR_CONCLUSION:"]:
+        assert bad not in text
+
+
+def test_similar_search_targets_always_exclude_source_article() -> None:
+    article_id = "a1"
+    target = pd.DataFrame([
+        {"article_id": "a1", "unit_id": "u1"},
+        {"article_id": "a2", "unit_id": "u2"},
+    ])
+    target = target[target["article_id"].astype(str) != str(article_id)]
+    assert str(article_id) not in target["article_id"].astype(str).tolist()
+
+
+def test_checkbox_label_removed_from_source() -> None:
+    import tabs.articles.semantic_imrad_mode as mod
+
+    source_code = Path(mod.__file__).read_text(encoding="utf-8")
+    assert "Исключить текущую статью" not in source_code
+    assert "st.rerun()" not in source_code
+
+
+def test_article_search_plain_substring() -> None:
+    assert article_label_matches_query("Цифровая школа — Иванов — 2018. — № 3", "иванов")
+
+
+def test_article_search_flexible_russian_endings() -> None:
+    assert article_label_matches_query("Цифровая школа — Иванов — 2018. — № 3", "цифров школ")
+    assert article_label_matches_query("Региональной информационной системы", "региональн информационн")
+
+
+def test_article_search_soft_sign() -> None:
+    assert article_label_matches_query("Модель адаптивного тестирования", "модел")
+    assert make_flexible_search_token("модель") == "модел"
+
+
+def test_article_search_does_not_overstem_short_tokens() -> None:
+    assert make_flexible_search_token("моя") == "моя"
+    labels = {"1": "Модель адаптивного тестирования", "2": "Цифровая школа"}
+    assert filter_articles_by_search_query(labels, "") == ["1", "2"]
