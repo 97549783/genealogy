@@ -251,3 +251,23 @@ def test_article_search_does_not_overstem_short_tokens() -> None:
     assert make_flexible_search_token("моя") == "моя"
     labels = {"1": "Модель адаптивного тестирования", "2": "Цифровая школа"}
     assert filter_articles_by_search_query(labels, "") == ["1", "2"]
+
+
+def test_neural_search_uses_submit_button() -> None:
+    import tabs.articles.semantic_imrad_mode as mod
+
+    source = Path(mod.__file__).read_text(encoding="utf-8")
+    assert 'form_submit_button("Найти")' in source
+
+
+def test_heavy_neural_operations_gated_by_submit() -> None:
+    import tabs.articles.semantic_imrad_mode as mod
+
+    source = Path(mod.__file__).read_text(encoding="utf-8")
+    guard_pos = source.find('if not submitted:\n            st.info("Введите запросы и нажмите «Найти».")\n            return')
+    encode_pos = source.find("encode_user_queries(")
+    search_pos = source.find("search_sections_by_query_vector(")
+
+    assert guard_pos != -1
+    assert encode_pos > guard_pos
+    assert search_pos > guard_pos

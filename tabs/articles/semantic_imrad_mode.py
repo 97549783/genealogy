@@ -329,28 +329,35 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
 
         idx_norm = _normalize_sections(idx_df.copy())
         section_options = {str(r["section_key"]): str(r["section_label"]) for _, r in idx_norm.iterrows()}
-        target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x], key="imrad_query_target")
 
-        st.markdown("Введите ключевые слова, характеризующие Ваш запрос")
-        st.caption("Можно вводить запросы на русском языке. Поиск выполняется смысловым сопоставлением, а не только по точному совпадению слов.")
         query_count_key = "imrad_neural_query_count"
         if query_count_key not in st.session_state:
             st.session_state[query_count_key] = 1
         count = max(1, min(5, int(st.session_state[query_count_key])))
         st.session_state[query_count_key] = count
 
-        query_values = [st.text_input(f"Запрос {i + 1}", key=f"imrad_neural_query_{i}") for i in range(count)]
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("Добавить запрос", key="imrad_add_query", disabled=count >= 5) and count < 5:
-                st.session_state[query_count_key] = count + 1
+            if st.button("Добавить запрос", key="imrad_add_query", disabled=count >= 5):
+                st.session_state[query_count_key] = min(5, count + 1)
                 st.rerun()
         with c2:
-            if st.button("Удалить последний запрос", key="imrad_remove_query", disabled=count <= 1) and count > 1:
-                st.session_state[query_count_key] = count - 1
+            if st.button("Удалить последний запрос", key="imrad_remove_query", disabled=count <= 1):
+                st.session_state[query_count_key] = max(1, count - 1)
                 st.rerun()
 
-        top_n = st.slider("Количество найденных статей", 1, 100, 20)
+        with st.form("imrad_neural_search_form"):
+            target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x], key="imrad_query_target")
+            st.markdown("Введите ключевые слова, характеризующие Ваш запрос")
+            st.caption("Можно вводить запросы на русском языке. Поиск выполняется смысловым сопоставлением, а не только по точному совпадению слов.")
+            query_values = [st.text_input(f"Запрос {i + 1}", key=f"imrad_neural_query_{i}") for i in range(count)]
+            top_n = st.slider("Количество найденных статей", 1, 100, 20)
+            submitted = st.form_submit_button("Найти")
+
+        if not submitted:
+            st.info("Введите запросы и нажмите «Найти».")
+            return
+
         queries = collect_non_empty_queries(query_values)
         if not queries:
             st.info("Введите хотя бы один запрос.")

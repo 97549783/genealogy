@@ -11,6 +11,7 @@ from tabs.articles.imrad_query_search import (
     encode_user_queries,
     search_sections_by_query_vector,
     softmax_percentages,
+    QUERY_CONTRIBUTION_TEMPERATURE,
 )
 from tabs.articles.imrad_section_labels import section_identity_key
 from tabs.articles.semantic_imrad_mode import _display_keywords_for_result, _display_text_for_result, _normalize_sections_per_article
@@ -35,6 +36,18 @@ def test_softmax_percentages() -> None:
     assert weights[0] > weights[1]
 
 
+
+
+def test_query_contribution_temperature_is_sharp() -> None:
+    weights_default = softmax_percentages(np.array([0.71, 0.68, 0.70]), temperature=1.0)
+    weights_sharp = softmax_percentages(np.array([0.71, 0.68, 0.70]), temperature=QUERY_CONTRIBUTION_TEMPERATURE)
+
+    assert weights_sharp.max() - weights_sharp.min() > weights_default.max() - weights_default.min()
+
+
+def test_softmax_percentages_sum_to_100_with_lower_temperature() -> None:
+    weights = softmax_percentages(np.array([0.71, 0.68, 0.70]), temperature=QUERY_CONTRIBUTION_TEMPERATURE)
+    assert round(float(weights.sum())) == 100
 def test_target_section_filtering() -> None:
     rows = pd.DataFrame([
         {"unit_level": "imrad_block", "imrad_block": "RESULTS_OR_DEMONSTRATION", "imrad_subblock": None},
