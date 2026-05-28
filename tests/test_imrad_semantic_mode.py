@@ -12,7 +12,8 @@ from core.db.imrad import (
     load_imrad_display_texts_ru,
     select_default_imrad_embedding_option,
 )
-from tabs.articles.imrad_section_labels import format_article_label_ru, format_keywords_ru, section_filter_key, section_label_ru
+from tabs.articles.imrad_section_labels import format_article_label_ru, format_keywords_ru, section_identity_key, section_filter_key, section_label_ru
+from tabs.articles.semantic_imrad_mode import _normalize_sections
 from tabs.articles.imrad_search import filter_imrad_index, resolve_matrix_path, search_similar_units
 from tabs.articles.tab import ARTICLE_MODE_LABELS
 
@@ -84,11 +85,14 @@ def test_formatters() -> None:
     assert format_article_label_ru(row) == "Название — Авторы — 2018. — № 3"
     assert format_keywords_ru('["a", "b"]') == "a, b."
     assert format_keywords_ru(None) == ""
-    assert "Методы" in section_label_ru(pd.Series({"imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": None}))
-    assert "Результаты" in section_label_ru(pd.Series({"imrad_block": "RESULTS_OR_DEMONSTRATION", "imrad_subblock": None}))
-    assert section_label_ru(pd.Series({"imrad_block": None, "imrad_subblock": None})) == "Раздел"
-    unknown = section_label_ru(pd.Series({"imrad_block": "SOME_NEW_BLOCK", "imrad_subblock": "SOME_NEW_SUBBLOCK"}))
-    assert "Другой раздел" in unknown and "Другой подраздел" in unknown
+    assert "Методы" in section_label_ru(pd.Series({"unit_level": "imrad_block", "imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": None}))
+    assert "Результаты" in section_label_ru(pd.Series({"unit_level": "imrad_block", "imrad_block": "RESULTS_OR_DEMONSTRATION", "imrad_subblock": None}))
+    assert section_label_ru(pd.Series({"unit_level": "imrad_block", "imrad_block": None, "imrad_subblock": None})) == ""
+    assert section_label_ru(pd.Series({"unit_level": "imrad_subblock", "imrad_block": "INTRODUCTION", "imrad_subblock": "UNKNOWN_SUBBLOCK"})) == ""
+    changed = section_label_ru(pd.Series({"unit_level": "imrad_subblock", "imrad_block": "INTRODUCTION", "imrad_subblock": "problem_gap"}))
+    assert "Проблема и ограничения" in changed
+    assert section_label_ru(pd.Series({"unit_level": "article"})) == "Статья в целом"
+    assert section_identity_key(pd.Series({"unit_level": "article"})) == "article"
 
 
 def test_index_restriction_by_allowed_article_ids() -> None:
@@ -98,11 +102,36 @@ def test_index_restriction_by_allowed_article_ids() -> None:
     assert set(filtered["article_id"]) == {"a1", "a3"}
 
 
-def test_section_filter_key_handles_empty_subblock() -> None:
-    row_none = pd.Series({"imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": None})
-    assert section_filter_key(row_none) == "METHOD_OR_APPROACH::"
-    row_nan = pd.Series({"imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": float("nan")})
-    assert section_filter_key(row_nan) == "METHOD_OR_APPROACH::"
+def test_section_filter_key_is_identity_key() -> None:
+    row_none = pd.Series({"unit_level": "imrad_block", "imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": None})
+    assert section_filter_key(row_none) == "block::METHOD_OR_APPROACH"
+    row_nan = pd.Series({"unit_level": "imrad_subblock", "imrad_block": "METHOD_OR_APPROACH", "imrad_subblock": "AIM"})
+    assert section_filter_key(row_nan) == "subblock::METHOD_OR_APPROACH::aim"
+
+
+def test_normalization_deduplicates_logical_sections() -> None:
+    units = pd.DataFrame([
+        {"unit_id": "u1", "unit_level": "imrad_block", "imrad_block": "INTRODUCTION", "imrad_subblock": None, "display_text_ru": "txt", "is_weak": 0, "is_inferred": 0, "confidence": 0.5},
+        {"unit_id": "u2", "unit_level": "imrad_block", "imrad_block": "INTRODUCTION", "imrad_subblock": None, "display_text_ru": "txt2", "is_weak": 1, "is_inferred": 1, "confidence": 0.1},
+        {"unit_id": "u3", "unit_level": "imrad_subblock", "imrad_block": "INTRODUCTION", "imrad_subblock": "aim_or_research_question", "display_text_ru": "t3", "is_weak": 0, "is_inferred": 0, "confidence": 0.5},
+        {"unit_id": "u4", "unit_level": "imrad_subblock", "imrad_block": "INTRODUCTION", "imrad_subblock": "aim_or_research_question", "display_text_ru": "t4", "is_weak": 1, "is_inferred": 1, "confidence": 0.1},
+    ])
+    normalized = _normalize_sections(units)
+    assert normalized["section_label"].tolist() == [
+        "Раздел: Введение",
+        "Раздел: Введение / подраздел: Цель и исследовательский вопрос",
+    ]
+
+
+def test_result_dedup_by_article_and_section_key() -> None:
+    rows = pd.DataFrame([
+        {"article_id": "a1", "unit_level": "imrad_block", "imrad_block": "RESULTS_OR_DEMONSTRATION", "imrad_subblock": None, "similarity": 0.6},
+        {"article_id": "a1", "unit_level": "imrad_block", "imrad_block": "RESULTS_OR_DEMONSTRATION", "imrad_subblock": None, "similarity": 0.9},
+    ])
+    rows["section_key"] = rows.apply(section_identity_key, axis=1)
+    dedup = rows.sort_values("similarity", ascending=False).drop_duplicates(["article_id", "section_key"], keep="first")
+    assert len(dedup) == 1
+    assert float(dedup.iloc[0]["similarity"]) == 0.9
 
 
 def test_search_still_works() -> None:

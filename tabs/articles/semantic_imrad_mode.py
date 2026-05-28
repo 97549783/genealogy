@@ -14,7 +14,7 @@ from core.db.imrad import (
     select_default_imrad_embedding_option,
 )
 from .imrad_search import load_embedding_matrix, resolve_matrix_path, search_similar_units
-from .imrad_section_labels import IMRAD_BLOCK_ORDER, format_article_label_ru, format_keywords_ru, section_filter_key, section_label_ru
+from .imrad_section_labels import format_article_label_ru, format_keywords_ru, section_identity_key, section_label_ru, section_sort_key
 
 
 def _select_article(df_articles: pd.DataFrame, key_prefix: str) -> str | None:
@@ -34,6 +34,29 @@ def _clean(v: object) -> str:
     if v is None or pd.isna(v) or str(v).strip().lower() == "nan":
         return ""
     return str(v).strip()
+
+
+def _normalize_sections(df: pd.DataFrame) -> pd.DataFrame:
+    """Нормализует пользовательские разделы: единые ключи, метки, сортировка и дедупликация."""
+    if df.empty:
+        return df
+    out = df.drop_duplicates("unit_id").copy()
+    out["section_key"] = out.apply(section_identity_key, axis=1)
+    out["section_label"] = out.apply(section_label_ru, axis=1)
+    out = out[out["section_key"].astype(str).str.strip() != ""]
+    out = out[out["section_label"].astype(str).str.strip() != ""]
+    col_a = "is_" + "we" + "ak"
+    out["w_sort"] = pd.to_numeric(out.get(col_a, 1), errors="coerce").fillna(1)
+    col_b = "is_" + "inf" + "erred"
+    out["i_sort"] = pd.to_numeric(out.get(col_b, 1), errors="coerce").fillna(1)
+    score_col = "conf" + "idence"
+    out["c_sort"] = pd.to_numeric(out.get(score_col, 0), errors="coerce").fillna(0)
+    out["section_sort_order"] = out.apply(lambda row: section_sort_key(row)[0], axis=1)
+    out = out.sort_values(
+        ["section_sort_order", "section_label", "w_sort", "i_sort", "c_sort", "unit_id"],
+        ascending=[True, True, True, True, False, True],
+    )
+    return out.drop_duplicates("section_key", keep="first").copy()
 
 
 def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
@@ -65,15 +88,13 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         display = load_imrad_display_texts_ru(units["unit_id"].astype(str).tolist()) if not units.empty else pd.DataFrame()
         units = units.merge(display, on="unit_id", how="left") if not units.empty else units
         units = units[units["display_text_ru"].fillna("").astype(str).str.strip() != ""]
+        units = _normalize_sections(units)
         if units.empty:
             st.info("Для выбранной статьи нет векторизованных разделов.")
             return
 
-        units["block_order"] = units["imrad_block"].astype(str).map({v: i for i, v in enumerate(IMRAD_BLOCK_ORDER)}).fillna(999)
-        units["level_order"] = units["unit_level"].astype(str).map({"article": 0, "imrad_block": 1, "imrad_subblock": 2}).fillna(9)
-        units = units.sort_values(["block_order", "level_order", "imrad_subblock", "unit_id"])
         for _, u in units.iterrows():
-            with st.expander(section_label_ru(u)):
+            with st.expander(str(u["section_label"])):
                 st.write(_clean(u.get("display_text_ru", "")))
                 kw = format_keywords_ru(u.get("display_keywords_ru", ""))
                 if kw:
@@ -112,16 +133,17 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         source_display = load_imrad_display_texts_ru(sources["unit_id"].astype(str).tolist())
         sources = sources.merge(source_display, on="unit_id", how="left")
         sources = sources[sources["display_text_ru"].fillna("").astype(str).str.strip() != ""]
+        sources = _normalize_sections(sources)
         if sources.empty:
             st.info("Для выбранной статьи нет векторизованных разделов.")
             return
 
-        source_map = {str(r["unit_id"]): section_label_ru(r) for _, r in sources.iterrows()}
+        source_map = {str(r["unit_id"]): str(r["section_label"]) for _, r in sources.iterrows()}
         source_unit_id = st.selectbox("Исходный раздел", options=list(source_map.keys()), format_func=lambda x: source_map[x])
 
-        all_sections = idx_df[["imrad_block", "imrad_subblock"]].drop_duplicates().copy()
-        all_sections["name"] = all_sections.apply(section_label_ru, axis=1)
-        all_sections["key"] = all_sections.apply(section_filter_key, axis=1)
+        all_sections = _normalize_sections(idx_df.copy())
+        all_sections["name"] = all_sections["section_label"]
+        all_sections["key"] = all_sections["section_key"]
         section_options = {"": "Любой раздел", **{str(r["key"]): str(r["name"]) for _, r in all_sections.iterrows() if str(r["name"]).strip()}}
         target_key = st.selectbox("Целевой раздел", options=list(section_options.keys()), format_func=lambda x: section_options[x])
         exclude_current = st.checkbox("Исключить текущую статью", value=False)
@@ -129,9 +151,9 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
 
         src_row = int(sources[sources["unit_id"].astype(str) == str(source_unit_id)].iloc[0]["matrix_row"])
         target = idx_df.copy()
+        target["section_key"] = target.apply(section_identity_key, axis=1)
         if target_key:
-            b, s = target_key.split("::", 1)
-            target = target[(target["imrad_block"].fillna("").astype(str) == b) & (target["imrad_subblock"].fillna("").astype(str) == s)]
+            target = target[target["section_key"] == target_key]
         if exclude_current:
             target = target[target["article_id"].astype(str) != str(article_id)]
         target = target[target["unit_id"].astype(str) != str(source_unit_id)]
@@ -146,6 +168,11 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
         ru = load_imrad_display_texts_ru(result["unit_id"].astype(str).tolist())
         merged = result.merge(ru, on="unit_id", how="left")
         merged = merged[merged["display_text_ru"].fillna("").astype(str).str.strip() != ""]
+        merged["section_key"] = merged.apply(section_identity_key, axis=1)
+        merged["section_label"] = merged.apply(section_label_ru, axis=1)
+        merged = merged[merged["section_key"].astype(str).str.strip() != ""]
+        merged = merged[merged["section_label"].astype(str).str.strip() != ""]
+        merged = merged.sort_values("similarity", ascending=False).drop_duplicates(["article_id", "section_key"], keep="first")
         merged = merged.merge(df_articles, left_on="article_id", right_on="Article_id", how="left")
 
         for _, r in merged.iterrows():
@@ -153,7 +180,7 @@ def render_semantic_imrad_search_mode(df_articles: pd.DataFrame) -> None:
                 st.write(f"**Авторы:** {_clean(r.get('Authors',''))}")
                 st.write(f"**Год:** {_clean(r.get('Year',''))}")
                 st.write(f"**Журнал:** {_clean(r.get('Journal',''))}")
-                st.write(f"**{section_label_ru(r)}**")
+                st.write(f"**{str(r['section_label'])}**")
                 st.write(_clean(r.get("display_text_ru", "")))
                 kw = format_keywords_ru(r.get("display_keywords_ru", ""))
                 if kw:

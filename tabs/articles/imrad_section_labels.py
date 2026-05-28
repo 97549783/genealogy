@@ -16,20 +16,27 @@ IMRAD_BLOCK_LABELS_RU = {
 }
 
 IMRAD_SUBBLOCK_LABELS_RU = {
-    "aim": "Цель",
+    "aim": "Цель и исследовательский вопрос",
     "aim_or_research_question": "Цель и исследовательский вопрос",
-    "problem_gap": "Проблема и дефицит",
+    "research_question": "Исследовательский вопрос",
+    "problem_gap": "Проблема и ограничения",
+    "problem_or_gap": "Проблема и ограничения",
+    "research_gap": "Проблема и ограничения",
     "context": "Контекст",
+    "background": "Контекст",
     "own_method": "Метод авторов",
     "own_method_or_approach": "Метод авторов",
+    "method": "Метод",
     "data_or_material": "Данные и материалы",
-    "findings": "Результаты",
+    "materials": "Данные и материалы",
+    "sample": "Выборка",
+    "findings": "Результаты авторов",
     "own_results_or_findings": "Результаты авторов",
-    "interpretation": "Интерпретация",
-    "limitations": "Ограничения",
+    "results": "Результаты",
+    "interpretation": "Интерпретация результатов",
+    "limitations": "Ограничения исследования",
     "conclusion": "Выводы",
-    "future_work": "Перспективы",
-    "OWN_RESULTS_OR_FINDINGS": "Результаты авторов",
+    "future_work": "Перспективы исследования",
 }
 
 IMRAD_BLOCK_ORDER = [
@@ -89,26 +96,65 @@ def format_keywords_ru(value: object) -> str:
     return f"{text}." if text else ""
 
 
-def _map_label(value: object, mapping: dict[str, str], fallback: str) -> str:
+def _map_label(value: object, mapping: dict[str, str], fallback: str = "") -> str:
     if is_empty_value(value):
         return ""
     raw = str(value).strip()
-    return mapping.get(raw) or mapping.get(raw.lower()) or mapping.get(raw.upper()) or fallback
+    return mapping.get(raw) or mapping.get(raw.lower()) or fallback
+
+
+def section_identity_key(row: pd.Series) -> str:
+    """Возвращает стабильный ключ пользовательского раздела."""
+    unit_level = _map_label(row.get("unit_level"), {"article": "article", "imrad_block": "imrad_block", "imrad_subblock": "imrad_subblock"})
+    block = "" if is_empty_value(row.get("imrad_block")) else str(row.get("imrad_block")).strip()
+    subblock = "" if is_empty_value(row.get("imrad_subblock")) else str(row.get("imrad_subblock")).strip()
+    if unit_level == "article":
+        return "article"
+    if unit_level == "imrad_block" and block:
+        return f"block::{block}"
+    if unit_level == "imrad_subblock" and block and subblock:
+        return f"subblock::{block}::{subblock.lower()}"
+    return ""
+
+
+def section_sort_key(row: pd.Series) -> tuple[int, str, str]:
+    """Возвращает ключ сортировки разделов для отображения: блок перед подразделами."""
+    unit_level = "" if is_empty_value(row.get("unit_level")) else str(row.get("unit_level")).strip()
+    block = "" if is_empty_value(row.get("imrad_block")) else str(row.get("imrad_block")).strip()
+    block_order = {
+        "INTRODUCTION": 10,
+        "METHOD_OR_APPROACH": 20,
+        "RESULTS_OR_DEMONSTRATION": 30,
+        "DISCUSSION_OR_CONCLUSION": 40,
+        "SUPPLEMENTARY_OR_TEXTUAL": 50,
+    }
+    if unit_level == "article":
+        order = 0
+    elif unit_level == "imrad_block":
+        order = block_order.get(block, 90)
+    elif unit_level == "imrad_subblock":
+        order = block_order.get(block, 90) + 1
+    else:
+        order = 999
+    return (order, str(row.get("section_label", "")), str(row.get("unit_id", "")))
 
 
 def section_label_ru(row: pd.Series) -> str:
     """Возвращает русский заголовок раздела/подраздела."""
-    subblock = _map_label(row.get("imrad_subblock"), IMRAD_SUBBLOCK_LABELS_RU, "Другой подраздел")
-    block = _map_label(row.get("imrad_block"), IMRAD_BLOCK_LABELS_RU, "Другой раздел")
-    if subblock:
-        return f"Раздел: {block} / подраздел: {subblock}" if block else f"Подраздел: {subblock}"
-    return f"Раздел: {block}" if block else "Раздел"
+    unit_level = "" if is_empty_value(row.get("unit_level")) else str(row.get("unit_level")).strip()
+    if unit_level == "article":
+        return "Статья в целом"
+    block = _map_label(row.get("imrad_block"), IMRAD_BLOCK_LABELS_RU)
+    if unit_level == "imrad_block":
+        return f"Раздел: {block}" if block else ""
+    if unit_level == "imrad_subblock":
+        subblock = _map_label(row.get("imrad_subblock"), IMRAD_SUBBLOCK_LABELS_RU)
+        if block and subblock:
+            return f"Раздел: {block} / подраздел: {subblock}"
+        return ""
+    return ""
 
 
 def section_filter_key(row: pd.Series) -> str:
     """Формирует ключ фильтра раздела для внутренних сопоставлений."""
-    block_value = row.get("imrad_block")
-    subblock_value = row.get("imrad_subblock")
-    block = "" if is_empty_value(block_value) else str(block_value).strip()
-    sub = "" if is_empty_value(subblock_value) else str(subblock_value).strip()
-    return f"{block}::{sub}"
+    return section_identity_key(row)
