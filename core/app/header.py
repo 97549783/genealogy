@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.ui.chrome import feedback_button
-
 
 def render_app_header() -> None:
     """Отрисовывает заголовок, описание и кнопку обратной связи."""
@@ -19,4 +17,6 @@ def render_app_header() -> None:
             "по педагогическим наукам, психологическим науками и техническим наукам (группа специальностей 2.3)."
         )
     with header_right:
+        from core.ui.chrome import feedback_button
+
         feedback_button()
