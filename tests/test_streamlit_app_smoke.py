@@ -53,3 +53,53 @@ def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> Non
     assert not app.exception
     assert len(app.tabs) == 0
     assert any("Обратная связь" in t.value for t in app.title)
+
+
+def _visible_text(app: AppTest) -> str:
+    return "\n".join(
+        getattr(item, "value", "")
+        for collection in [
+            app.markdown,
+            app.caption,
+            app.success,
+            app.warning,
+            app.error,
+            app.text,
+            app.title,
+            app.subheader,
+        ]
+        for item in collection
+    )
+
+
+def test_streamlit_app_lazy_renders_only_default_tab(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_minimal_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
+    app = AppTest.from_file("streamlit_app.py")
+    app.run(timeout=30)
+
+    assert not app.exception
+    assert any(tab.label == "Построение деревьев" for tab in app.tabs)
+
+    all_text = _visible_text(app)
+
+    assert "Режим поиска" not in all_text
+    assert "Загружено" not in all_text
+
+
+def test_streamlit_app_lazy_renders_requested_profile_tab(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_minimal_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
+    app = AppTest.from_file("streamlit_app.py")
+    app.query_params["tab"] = "profiles"
+    app.run(timeout=30)
+
+    assert not app.exception
+
+    all_text = _visible_text(app)
+
+    assert "Режим поиска" in all_text
