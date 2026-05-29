@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import pandas as pd
 import streamlit as st
 
-from core.db import FEEDBACK_FILE
+from core.app.feedback import feedback_exists, load_feedback
 
 _ADMIN_SECRET = "nb39fdv94beraaagv2evdc9ewr3fokv"
 
@@ -16,8 +15,8 @@ def maybe_render_admin_page_and_stop() -> None:
         return
 
     st.title("📋 Обратная связь")
-    if FEEDBACK_FILE.exists():
-        fb_df = pd.read_csv(FEEDBACK_FILE)
+    if feedback_exists():
+        fb_df = load_feedback()
         st.caption(f"Всего записей: {len(fb_df)}")
         st.table(fb_df)
     else:
