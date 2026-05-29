@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import List
 
 import pandas as pd
@@ -21,7 +20,6 @@ from .scores import load_dissertation_scores
 
 AUTHOR_COLUMN = "candidate_name"
 SUPERVISOR_COLUMNS: List[str] = ["supervisors_1.name", "supervisors_2.name"]
-FEEDBACK_FILE = Path("/app/data-nonsynchronized/feedback.csv")
 
 SINGLE_COLUMN_CRITERIA = {
     "title": "title",

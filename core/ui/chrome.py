@@ -14,10 +14,7 @@ core/ui/chrome.py — переиспользуемые UI-компоненты �
 
 from __future__ import annotations
 
-import csv
 import io
-from datetime import datetime
-from pathlib import Path
 from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
@@ -25,7 +22,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from core.db import FEEDBACK_FILE
+from core.app.feedback import append_feedback
 
 # ---------------------------------------------------------------------------
 # Тексты инструкций
@@ -273,22 +270,6 @@ def _get_feedback_state() -> Dict[str, str]:
     return state
 
 
-def _store_feedback(name: str, email: str, message: str) -> None:
-    FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    record = [
-        datetime.utcnow().isoformat(timespec="seconds") + "Z",
-        name.strip(),
-        email.strip(),
-        message.replace("\r\n", "\n").replace("\r", "\n"),
-    ]
-    file_exists = FEEDBACK_FILE.exists()
-    with FEEDBACK_FILE.open("a", newline="", encoding="utf-8") as fp:
-        writer = csv.writer(fp)
-        if not file_exists:
-            writer.writerow(["timestamp", "name", "email", "message"])
-        writer.writerow(record)
-
-
 def _trigger_rerun() -> None:
     try:
         st.rerun()
@@ -312,6 +293,8 @@ def feedback_button() -> None:
                 )
             elif status == "warning":
                 st.warning("Пожалуйста, заполните поле «Сообщение».")
+            elif status == "error":
+                st.error("Не удалось сохранить сообщение. Пожалуйста, попробуйте позже.")
 
         with st.form(key="feedback_form"):
             name = st.text_input("Имя", value=feedback_state.get("name", ""))
@@ -325,13 +308,20 @@ def feedback_button() -> None:
 
         if submitted:
             feedback_state = {"name": name, "email": email, "message": message}
+
             if message.strip():
-                _store_feedback(name, email, message)
-                st.session_state[FEEDBACK_FORM_RESULT_KEY] = ("success", name)
-                st.session_state[FEEDBACK_FORM_STATE_KEY] = _default_feedback_state()
+                try:
+                    append_feedback(name, email, message)
+                except OSError:
+                    st.session_state[FEEDBACK_FORM_RESULT_KEY] = ("error", None)
+                    st.session_state[FEEDBACK_FORM_STATE_KEY] = feedback_state
+                else:
+                    st.session_state[FEEDBACK_FORM_RESULT_KEY] = ("success", name)
+                    st.session_state[FEEDBACK_FORM_STATE_KEY] = _default_feedback_state()
             else:
                 st.session_state[FEEDBACK_FORM_RESULT_KEY] = ("warning", None)
                 st.session_state[FEEDBACK_FORM_STATE_KEY] = feedback_state
+
             _trigger_rerun()
 
     if st.button("Обратная связь", key="feedback_button", use_container_width=True):

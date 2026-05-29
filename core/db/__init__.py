@@ -1,6 +1,5 @@
 from .dissertations import (
     AUTHOR_COLUMN,
-    FEEDBACK_FILE,
     SUPERVISOR_COLUMNS,
     load_basic_scores,
     load_dissertation_profile_scores,
