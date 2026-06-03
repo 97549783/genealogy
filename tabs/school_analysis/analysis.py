@@ -133,12 +133,15 @@ def compute_overview(
     candidates = 0
     doctors = 0
     if not subset.empty and DEGREE_LEVEL_COLUMN in subset.columns:
-        for _, row in subset.iterrows():
-            d = _degree_level(row)
-            if d == DEGREE_CANDIDATE:
-                candidates += 1
-            elif d == DEGREE_DOCTOR:
-                doctors += 1
+        raw = (
+            subset[DEGREE_LEVEL_COLUMN]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+        candidates = int(raw.str.startswith(DEGREE_CANDIDATE[:3]).sum())
+        doctors = int(raw.str.startswith(DEGREE_DOCTOR[:3]).sum())
 
     # FIX #1: явное приведение к int, чтобы избежать случайной подмены типа
     cities: int = 0
@@ -326,37 +329,62 @@ def compute_yearly_stats(subset: pd.DataFrame) -> pd.DataFrame:
     if subset.empty or YEAR_COLUMN not in subset.columns:
         return pd.DataFrame(columns=["Год", "Всего", "Кандидатских", "Докторских"])
 
-    rows: List[Dict] = []
-    for _, row in subset.iterrows():
-        y = _safe_year(row.get(YEAR_COLUMN))
-        if y is None:
-            continue
-        d = _degree_level(row)
-        rows.append({"year": y, "degree": d})
+    years_num = pd.to_numeric(
+        subset[YEAR_COLUMN].astype(str).str.strip(),
+        errors="coerce",
+    )
 
-    if not rows:
+    # Повторяем семантику _safe_year: сначала int(float(...)),
+    # затем 1900 < y < 2100.
+    years = pd.Series(pd.NA, index=subset.index, dtype="Int64")
+    mask = years_num.notna()
+    years.loc[mask] = np.trunc(years_num.loc[mask]).astype("int64")
+    years = years.where((years > 1900) & (years < 2100))
+
+    if DEGREE_LEVEL_COLUMN in subset.columns:
+        raw_degree = (
+            subset[DEGREE_LEVEL_COLUMN]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+    else:
+        raw_degree = pd.Series("", index=subset.index)
+
+    degrees = np.select(
+        [
+            raw_degree.str.startswith(DEGREE_CANDIDATE[:3]),
+            raw_degree.str.startswith(DEGREE_DOCTOR[:3]),
+        ],
+        [DEGREE_CANDIDATE, DEGREE_DOCTOR],
+        default="",
+    )
+
+    tmp = pd.DataFrame({"year": years, "degree": degrees}).dropna(subset=["year"])
+
+    if tmp.empty:
         return pd.DataFrame(columns=["Год", "Всего", "Кандидатских", "Докторских"])
 
-    tmp = pd.DataFrame(rows)
+    tmp["year"] = tmp["year"].astype(int)
 
-    # FIX #2: include_groups=False предотвращает DeprecationWarning в pandas >= 2.2
     grouped = (
-        tmp.groupby("year")
-        .apply(
-            lambda g: pd.Series(
-                {
-                    "Всего": len(g),
-                    "Кандидатских": (g["degree"] == DEGREE_CANDIDATE).sum(),
-                    "Докторских": (g["degree"] == DEGREE_DOCTOR).sum(),
-                }
-            ),
-            include_groups=False,
+        tmp.assign(
+            is_candidate=tmp["degree"].eq(DEGREE_CANDIDATE),
+            is_doctor=tmp["degree"].eq(DEGREE_DOCTOR),
         )
-        .reset_index()
+        .groupby("year", as_index=False)
+        .agg(
+            Всего=("degree", "size"),
+            Кандидатских=("is_candidate", "sum"),
+            Докторских=("is_doctor", "sum"),
+        )
         .rename(columns={"year": "Год"})
         .sort_values("Год")
     )
     grouped["Год"] = grouped["Год"].astype(int)
+    grouped["Кандидатских"] = grouped["Кандидатских"].astype(int)
+    grouped["Докторских"] = grouped["Докторских"].astype(int)
     return grouped.reset_index(drop=True)
 
 
