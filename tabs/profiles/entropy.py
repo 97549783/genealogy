@@ -250,65 +250,55 @@ def search_by_entropy(
     Возвращает:
         DataFrame с результатами (Code, entropy, features_count)
     """
-    results = []
+    # Векторизованный расчет быстрее построчного обхода, но на больших матрицах
+    # может временно потреблять больше пиковой памяти из-за промежуточных массивов.
+    feat_matrix = (
+        scores_df[feature_columns]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0.0)
+        .to_numpy(dtype=np.float64, copy=False)
+    )
 
-    # Строим иерархию если нужна
-    hierarchy = None
-    if use_hierarchical:
-        hierarchy = build_hierarchy_from_codes(feature_columns)
+    feat_thresh = np.where(feat_matrix >= min_threshold, feat_matrix, 0.0)
+    row_sums = feat_thresh.sum(axis=1)
+    valid = row_sums > 0
 
-    for idx, row in scores_df.iterrows():
-        code = str(row["Code"])
+    probs = np.zeros_like(feat_thresh, dtype=np.float64)
+    np.divide(
+        feat_thresh,
+        row_sums[:, None],
+        out=probs,
+        where=valid[:, None],
+    )
 
-        # Извлекаем профиль (только нужные колонки)
-        # Создаем Series с числовыми значениями
-        profile_dict = {}
-        for col in feature_columns:
-            try:
-                val = row[col]
-                if pd.isna(val):
-                    profile_dict[col] = 0.0
-                else:
-                    profile_dict[col] = float(val)
-            except (ValueError, TypeError):
-                profile_dict[col] = 0.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_probs = np.where(probs > 0, np.log2(probs), 0.0)
 
-        profile = pd.Series(profile_dict)
+    # Строим иерархию и коэффициенты один раз для всего списка признаков.
+    hierarchy = (
+        build_hierarchy_from_codes(feature_columns) if use_hierarchical else None
+    )
+    if use_hierarchical and hierarchy:
+        z_coeffs = np.array(
+            [calculate_z_coefficient(col, hierarchy) for col in feature_columns],
+            dtype=np.float64,
+        )
+        entropy_values = np.where(
+            valid,
+            -(probs * log_probs * z_coeffs).sum(axis=1),
+            0.0,
+        )
+    else:
+        entropy_values = np.where(valid, -(probs * log_probs).sum(axis=1), 0.0)
 
-        # Рассчитываем энтропию
-        try:
-            if use_hierarchical and hierarchy:
-                entropy = calculate_entropy_hierarchical(
-                    profile,
-                    hierarchy,
-                    min_threshold
-                )
-            else:
-                entropy = calculate_entropy_shannon(
-                    profile,
-                    min_threshold
-                )
-        except Exception as e:
-            # Если произошла ошибка, записываем диагностику и пропускаем
-            print(f"⚠️ Ошибка при расчете энтропии для {code}: {type(e).__name__}: {e}")
-            entropy = 0.0
+    features_count_arr = (feat_matrix >= min_threshold).sum(axis=1)
 
-        # Подсчитываем количество значимых тем
-        try:
-            features_count = int(sum(1 for v in profile.values if v >= min_threshold))
-        except Exception:
-            features_count = 0
+    results_df = pd.DataFrame({
+        "Code": scores_df["Code"].astype(str).values,
+        "entropy": entropy_values.astype(float),
+        "features_count": features_count_arr.astype(int),
+    })
 
-        results.append({
-            "Code": code,
-            "entropy": float(entropy),
-            "features_count": features_count
-        })
-
-    # Создаем DataFrame
-    results_df = pd.DataFrame(results)
-
-    # Сортируем по энтропии
     if not results_df.empty:
         results_df = results_df.sort_values(by="entropy", ascending=ascending)
 
