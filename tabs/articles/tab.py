@@ -143,6 +143,7 @@ def render_articles_analysis_tab(
     classifier_labels: Optional[Dict[str, str]] = None,
 ) -> None:
     """Отрисовывает вкладку «Анализ статей (демо)» и выбранный режим."""
+     """Работа над системой идет"""
     _hydrate_mode_from_query()
     if classifier_labels is None:
         classifier_labels = load_articles_classifier()
