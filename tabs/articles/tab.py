@@ -29,7 +29,7 @@ from .query_params import query_params_signature, should_hydrate_query
 
 ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
-     "single_school1": "Анализ одной школы1",
+    "single_school1": "Анализ одной школы1",
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
@@ -153,6 +153,7 @@ def render_articles_analysis_tab(
         "«Информатика и образование» и "
         "«Вестник Московского городского педагогического университета. "
         "Серия: Информатика и информатизация образования»."
+         "Серия: Информатика и информатизация образования1»."
     )
 
     df_articles_all = load_articles_data()
