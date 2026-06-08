@@ -29,9 +29,6 @@ from .query_params import query_params_signature, should_hydrate_query
 
 ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
-    "single_school1": "Анализ одной школы1",
-    "single_school1": "Анализ инфраструктуры для обучения",
-     "single_school1": "Анализ транспортной доступности",
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
