@@ -32,7 +32,7 @@ ARTICLE_MODE_LABELS = {
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
-   }
+}
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
 
@@ -142,7 +142,6 @@ def render_articles_analysis_tab(
     classifier_labels: Optional[Dict[str, str]] = None,
 ) -> None:
     """Отрисовывает вкладку «Анализ статей (демо)» и выбранный режим."""
-     """Работа над системой идет"""
     _hydrate_mode_from_query()
     if classifier_labels is None:
         classifier_labels = load_articles_classifier()
