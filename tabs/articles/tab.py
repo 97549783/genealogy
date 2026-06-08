@@ -134,8 +134,7 @@ def _hydrate_mode_from_query() -> None:
         st.session_state["aa_mode"] = "single_school"
     elif "aa_mode" not in st.session_state:
         st.session_state["aa_mode"] = "single_school"
-  elif st.query_params.get_all("aa_source_school1"):
-        st.session_state["aa_mode"] = "similar_schools1"
+  
 
 def render_articles_analysis_tab(
     df_lineage: pd.DataFrame,
