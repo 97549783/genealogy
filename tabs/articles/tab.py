@@ -20,7 +20,6 @@ from .comparison_mode import (
     load_articles_classifier,
     load_articles_data,
     share_params_button,
-
 )
 from .single_school_mode import render_single_school_mode
 from .similar_schools_mode import render_similar_schools_mode
@@ -33,9 +32,9 @@ ARTICLE_MODE_LABELS = {
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
-    
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
+
 
 def _journal_fallback_key(journal: Any) -> str:
     """Строит запасной ключ для журнала без ISSN."""
@@ -134,7 +133,7 @@ def _hydrate_mode_from_query() -> None:
         st.session_state["aa_mode"] = "single_school"
     elif "aa_mode" not in st.session_state:
         st.session_state["aa_mode"] = "single_school"
-  
+
 
 def render_articles_analysis_tab(
     df_lineage: pd.DataFrame,
@@ -153,7 +152,6 @@ def render_articles_analysis_tab(
         "«Информатика и образование» и "
         "«Вестник Московского городского педагогического университета. "
         "Серия: Информатика и информатизация образования»."
-         "Серия: Информатика и информатизация образования1»."
     )
 
     df_articles_all = load_articles_data()
@@ -234,6 +232,3 @@ def render_articles_comparison_tab(
         selected_roots=selected_roots,
         classifier_labels=classifier_labels,
     )
-
-
-
