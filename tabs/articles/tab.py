@@ -32,6 +32,7 @@ ARTICLE_MODE_LABELS = {
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
+    "ccc": "Инструкции",
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
@@ -133,6 +134,8 @@ def _hydrate_mode_from_query() -> None:
         st.session_state["aa_mode"] = "single_school"
     elif "aa_mode" not in st.session_state:
         st.session_state["aa_mode"] = "single_school"
+    elif "aa_mode" not in st.session_state:
+        st.session_state["aa_mode"] = "ссс"
 
 
 def render_articles_analysis_tab(
