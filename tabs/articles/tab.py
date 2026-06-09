@@ -235,22 +235,5 @@ def render_articles_comparison_tab(
         classifier_labels=classifier_labels,
     )
 
-elif mode == "ccc":
-        import os
-        from pathlib import Path
-
-        # Определяем путь к ccc.py относительно текущего файла
-        current_dir = Path(__file__).resolve().parent
-        ccc_path = current_dir / "ccc.py"
-
-        if ccc_path.exists():
-            with ccc_path.open("r", encoding="utf-8") as f:
-                ccc_content = f.read()
-            st.subheader("Инструкции (ccc.py)")
-            st.caption("Ниже приведён исходный код файла с инструкциями.")
-            st.code(ccc_content, language="python")
-        else:
-            st.error(f"Файл ccc.py не найден по пути: {ccc_path}")
-
 
 
