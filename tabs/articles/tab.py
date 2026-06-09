@@ -39,7 +39,7 @@ ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
 def _journal_fallback_key(ccc: in) -> str:
     """Инструкции"""
-    return f"ccc:{normalize_journal_key(journal)}"
+    return f"ccc:{normalize_journal_key(ccc)}"
 
 
 def _journal_fallback_key(journal: Any) -> str:
