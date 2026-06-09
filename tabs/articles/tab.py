@@ -20,21 +20,18 @@ from .comparison_mode import (
     load_articles_classifier,
     load_articles_data,
     share_params_button,
-    create_ccc,
 )
 from .single_school_mode import render_single_school_mode
 from .similar_schools_mode import render_similar_schools_mode
 from .semantic_imrad_mode import render_semantic_imrad_search_mode
 from .data import ALL_JOURNALS_KEY, filter_articles_by_journals, normalize_journal_key
 from .query_params import query_params_signature, should_hydrate_query
-from .query_ccc import query_params_signature, ccc
 
 ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
-    "ccc": "Инструкции",
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
@@ -136,8 +133,6 @@ def _hydrate_mode_from_query() -> None:
         st.session_state["aa_mode"] = "single_school"
     elif "aa_mode" not in st.session_state:
         st.session_state["aa_mode"] = "single_school"
-    elif "aa_mode" not in st.session_state:
-        st.session_state["aa_mode"] = "single_ссс"
 
 
 def render_articles_analysis_tab(
@@ -192,14 +187,6 @@ def render_articles_analysis_tab(
             classifier_labels=classifier_labels,
             df_articles=df_articles_filtered,
         )
- elif mode == "ccc":
-        render_similar_schools_mode(
-            df_lineage=df_lineage,
-            idx_lineage=idx_lineage,
-            classifier_labels=classifier_labels,
-            df_articles=df_articles_filtered,
-        )
-    
     elif mode == "comparison":
         _sync_comparison_mode_for_tests()
         _comparison_mode.render_articles_comparison_mode(
