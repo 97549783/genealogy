@@ -135,7 +135,7 @@ def _hydrate_mode_from_query() -> None:
     elif "aa_mode" not in st.session_state:
         st.session_state["aa_mode"] = "single_school"
     elif "aa_mode" not in st.session_state:
-        st.session_state["aa_mode"] = "ссс"
+        st.session_state["aa_mode"] = "single_ссс"
 
 
 def render_articles_analysis_tab(
