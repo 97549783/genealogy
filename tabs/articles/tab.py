@@ -37,11 +37,6 @@ ARTICLE_MODE_LABELS = {
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
-def _journal_fallback_key(ccc: Any) -> str:
-    """Возвращает ключ для журнала в формате 'ccc:<нормализованное_значение>'."""
-    return f"ccc:{normalize_journal_key(ccc)}"
-
-
 def _journal_fallback_key(journal: Any) -> str:
     """Строит запасной ключ для журнала без ISSN."""
     return f"journal:{normalize_journal_key(journal)}"
