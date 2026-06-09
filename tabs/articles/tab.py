@@ -27,6 +27,8 @@ from .similar_schools_mode import render_similar_schools_mode
 from .semantic_imrad_mode import render_semantic_imrad_search_mode
 from .data import ALL_JOURNALS_KEY, filter_articles_by_journals, normalize_journal_key
 from .query_params import query_params_signature, should_hydrate_query
+from .query_ccc import query_params_signature, should_hydrate_query
+
 
 ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
