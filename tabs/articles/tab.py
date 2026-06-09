@@ -27,8 +27,6 @@ from .similar_schools_mode import render_similar_schools_mode
 from .semantic_imrad_mode import render_semantic_imrad_search_mode
 from .data import ALL_JOURNALS_KEY, filter_articles_by_journals, normalize_journal_key
 from .query_params import query_params_signature, should_hydrate_query
-from .query_ccc import query_params_signature, should_hydrate_query
-
 
 ARTICLE_MODE_LABELS = {
     "single_school": "Анализ одной школы",
@@ -236,3 +234,23 @@ def render_articles_comparison_tab(
         selected_roots=selected_roots,
         classifier_labels=classifier_labels,
     )
+
+elif mode == "ccc":
+        import os
+        from pathlib import Path
+
+        # Определяем путь к ccc.py относительно текущего файла
+        current_dir = Path(__file__).resolve().parent
+        ccc_path = current_dir / "ccc.py"
+
+        if ccc_path.exists():
+            with ccc_path.open("r", encoding="utf-8") as f:
+                ccc_content = f.read()
+            st.subheader("Инструкции (ccc.py)")
+            st.caption("Ниже приведён исходный код файла с инструкциями.")
+            st.code(ccc_content, language="python")
+        else:
+            st.error(f"Файл ccc.py не найден по пути: {ccc_path}")
+
+
+
