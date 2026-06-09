@@ -187,6 +187,14 @@ def render_articles_analysis_tab(
             classifier_labels=classifier_labels,
             df_articles=df_articles_filtered,
         )
+ elif mode == "ccc":
+        render_similar_schools_mode(
+            df_lineage=df_lineage,
+            idx_lineage=idx_lineage,
+            classifier_labels=classifier_labels,
+            df_articles=df_articles_filtered,
+        )
+    
     elif mode == "comparison":
         _sync_comparison_mode_for_tests()
         _comparison_mode.render_articles_comparison_mode(
