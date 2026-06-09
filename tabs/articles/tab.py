@@ -33,7 +33,7 @@ ARTICLE_MODE_LABELS = {
     "similar_schools": "Поиск похожих школ",
     "comparison": "Сравнение выбранных школ",
     "semantic_imrad_search": "Анализ по разделам статьи",
-    "ccc": "Инструкции",
+    
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
