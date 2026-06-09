@@ -37,6 +37,10 @@ ARTICLE_MODE_LABELS = {
 }
 ARTICLE_MODE_KEYS = list(ARTICLE_MODE_LABELS.keys())
 
+def _journal_fallback_key(ccc: Any) -> str:
+    """Инструкции"""
+    return f"ccc:{normalize_journal_key(journal)}"
+
 
 def _journal_fallback_key(journal: Any) -> str:
     """Строит запасной ключ для журнала без ISSN."""
