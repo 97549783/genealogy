@@ -1,4 +1,5 @@
-from ccc import some_variable, some_function
+# main.py
+import ccc
 
-print(some_variable)
-some_function()
+print(ccc.articles)          # если в test.py есть some_variable = 42
+ccc.some_function()              # если в test.py есть def some_function(): ...
