@@ -12,7 +12,7 @@ TAB_SPECS: List[Tuple[str, str]] = [
     ("school_comparison", "Сравнение научных школ"),
     ("articles_comparison", "Анализ статей (демо)"),
     ("ccc", "Инструкции по работе с системой")
-     ("ccc", "Инструкции по работе с системой1")
+     
 ]
 TAB_ID_TO_LABEL: Dict[str, str] = dict(TAB_SPECS)
 TAB_LABEL_TO_ID: Dict[str, str] = {label: tab_id for tab_id, label in TAB_SPECS}
