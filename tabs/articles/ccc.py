@@ -1,10 +1,6 @@
-# main.py
-import ccc
+# test.py
+def do_work():
+    print("Работаю...")
 
-print(ccc.articles)          # если в test.py есть some_variable = 42
-ccc.some_function()              # если в test.py есть def some_function(): ...
-
-message = "Привет из test.py!"
-
-def get_data():
-    return [1, 2, 3]
+if __name__ == "__main__":
+    do_work()
