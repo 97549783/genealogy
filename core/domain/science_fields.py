@@ -21,7 +21,7 @@ SCIENCE_FIELD_OPTIONS: dict[str, ScienceFieldOption] = {
     "philosophy": ScienceFieldOption("philosophy", "Философские науки", ("философ",), "philosophy"),
     "theology": ScienceFieldOption("theology", "Теология", ("теолог",), "theology"),
     "technical": ScienceFieldOption("technical", "Технические науки", ("техник",), "technical"),
-    "phys_math": ScienceFieldOption("phys_math", "Физико-математические науки", ("мат",), "phys_math"),
+    "phys_math": ScienceFieldOption("phys_math", "Физико-математические науки", ("матем",), "phys_math"),
 }
 
 
