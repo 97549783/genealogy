@@ -33,7 +33,6 @@ def get_science_field_options() -> list[ScienceFieldOption]:
         SCIENCE_FIELD_OPTIONS["theology"],
         SCIENCE_FIELD_OPTIONS["technical"],
         SCIENCE_FIELD_OPTIONS["phys_math"],
-        SCIENCE_FIELD_OPTIONS["theology"],
     ]
 
 
