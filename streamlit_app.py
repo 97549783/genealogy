@@ -116,4 +116,4 @@ if _should_render_tab("articles_comparison"):
 
 if _should_render_tab("test1111"):
     with tab_by_id["test1111"]:
-   render_test1(df_test1111=ctx.df, idx_test1111=ctx.idx)     
+   render_test1(df_test1=ctx.df, idx_test1=ctx.idx)     
