@@ -92,8 +92,10 @@ def compute_similar_schools_result(
 
     source_scored_dataset = filter_articles_with_thematic_scores(source_dataset)
     if similarity_mode == "profile" and source_scored_dataset.empty:
+        _perf_log(f"compute_total_sec={time.perf_counter() - compute_started:.2f} rows=0")
         return pd.DataFrame(), "Для исходной школы найдены статьи, но среди них нет статей с рассчитанными тематическими профилями."
     if similarity_mode == "combined" and source_scored_dataset.empty:
+        _perf_log(f"compute_total_sec={time.perf_counter() - compute_started:.2f} rows=0")
         return pd.DataFrame(), "Для комбинированного поиска у исходной школы должны быть статьи с рассчитанными тематическими профилями."
 
     scored_articles = filter_articles_with_thematic_scores(df_articles)
