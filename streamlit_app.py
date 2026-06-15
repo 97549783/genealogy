@@ -10,7 +10,7 @@ from core.app import (
     render_app_header,
 )
 from tabs.articles.tab import render_articles_analysis_tab
-from tabs.articles.tab import render_ссс_tab
+from tabs.articles import render_ссс_tab
 from tabs.intersection.tab import render_opponents_intersection_tab
 from tabs.lineages.tab import render_school_trees_tab
 from tabs.profiles.tab import render_profiles_tab
