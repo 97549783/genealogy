@@ -250,3 +250,93 @@ mode.render_similar_schools_mode(pd.DataFrame(), {})
         "Для комбинированного поиска у исходной школы должны быть статьи с рассчитанными тематическими профилями." in value.value
         for value in app.info
     )
+
+
+def test_compute_similar_schools_excludes_source_school_descendants_for_any_scope(monkeypatch) -> None:
+    import pandas as pd
+    from core.lineage.graph import build_index
+    import tabs.articles.similar_schools_mode as mode
+
+    df_lineage = pd.DataFrame(
+        [
+            {"candidate_name": "Петров Петр Петрович", "supervisor_name": "Иванов Иван Иванович"},
+            {"candidate_name": "Сидоров Сидор Сидорович", "supervisor_name": "Петров Петр Петрович"},
+        ]
+    )
+    idx_lineage = build_index(df_lineage, ["supervisor_name"])
+    options = [
+        "Иванов Иван Иванович",
+        "Петров Петр Петрович",
+        "Сидоров Сидор Сидорович",
+        "Смирнов Сергей Сергеевич",
+    ]
+    calls = []
+
+    def _fake_build(option, *args, **kwargs):
+        calls.append(option)
+        return pd.DataFrame([{"Article_id": f"A-{option}", "Authors": option, "Keywords": "общий"}])
+
+    monkeypatch.setattr(mode, "build_articles_dataset_for_school", _fake_build)
+    monkeypatch.setattr(mode, "build_article_author_index", lambda article_authors: {})
+
+    for scope in ["direct", "all"]:
+        calls.clear()
+        result, message = mode.compute_similar_schools_result(
+            "Иванов Иван Иванович",
+            options,
+            {option: "article_author" for option in options},
+            df_lineage,
+            idx_lineage,
+            pd.DataFrame([{"Article_id": "A", "Keywords": "общий"}]),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            scope,
+            "keywords",
+            1,
+            3.0,
+            None,
+        )
+
+        assert message is None
+        assert calls == ["Иванов Иван Иванович", "Смирнов Сергей Сергеевич"]
+        assert result["Школа"].tolist() == ["Смирнов Сергей Сергеевич"]
+        assert "Петров Петр Петрович" not in result["Школа"].tolist()
+        assert "Сидоров Сидор Сидорович" not in result["Школа"].tolist()
+
+
+def test_compute_similar_schools_unknown_source_excludes_only_source(monkeypatch) -> None:
+    import pandas as pd
+    from core.lineage.graph import build_index
+    import tabs.articles.similar_schools_mode as mode
+
+    df_lineage = pd.DataFrame([{"candidate_name": "Петров Петр Петрович", "supervisor_name": "Иванов Иван Иванович"}])
+    idx_lineage = build_index(df_lineage, ["supervisor_name"])
+    options = ["Неизвестный Николай Николаевич", "Петров Петр Петрович", "Смирнов Сергей Сергеевич"]
+    calls = []
+
+    def _fake_build(option, *args, **kwargs):
+        calls.append(option)
+        return pd.DataFrame([{"Article_id": f"A-{option}", "Authors": option, "Keywords": "общий"}])
+
+    monkeypatch.setattr(mode, "build_articles_dataset_for_school", _fake_build)
+    monkeypatch.setattr(mode, "build_article_author_index", lambda article_authors: {})
+
+    result, message = mode.compute_similar_schools_result(
+        "Неизвестный Николай Николаевич",
+        options,
+        {option: "article_author" for option in options},
+        df_lineage,
+        idx_lineage,
+        pd.DataFrame([{"Article_id": "A", "Keywords": "общий"}]),
+        pd.DataFrame(),
+        pd.DataFrame(),
+        "direct",
+        "keywords",
+        1,
+        3.0,
+        None,
+    )
+
+    assert message is None
+    assert calls == ["Неизвестный Николай Николаевич", "Петров Петр Петрович", "Смирнов Сергей Сергеевич"]
+    assert result["Школа"].tolist() == ["Петров Петр Петрович", "Смирнов Сергей Сергеевич"]

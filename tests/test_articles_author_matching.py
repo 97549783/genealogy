@@ -136,35 +136,25 @@ def test_short_initials_remain_ambiguous(monkeypatch) -> None:
 
 
 def test_school_member_names_resolve_article_author_label_to_lineage_full_name(monkeypatch) -> None:
+    from core.lineage.graph import build_index
+
     _clear_matching_caches()
-    df_lineage = pd.DataFrame([{"candidate_name": "Аспирант", "supervisors_1.name": "Иванов Иван Иванович"}])
-    seen = {}
+    df_lineage = pd.DataFrame([{"candidate_name": "Ученик Уч Ученикович", "supervisors_1.name": "Иванов Иван Иванович"}])
+    idx_lineage = build_index(df_lineage, ["supervisors_1.name"])
 
-    class _Graph:
-        def has_node(self, node):
-            return node == "Иванов Иван Иванович"
+    def _lineage_should_not_be_called(*args, **kwargs):
+        raise AssertionError("lineage() не должен вызываться для прямого охвата")
 
-        def successors(self, node):
-            return ["Ученик Уч Ученикович"]
-
-        def nodes(self):
-            return ["Иванов Иван Иванович", "Ученик Уч Ученикович"]
-
-    def _fake_lineage(df, idx, root):
-        seen["root"] = root
-        return _Graph(), None
-
-    monkeypatch.setattr(matching, "lineage", _fake_lineage)
+    monkeypatch.setattr(matching, "lineage", _lineage_should_not_be_called)
 
     names = matching.get_school_member_names(
         "Иванов И.И.",
         {"Иванов И.И.": "article_author"},
         df_lineage,
-        {},
+        idx_lineage,
         "direct",
     )
 
-    assert seen["root"] == "Иванов Иван Иванович"
     assert names == {"Иванов Иван Иванович", "Ученик Уч Ученикович"}
 
 
@@ -204,3 +194,91 @@ def test_school_membership_uses_tree_tab_root_for_exact_full_name(monkeypatch) -
 
     assert seen["root"] == "Григорьев Сергей Георгиевич"
     assert names == {"Григорьев Сергей Георгиевич"}
+
+
+def test_get_school_member_names_direct_scope_does_not_call_lineage(monkeypatch) -> None:
+    from core.lineage.graph import build_index
+
+    _clear_matching_caches()
+    df_lineage = pd.DataFrame(
+        [
+            {"candidate_name": "Петров Петр Петрович", "supervisor_name": "Иванов Иван Иванович"},
+            {"candidate_name": "Сидоров Сидор Сидорович", "supervisor_name": "Петров Петр Петрович"},
+        ]
+    )
+    idx_lineage = build_index(df_lineage, ["supervisor_name"])
+
+    def _lineage_should_not_be_called(*args, **kwargs):
+        raise AssertionError("lineage() не должен вызываться для прямого охвата")
+
+    monkeypatch.setattr(matching, "lineage", _lineage_should_not_be_called)
+
+    names = matching.get_school_member_names(
+        "Иванов Иван Иванович",
+        {"Иванов Иван Иванович": "article_author"},
+        df_lineage,
+        idx_lineage,
+        "direct",
+    )
+
+    assert names == {"Иванов Иван Иванович", "Петров Петр Петрович"}
+    assert "Сидоров Сидор Сидорович" not in names
+
+
+def test_get_school_member_names_all_scope_includes_all_descendants() -> None:
+    from core.lineage.graph import build_index
+
+    _clear_matching_caches()
+    df_lineage = pd.DataFrame(
+        [
+            {"candidate_name": "Петров Петр Петрович", "supervisor_name": "Иванов Иван Иванович"},
+            {"candidate_name": "Сидоров Сидор Сидорович", "supervisor_name": "Петров Петр Петрович"},
+        ]
+    )
+    idx_lineage = build_index(df_lineage, ["supervisor_name"])
+
+    names = matching.get_school_member_names(
+        "Иванов Иван Иванович",
+        {"Иванов Иван Иванович": "article_author"},
+        df_lineage,
+        idx_lineage,
+        "all",
+    )
+
+    assert names == {
+        "Иванов Иван Иванович",
+        "Петров Петр Петрович",
+        "Сидоров Сидор Сидорович",
+    }
+
+
+def test_source_school_excluded_initials_includes_full_lineage_independent_of_scope() -> None:
+    from core.lineage.graph import build_index
+
+    _clear_matching_caches()
+    df_lineage = pd.DataFrame(
+        [
+            {"candidate_name": "Петров Петр Петрович", "supervisor_name": "Иванов Иван Иванович"},
+            {"candidate_name": "Сидоров Сидор Сидорович", "supervisor_name": "Петров Петр Петрович"},
+        ]
+    )
+    idx_lineage = build_index(df_lineage, ["supervisor_name"])
+
+    excluded = matching.get_source_school_excluded_initials("Иванов Иван Иванович", df_lineage, idx_lineage)
+
+    assert matching.canon_article_author_name("Иванов Иван Иванович") in excluded
+    assert matching.canon_article_author_name("Петров Петр Петрович") in excluded
+    assert matching.canon_article_author_name("Сидоров Сидор Сидорович") in excluded
+    assert matching.canon_article_author_name("Смирнов Сергей Сергеевич") not in excluded
+
+
+def test_source_school_excluded_initials_unknown_author_excludes_only_selected_author() -> None:
+    from core.lineage.graph import build_index
+
+    _clear_matching_caches()
+    df_lineage = pd.DataFrame([{"candidate_name": "Петров Петр Петрович", "supervisor_name": "Иванов Иван Иванович"}])
+    idx_lineage = build_index(df_lineage, ["supervisor_name"])
+
+    excluded = matching.get_source_school_excluded_initials("Неизвестный Николай Николаевич", df_lineage, idx_lineage)
+
+    assert excluded == {matching.canon_article_author_name("Неизвестный Николай Николаевич")}
