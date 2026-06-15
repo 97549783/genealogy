@@ -12,7 +12,7 @@ from core.db.articles import load_article_authors, load_article_keywords, load_a
 from core.ui.links import share_params_button
 from .author_matching import compute_selectable_people, resolve_article_author_to_lineage_root
 from .blocks import get_available_block_columns
-from .data import build_articles_dataset_for_school, filter_articles_with_thematic_scores
+from .data import build_article_author_index, build_articles_dataset_for_school, filter_articles_with_thematic_scores
 from .metrics import build_school_vector, compute_keyword_overlap, cosine_similarity_safe, get_article_feature_columns, normalize_keyword
 from .query_params import parse_float_param, parse_int_param, query_params_signature, should_hydrate_query
 
@@ -55,6 +55,7 @@ def compute_similar_schools_result(
     classifier_labels: Optional[Dict[str, str]],
 ) -> tuple[pd.DataFrame, str | None]:
     """Считает похожие школы по подтверждённым пользователем параметрам."""
+    article_author_index = build_article_author_index(article_authors)
     source_dataset = build_articles_dataset_for_school(
         source_school,
         options_meta,
@@ -63,6 +64,7 @@ def compute_similar_schools_result(
         df_articles,
         scope,
         df_article_authors=article_authors,
+        article_author_index=article_author_index,
     )
     if source_dataset.empty:
         return pd.DataFrame(), "Для исходной школы статьи не найдены."
@@ -92,6 +94,7 @@ def compute_similar_schools_result(
             df_articles,
             scope,
             df_article_authors=article_authors,
+            article_author_index=article_author_index,
         )
         target_scored_dataset = filter_articles_with_thematic_scores(dataset)
         count_for_limit = len(dataset) if similarity_mode == "keywords" else len(target_scored_dataset)

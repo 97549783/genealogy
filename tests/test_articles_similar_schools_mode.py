@@ -102,6 +102,39 @@ mode.render_similar_schools_mode(pd.DataFrame(), {})
     assert any("Параметры изменены. Нажмите «Поиск», чтобы обновить результаты." in value.value for value in app.info)
 
 
+def test_similar_schools_builds_author_index_once_per_uncached_search() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.similar_schools_mode as mode
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П.", "Сидоров С.С."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only", "Сидоров С.С.": "initials_only"})
+mode.load_articles_data = lambda: pd.DataFrame([{"Article_id": "A1", "Authors": "Иванов И.И.", "Year": "2020", "Keywords": "а", "Has_thematic_scores": True, "1": 1.0}])
+mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "а"}])
+mode.load_article_authors = lambda: pd.DataFrame([{"Article_id": "A1", "Name": "Иванов И.И."}])
+mode.get_article_feature_columns = lambda df: ["1"]
+mode.get_available_block_columns = lambda df, classifier_labels=None: []
+def _fake_author_index(article_authors):
+    st.session_state["_author_index_calls"] = st.session_state.get("_author_index_calls", 0) + 1
+    return {"иванов и.и.": {"A1"}}
+mode.build_article_author_index = _fake_author_index
+def _fake_build(option, *args, **kwargs):
+    assert kwargs.get("article_author_index") == {"иванов и.и.": {"A1"}}
+    st.session_state["_build_calls"] = st.session_state.get("_build_calls", 0) + 1
+    article_id = "A1" if option == "Иванов И.И." else f"A_{option}"
+    return pd.DataFrame([{"Article_id": article_id, "Authors": option, "Year": "2020", "Keywords": "а", "Has_thematic_scores": True, "1": 1.0}])
+mode.build_articles_dataset_for_school = _fake_build
+mode.render_similar_schools_mode(pd.DataFrame(), {})
+"""
+    )
+    app.run(timeout=10)
+    app.selectbox[0].select("Иванов И.И.").run(timeout=10)
+    app.button[0].click().run(timeout=10)
+
+    assert app.session_state["_author_index_calls"] == 1
+    assert app.session_state["_build_calls"] == 3
+
+
 def test_similar_schools_hydrates_query_and_builds_share_payload() -> None:
     app = AppTest.from_string(
         """
