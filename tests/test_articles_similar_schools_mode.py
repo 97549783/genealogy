@@ -22,6 +22,86 @@ mode.render_similar_schools_mode(pd.DataFrame(), {})
     assert any("Выберите исходную научную школу для поиска похожих школ." in value.value for value in app.info)
 
 
+def test_similar_schools_does_not_search_after_manual_school_selection() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.similar_schools_mode as mode
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
+mode.load_articles_data = lambda: pd.DataFrame([{"Article_id": "A1"}])
+def _fake_build(*args, **kwargs):
+    st.session_state["_dataset_built"] = True
+    return pd.DataFrame()
+mode.build_articles_dataset_for_school = _fake_build
+mode.render_similar_schools_mode(pd.DataFrame(), {})
+"""
+    )
+    app.run(timeout=10)
+    app.selectbox[0].select("Иванов И.И.").run(timeout=10)
+    assert "_dataset_built" not in app.session_state
+    assert any("Задайте параметры и нажмите «Поиск»." in value.value for value in app.info)
+
+
+def test_similar_schools_searches_after_button_click() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.similar_schools_mode as mode
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
+mode.load_articles_data = lambda: pd.DataFrame([{"Article_id": "A1", "Authors": "Иванов И.И.", "Year": "2020", "Keywords": "а", "Has_thematic_scores": True, "1": 1.0}])
+mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "а"}])
+mode.load_article_authors = lambda: pd.DataFrame()
+mode.get_article_feature_columns = lambda df: ["1"]
+mode.get_available_block_columns = lambda df, classifier_labels=None: []
+def _fake_build(option, *args, **kwargs):
+    st.session_state["_dataset_built"] = True
+    article_id = "A1" if option == "Иванов И.И." else "A2"
+    return pd.DataFrame([{"Article_id": article_id, "Authors": option, "Year": "2020", "Keywords": "а", "Has_thematic_scores": True, "1": 1.0}])
+mode.build_articles_dataset_for_school = _fake_build
+mode.render_similar_schools_mode(pd.DataFrame(), {})
+"""
+    )
+    app.run(timeout=10)
+    app.selectbox[0].select("Иванов И.И.").run(timeout=10)
+    app.button[0].click().run(timeout=10)
+    assert app.session_state["_dataset_built"] is True
+    assert len(app.dataframe) == 1
+
+
+def test_similar_schools_parameter_change_does_not_recalculate() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.articles.similar_schools_mode as mode
+mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
+mode.load_articles_data = lambda: pd.DataFrame([{"Article_id": "A1", "Authors": "Иванов И.И.", "Year": "2020", "Keywords": "а", "Has_thematic_scores": True, "1": 1.0}])
+mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "а"}])
+mode.load_article_authors = lambda: pd.DataFrame()
+mode.get_article_feature_columns = lambda df: ["1"]
+mode.get_available_block_columns = lambda df, classifier_labels=None: []
+def _fake_build(option, *args, **kwargs):
+    st.session_state["_build_calls"] = st.session_state.get("_build_calls", 0) + 1
+    article_id = "A1" if option == "Иванов И.И." else "A2"
+    return pd.DataFrame([{"Article_id": article_id, "Authors": option, "Year": "2020", "Keywords": "а", "Has_thematic_scores": True, "1": 1.0}])
+mode.build_articles_dataset_for_school = _fake_build
+mode.render_similar_schools_mode(pd.DataFrame(), {})
+"""
+    )
+    app.run(timeout=10)
+    app.selectbox[0].select("Иванов И.И.").run(timeout=10)
+    app.button[0].click().run(timeout=10)
+    build_calls = app.session_state["_build_calls"]
+
+    app.number_input[0].set_value(2).run(timeout=10)
+
+    assert app.session_state["_build_calls"] == build_calls
+    assert len(app.dataframe) == 0
+    assert any("Параметры изменены. Нажмите «Поиск», чтобы обновить результаты." in value.value for value in app.info)
+
+
 def test_similar_schools_hydrates_query_and_builds_share_payload() -> None:
     app = AppTest.from_string(
         """
@@ -31,6 +111,7 @@ import tabs.articles.similar_schools_mode as mode
 mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
 mode.load_articles_data = lambda: pd.DataFrame([{"Article_id": "A1", "Authors": "Иванов И.И.", "Year": "2020", "Keywords": "а", "1": 1.0}, {"Article_id": "A2", "Authors": "Петров П.П.", "Year": "2021", "Keywords": "а", "1": 0.5}])
 mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "а"}, {"Article_id": "A2", "Keyword": "а"}])
+mode.load_article_authors = lambda: pd.DataFrame()
 mode.get_article_feature_columns = lambda df: ["1"]
 mode.get_available_block_columns = lambda df, classifier_labels=None: []
 mode.share_params_button = lambda payload, key: st.session_state.update({"_share_payload": payload, "_share_key": key})
@@ -97,6 +178,7 @@ import streamlit as st
 import tabs.articles.similar_schools_mode as mode
 mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
 mode.load_article_keywords = lambda: pd.DataFrame([{"Article_id": "A1", "Keyword": "а"}, {"Article_id": "A2", "Keyword": "а"}])
+mode.load_article_authors = lambda: pd.DataFrame()
 mode.get_article_feature_columns = lambda df: ["1"]
 mode.get_available_block_columns = lambda df, classifier_labels=None: []
 mode.share_params_button = lambda payload, key: st.session_state.update({"_share_payload": payload, "_share_key": key})
@@ -121,6 +203,7 @@ import pandas as pd
 import tabs.articles.similar_schools_mode as mode
 mode.compute_selectable_people = lambda df_lineage, include_without_descendants: (["Иванов И.И.", "Петров П.П."], {"Иванов И.И.": "initials_only", "Петров П.П.": "initials_only"})
 mode.load_article_keywords = lambda: pd.DataFrame()
+mode.load_article_authors = lambda: pd.DataFrame()
 mode.get_article_feature_columns = lambda df: ["1"]
 mode.get_available_block_columns = lambda df, classifier_labels=None: []
 mode.build_articles_dataset_for_school = lambda option, *args, **kwargs: pd.DataFrame([{"Article_id": "A1", "Authors": option, "Year": "2020", "Keywords": "а", "Has_thematic_scores": False, "1": pd.NA}])

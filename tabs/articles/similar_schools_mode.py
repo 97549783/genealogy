@@ -8,7 +8,7 @@ from typing import Dict, Optional, Set
 import pandas as pd
 import streamlit as st
 
-from core.db.articles import load_article_keywords, load_articles_data
+from core.db.articles import load_article_authors, load_article_keywords, load_articles_data
 from core.ui.links import share_params_button
 from .author_matching import compute_selectable_people, resolve_article_author_to_lineage_root
 from .blocks import get_available_block_columns
@@ -37,6 +37,94 @@ def _strong_block_labels(dataset: pd.DataFrame, blocks: list[dict], threshold: f
         if code in dataset.columns and float(pd.to_numeric(dataset[code], errors="coerce").fillna(0).mean()) >= threshold:
             labels.add(str(block.get("label", "")))
     return labels
+
+
+def compute_similar_schools_result(
+    source_school: str,
+    options: list[str],
+    options_meta: dict[str, str],
+    df_lineage: pd.DataFrame,
+    idx_lineage: Dict[str, Set[int]],
+    df_articles: pd.DataFrame,
+    article_authors: pd.DataFrame,
+    article_keywords: pd.DataFrame,
+    scope: str,
+    similarity_mode: str,
+    min_articles: int,
+    threshold: float,
+    classifier_labels: Optional[Dict[str, str]],
+) -> tuple[pd.DataFrame, str | None]:
+    """Считает похожие школы по подтверждённым пользователем параметрам."""
+    source_dataset = build_articles_dataset_for_school(
+        source_school,
+        options_meta,
+        df_lineage,
+        idx_lineage,
+        df_articles,
+        scope,
+        df_article_authors=article_authors,
+    )
+    if source_dataset.empty:
+        return pd.DataFrame(), "Для исходной школы статьи не найдены."
+
+    source_scored_dataset = filter_articles_with_thematic_scores(source_dataset)
+    if similarity_mode == "profile" and source_scored_dataset.empty:
+        return pd.DataFrame(), "Для исходной школы найдены статьи, но среди них нет статей с рассчитанными тематическими профилями."
+    if similarity_mode == "combined" and source_scored_dataset.empty:
+        return pd.DataFrame(), "Для комбинированного поиска у исходной школы должны быть статьи с рассчитанными тематическими профилями."
+
+    scored_articles = filter_articles_with_thematic_scores(df_articles)
+    feature_columns = get_article_feature_columns(scored_articles if not scored_articles.empty else df_articles)
+    blocks = get_available_block_columns(scored_articles if not scored_articles.empty else df_articles, classifier_labels=classifier_labels)
+    source_vector = build_school_vector(source_scored_dataset, feature_columns) if similarity_mode in {"profile", "combined"} else None
+    source_keywords = _keywords_for_dataset(source_dataset, article_keywords)
+    source_strong = _strong_block_labels(source_scored_dataset, blocks, float(threshold)) if similarity_mode in {"profile", "combined"} else set()
+
+    rows = []
+    for option in options:
+        if option == source_school:
+            continue
+        dataset = build_articles_dataset_for_school(
+            option,
+            options_meta,
+            df_lineage,
+            idx_lineage,
+            df_articles,
+            scope,
+            df_article_authors=article_authors,
+        )
+        target_scored_dataset = filter_articles_with_thematic_scores(dataset)
+        count_for_limit = len(dataset) if similarity_mode == "keywords" else len(target_scored_dataset)
+        if count_for_limit < int(min_articles):
+            continue
+
+        cosine = 0.0
+        common_strong: list[str] = []
+        different: list[str] = []
+        if similarity_mode in {"profile", "combined"}:
+            if target_scored_dataset.empty:
+                continue
+            target_vector = build_school_vector(target_scored_dataset, feature_columns)
+            cosine = cosine_similarity_safe(source_vector, target_vector)
+            target_strong = _strong_block_labels(target_scored_dataset, blocks, float(threshold))
+            common_strong = sorted(source_strong & target_strong)
+            different = sorted((source_strong | target_strong) - (source_strong & target_strong))
+
+        overlap = compute_keyword_overlap(source_keywords, _keywords_for_dataset(dataset, article_keywords))
+        rows.append({
+            "Школа": option,
+            "Косинусная близость": cosine,
+            "Количество статей": len(dataset),
+            "Статей с тематическим профилем": len(target_scored_dataset),
+            "Общие сильные блоки": "; ".join(common_strong),
+            "Отличающиеся блоки": "; ".join(different[:10]),
+            "Общих ключевых слов": overlap["intersection_count"],
+            "Jaccard": overlap["jaccard"],
+            "Пересекающиеся ключевые слова": "; ".join(overlap["intersection_keywords"][:20]),
+            "Итоговая близость": 0.7 * cosine + 0.3 * overlap["jaccard"],
+        })
+
+    return pd.DataFrame(rows), None
 
 
 def render_similar_schools_mode(
@@ -74,6 +162,7 @@ def render_similar_schools_mode(
         st.session_state["aa_min_articles"] = max(1, min(1000, parse_int_param(st.query_params.get("aa_min_articles", 1), 1)))
         st.session_state["aa_top_n"] = max(1, min(100, parse_int_param(st.query_params.get("aa_top_n", 20), 20)))
         st.session_state["aa_similar_threshold"] = max(0.0, min(10.0, parse_float_param(st.query_params.get("aa_threshold", 3.0), 3.0)))
+        st.session_state["aa_similar_auto_search"] = bool(st.session_state.get("aa_source_school"))
 
     selected_value = st.session_state.get("aa_source_school")
     selected_index = options.index(selected_value) if selected_value in options else None
@@ -128,67 +217,58 @@ def render_similar_schools_mode(
     with c3:
         threshold = st.number_input("Порог среднего балла", min_value=0.0, max_value=10.0, value=float(st.session_state.get("aa_similar_threshold", 3.0)), step=0.1, key="aa_similar_threshold")
 
+    search_signature = (
+        source_school,
+        scope,
+        similarity_mode,
+        int(min_articles),
+        int(top_n),
+        round(float(threshold), 6),
+        tuple(st.session_state.get("aa_selected_journals", ["all"])),
+        st.session_state.get("ac_disambiguation", {}).get(resolution.canon_key, ""),
+    )
+    search_clicked = st.button("Поиск", type="primary", key="aa_similar_search")
+    if search_clicked:
+        st.session_state["aa_similar_submitted_signature"] = search_signature
+    if st.session_state.pop("aa_similar_auto_search", False):
+        st.session_state["aa_similar_submitted_signature"] = search_signature
+
+    submitted_signature = st.session_state.get("aa_similar_submitted_signature")
+    if submitted_signature != search_signature:
+        if submitted_signature is None:
+            st.info("Задайте параметры и нажмите «Поиск».")
+        else:
+            st.info("Параметры изменены. Нажмите «Поиск», чтобы обновить результаты.")
+        return
+
     if df_articles is None:
         df_articles = load_articles_data()
-    source_dataset = build_articles_dataset_for_school(source_school, options_meta, df_lineage, idx_lineage, df_articles, scope)
-    if source_dataset.empty:
-        st.info("Для исходной школы статьи не найдены.")
+    cache = st.session_state.setdefault("aa_similar_results_cache", {})
+    if search_signature in cache:
+        result, message = cache[search_signature]
+    else:
+        with st.spinner("Идёт поиск похожих школ..."):
+            article_authors = load_article_authors()
+            article_keywords = load_article_keywords()
+            result, message = compute_similar_schools_result(
+                source_school,
+                options,
+                options_meta,
+                df_lineage,
+                idx_lineage,
+                df_articles,
+                article_authors,
+                article_keywords,
+                scope,
+                similarity_mode,
+                int(min_articles),
+                float(threshold),
+                classifier_labels,
+            )
+        cache[search_signature] = (result, message)
+    if message:
+        st.info(message)
         return
-
-    article_keywords = load_article_keywords()
-    source_scored_dataset = filter_articles_with_thematic_scores(source_dataset)
-    if similarity_mode == "profile" and source_scored_dataset.empty:
-        st.info("Для исходной школы найдены статьи, но среди них нет статей с рассчитанными тематическими профилями.")
-        return
-    if similarity_mode == "combined" and source_scored_dataset.empty:
-        st.info("Для комбинированного поиска у исходной школы должны быть статьи с рассчитанными тематическими профилями.")
-        return
-
-    scored_articles = filter_articles_with_thematic_scores(df_articles)
-    feature_columns = get_article_feature_columns(scored_articles if not scored_articles.empty else df_articles)
-    blocks = get_available_block_columns(scored_articles if not scored_articles.empty else df_articles, classifier_labels=classifier_labels)
-    source_vector = build_school_vector(source_scored_dataset, feature_columns) if similarity_mode in {"profile", "combined"} else None
-    source_keywords = _keywords_for_dataset(source_dataset, article_keywords)
-    source_strong = _strong_block_labels(source_scored_dataset, blocks, float(threshold)) if similarity_mode in {"profile", "combined"} else set()
-
-    rows = []
-    with st.spinner("Идёт поиск похожих школ..."):
-        for option in options:
-            if option == source_school:
-                continue
-            dataset = build_articles_dataset_for_school(option, options_meta, df_lineage, idx_lineage, df_articles, scope)
-            target_scored_dataset = filter_articles_with_thematic_scores(dataset)
-            count_for_limit = len(dataset) if similarity_mode == "keywords" else len(target_scored_dataset)
-            if count_for_limit < int(min_articles):
-                continue
-
-            cosine = 0.0
-            common_strong: list[str] = []
-            different: list[str] = []
-            if similarity_mode in {"profile", "combined"}:
-                if target_scored_dataset.empty:
-                    continue
-                target_vector = build_school_vector(target_scored_dataset, feature_columns)
-                cosine = cosine_similarity_safe(source_vector, target_vector)
-                target_strong = _strong_block_labels(target_scored_dataset, blocks, float(threshold))
-                common_strong = sorted(source_strong & target_strong)
-                different = sorted((source_strong | target_strong) - (source_strong & target_strong))
-
-            overlap = compute_keyword_overlap(source_keywords, _keywords_for_dataset(dataset, article_keywords))
-            rows.append({
-                "Школа": option,
-                "Косинусная близость": cosine,
-                "Количество статей": len(dataset),
-                "Статей с тематическим профилем": len(target_scored_dataset),
-                "Общие сильные блоки": "; ".join(common_strong),
-                "Отличающиеся блоки": "; ".join(different[:10]),
-                "Общих ключевых слов": overlap["intersection_count"],
-                "Jaccard": overlap["jaccard"],
-                "Пересекающиеся ключевые слова": "; ".join(overlap["intersection_keywords"][:20]),
-                "Итоговая близость": 0.7 * cosine + 0.3 * overlap["jaccard"],
-            })
-
-    result = pd.DataFrame(rows)
     if result.empty:
         st.info("Похожие школы по заданным условиям не найдены.")
         return
