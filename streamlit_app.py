@@ -18,7 +18,7 @@ from tabs.registry import DEFAULT_TAB_ID, TAB_ID_TO_LABEL, TAB_SPECS
 from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
-from tabs.test1111 import test1111
+from tabs.test1 import test1111
 
 
 MAIN_TAB_STATE_KEY = "main_tab"
