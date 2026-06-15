@@ -1,5 +1,2 @@
-#Тестовое сообщение
-
-test = ("Привет, как дела?")
-
-print(test)
+def test111():
+    print("Hello, World!")
