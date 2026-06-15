@@ -93,6 +93,13 @@ if _should_render_tab("school_search"):
             idx=ctx.idx,
         )
 
+if _ccc_render_tab("ccc_search"):
+    with tab_by_id["ccc_search"]:
+        render_ccc_search_tab(
+            df=ctx.df,
+            idx=ctx.idx,
+        )
+
 if _should_render_tab("intersection"):
     with tab_by_id["intersection"]:
         render_opponents_intersection_tab(df=ctx.df, idx=ctx.idx)
