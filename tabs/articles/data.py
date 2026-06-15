@@ -74,11 +74,35 @@ def make_elibrary_url(doi: Any) -> str:
     return f"https://elibrary.ru/{value}" if value else ""
 
 
+def build_article_author_index(article_authors: pd.DataFrame) -> dict[str, set[str]]:
+    """Строит индекс авторов статей для быстрого поиска статей по инициалам."""
+    if article_authors is None or article_authors.empty:
+        return {}
+    if "Article_id" not in article_authors.columns or "Name" not in article_authors.columns:
+        return {}
+
+    work = article_authors[["Article_id", "Name"]].dropna(subset=["Article_id", "Name"]).copy()
+    work["_article_id"] = work["Article_id"].astype(str).str.strip()
+    work["_canon"] = work["Name"].astype(str).map(canon_article_author_name)
+    work = work[(work["_article_id"] != "") & (work["_canon"] != "")]
+
+    index: dict[str, set[str]] = {}
+    for canon_name, article_id in zip(work["_canon"], work["_article_id"]):
+        index.setdefault(str(canon_name), set()).add(str(article_id))
+    return index
+
+
 def _article_ids_for_initials(
     member_initials: Set[str],
     article_authors: pd.DataFrame,
+    article_author_index: dict[str, set[str]] | None = None,
 ) -> Set[str]:
     """Возвращает идентификаторы статей по совпадению авторов из `article_authors`."""
+    if article_author_index is not None:
+        article_ids: Set[str] = set()
+        for key in member_initials:
+            article_ids.update(article_author_index.get(key, set()))
+        return article_ids
     if not member_initials or article_authors is None or article_authors.empty:
         return set()
     if "Article_id" not in article_authors.columns or "Name" not in article_authors.columns:
@@ -107,9 +131,19 @@ def build_articles_dataset_for_school(
     df_articles: pd.DataFrame,
     scope: str,
     df_article_authors: pd.DataFrame | None = None,
+    article_author_index: dict[str, set[str]] | None = None,
 ) -> pd.DataFrame:
     """Строит набор статей для одной выбранной школы."""
-    return build_articles_dataset_for_schools([selected_option], options_meta, df_lineage, idx_lineage, df_articles, scope, df_article_authors=df_article_authors)
+    return build_articles_dataset_for_schools(
+        [selected_option],
+        options_meta,
+        df_lineage,
+        idx_lineage,
+        df_articles,
+        scope,
+        df_article_authors=df_article_authors,
+        article_author_index=article_author_index,
+    )
 
 
 def build_articles_dataset_for_schools(
@@ -120,11 +154,13 @@ def build_articles_dataset_for_schools(
     df_articles: pd.DataFrame,
     scope: str,
     df_article_authors: pd.DataFrame | None = None,
+    article_author_index: dict[str, set[str]] | None = None,
 ) -> pd.DataFrame:
     """Строит объединённый набор статей для нескольких школ."""
     if df_articles is None or df_articles.empty or "Article_id" not in df_articles.columns:
         return pd.DataFrame()
     article_authors = df_article_authors if df_article_authors is not None else load_article_authors()
+    author_index = article_author_index if article_author_index is not None else build_article_author_index(article_authors)
     work = _ensure_article_columns(df_articles)
     work["_article_id"] = work["Article_id"].astype(str).str.strip()
     combined: List[pd.DataFrame] = []
@@ -132,7 +168,7 @@ def build_articles_dataset_for_schools(
         initials = get_school_member_initials(option, options_meta, df_lineage, idx_lineage, scope)
         if not initials:
             continue
-        article_ids = _article_ids_for_initials(initials, article_authors)
+        article_ids = _article_ids_for_initials(initials, article_authors, author_index)
         if not article_ids:
             continue
         sub = work[work["_article_id"].isin(article_ids)].copy()
