@@ -18,7 +18,7 @@ from tabs.registry import DEFAULT_TAB_ID, TAB_ID_TO_LABEL, TAB_SPECS
 from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
-from test1 import  test1
+from tabs.test1111 import  test1111
 
 MAIN_TAB_STATE_KEY = "main_tab"
 
@@ -112,4 +112,8 @@ if _should_render_tab("school_comparison"):
 
 if _should_render_tab("articles_comparison"):
     with tab_by_id["articles_comparison"]:
+        render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
+
+if _should_render_tab("test1111"):
+    with tab_by_id["test1.py"]:
         render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
