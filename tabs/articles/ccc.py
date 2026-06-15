@@ -1,4 +1,8 @@
-#ccc
-test = ("123132132")
+import streamlit as st
 
-print(test)
+st.title("Тестовое приложение")
+st.write("Привет! Streamlit работает отлично.")
+
+name = st.text_input("Как вас зовут?")
+if name:
+    st.success(f"Приятно познакомиться, {name}!")
