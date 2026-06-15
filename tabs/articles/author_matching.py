@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from core.db.articles import load_article_authors
-from core.lineage.graph import lineage
+from core.lineage.graph import lineage, rows_for
 
 AUTHOR_COLUMN = "candidate_name"
 _RE_MULTI_SPACE = re.compile(r"\s+")
@@ -228,22 +228,62 @@ def get_school_member_names(
     idx_lineage: Dict[str, Set[int]],
     scope: str,
 ) -> Set[str]:
-    """Возвращает имена участников школы через общий расчёт генеалогической линии."""
+    """Возвращает имена участников школы через расчёт генеалогической линии."""
     resolution = resolve_article_author_to_lineage_root(selected_option, df_lineage)
     root_name = resolution.root_name or _session_resolved_lineage_root(resolution)
     if not root_name:
         return {resolution.display_name} if resolution.display_name else set()
 
-    graph, _ = lineage(df_lineage, idx_lineage, root_name)
-    if graph is None or not getattr(graph, "has_node", lambda _: False)(root_name):
-        return {root_name}
     if scope == "direct":
-        names = set(getattr(graph, "successors")(root_name))
+        names = {root_name}
+        rows = rows_for(df_lineage, idx_lineage, root_name)
+        if not rows.empty and AUTHOR_COLUMN in rows.columns:
+            names.update(
+                str(value).strip()
+                for value in rows[AUTHOR_COLUMN].dropna().astype(str)
+                if str(value).strip()
+            )
+        return names
+
+    if scope == "all":
+        graph, _ = lineage(df_lineage, idx_lineage, root_name)
+        if graph is None or not getattr(graph, "has_node", lambda _: False)(root_name):
+            return {root_name}
+        names = set(getattr(graph, "nodes")())
         names.add(root_name)
         return names
-    names = set(getattr(graph, "nodes")())
-    names.add(root_name)
-    return names
+
+    return {root_name}
+
+
+def get_source_school_excluded_initials(
+    selected_option: str,
+    df_lineage: pd.DataFrame,
+    idx_lineage: Dict[str, Set[int]],
+) -> Set[str]:
+    """Возвращает ключи исходного автора и всех участников его полной школы.
+
+    Используется, чтобы режим поиска похожих школ сравнивал исходную школу
+    только с внешними авторами, а не с её внутренними подшколами.
+    """
+    resolution = resolve_article_author_to_lineage_root(selected_option, df_lineage)
+    root_name = resolution.root_name or _session_resolved_lineage_root(resolution)
+    excluded: Set[str] = {resolution.canon_key} - {""}
+
+    if not root_name:
+        return excluded
+
+    graph, _ = lineage(df_lineage, idx_lineage, root_name)
+    names = {root_name}
+    if graph is not None:
+        names.update(str(name).strip() for name in getattr(graph, "nodes")() if str(name).strip())
+
+    excluded.update(
+        key
+        for key in (canon_initials(fio_to_short(name)) for name in names)
+        if key
+    )
+    return excluded
 
 
 def get_school_member_initials(
