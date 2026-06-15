@@ -19,7 +19,7 @@ from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
 
 
-MAIN_TAB_STATE_KEY = "main_tab"
+MAIN_TAB_STATE_KEY = "ccc_tab"
 
 
 st.set_page_config(page_title="Академическая генеалогия", layout="wide")
