@@ -20,8 +20,7 @@ from .comparison_mode import (
     load_articles_classifier,
     load_articles_data,
     share_params_button,
-    ссс,
-)
+    )
 from .single_school_mode import render_single_school_mode
 from .similar_schools_mode import render_similar_schools_mode
 from .semantic_imrad_mode import render_semantic_imrad_search_mode
