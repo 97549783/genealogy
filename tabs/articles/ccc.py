@@ -1,6 +1,5 @@
-# test.py
-def do_work():
-    print("Работаю...")
+file_path = "articles/ccc.py"
 
-if __name__ == "__main__":
-    do_work()
+with open(file_path, "r", encoding="utf-8") as f:
+    content = f.read()
+    print(content)
