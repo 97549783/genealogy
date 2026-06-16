@@ -117,5 +117,5 @@ if _should_render_tab("articles_comparison"):
 
 if _should_render_tab("test1111"):
     with tab_by_id["test1111"]:
-        render_test1111()
+        test1111()
 
