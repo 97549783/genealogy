@@ -118,5 +118,4 @@ if _should_render_tab("test1111"):
             idx=ctx.idx,
         )
         
-    with tab_by_id["test1111"]:
-        render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
+  
