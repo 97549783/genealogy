@@ -117,4 +117,4 @@ if _should_render_tab("articles_comparison"):
 
 if _should_render_tab("test1111"):
     with tab_by_id["test1111"]:
-         render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
+         render_test1111_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
