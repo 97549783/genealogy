@@ -1,2 +1,2 @@
-from .tab import render_test1111_tab
+from .tab import render_test1111
 print("Hellow, World!")
