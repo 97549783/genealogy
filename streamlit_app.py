@@ -113,5 +113,6 @@ if _should_render_tab("school_comparison"):
         )
 
 
-        
+ sys.argv = ["streamlit", "run", "test1111/test1111.py"]
+stcli.main()       
   
