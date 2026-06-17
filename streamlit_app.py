@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import streamlit as st
 
+from streamlit.web import cli as stcli
+import sys
+
 from core.app import (
     build_app_context,
     maybe_render_admin_page_and_stop,
