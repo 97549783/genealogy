@@ -1,2 +1,3 @@
-from .tab import render_test1111_test1111
-print("Hellow, World!")
+import streamlit as st
+
+st.write("Привет, мир")
