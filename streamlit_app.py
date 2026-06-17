@@ -19,7 +19,7 @@ from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
 
-with open("test1111.py", "r", encoding="utf-8") as f:
+with open("test1111/test1111.py", "r", encoding="utf-8") as f:
     code = f.read()
     exec(code)
 
