@@ -13,7 +13,7 @@ METADATA_COLS = {
     "Year", "Year_num", "Abstract", "Keywords", "DOI", "Pages", "Funding",
     "Has_thematic_scores", "Article_URL", "Article_PDF", "Published_at", "Section", "UDK",
     "Citation", "Issue_URL", "Issue_PDF", "Issue_title", "Issue_serial", "Issue_in_year",
-    "Issue_total_pages", "First_page", "Last_page", "Source_pages_text", "Source_article_url",
+    "Issue_total_pages", "First_page", "Last_page", "Source_pages_text", "Source_article_url", "ccc",
 }
 
 

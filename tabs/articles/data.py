@@ -17,7 +17,7 @@ ARTICLE_OUTPUT_COLUMNS = [
     "Published_at", "Section", "UDK", "Citation", "Issue_URL", "Issue_PDF",
     "Has_thematic_scores",
     "Issue_title", "Issue_serial", "Issue_in_year", "Issue_total_pages", "First_page",
-    "Last_page", "Source_pages_text", "Source_article_url", "Year_num",
+    "Last_page", "Source_pages_text", "Source_article_url", "Year_num","ccc",
 ]
 
 
