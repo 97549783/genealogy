@@ -19,9 +19,6 @@ from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
 
-from streamlit.web import cli as stcli
-import sys
-
 # Передаем аргументы командной строки в функцию запуска
 sys.argv = ["streamlit", "run", "test1111/test1111.py"]
 stcli.main()
