@@ -112,8 +112,6 @@ if _should_render_tab("school_comparison"):
             idx=ctx.idx,
         )
 
-if _should_render_tab("test1111"):
-    with tab_by_id["test1111"]:
-    test1111.test1111(test1111)
+
         
   
