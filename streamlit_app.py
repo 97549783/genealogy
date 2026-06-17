@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-from streamlit.web import cli as stcli
-import sys
-
 from core.app import (
     build_app_context,
     maybe_render_admin_page_and_stop,
@@ -21,10 +18,6 @@ from tabs.registry import DEFAULT_TAB_ID, TAB_ID_TO_LABEL, TAB_SPECS
 from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
-
-# Передаем аргументы командной строки в функцию запуска
-sys.argv = ["streamlit", "run", "test1111/test1111.py"]
-stcli.main()
 
 MAIN_TAB_STATE_KEY = "main_tab"
 
