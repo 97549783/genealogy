@@ -20,10 +20,6 @@ from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab 
 from test1111.test1111 import show_page
 
-st.title("Главное приложение")
-
-# Вызываем функцию для отображения текста
-show_page()
 
 
 MAIN_TAB_STATE_KEY = "main_tab"
