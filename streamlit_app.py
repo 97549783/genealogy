@@ -18,7 +18,6 @@ from tabs.registry import DEFAULT_TAB_ID, TAB_ID_TO_LABEL, TAB_SPECS
 from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
-
 from test1111.test1111 import show_page
 
 st.title("Главное приложение")
