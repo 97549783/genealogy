@@ -114,9 +114,6 @@ if _should_render_tab("school_comparison"):
 
 if _should_render_tab("test1111"):
     with tab_by_id["test1111"]:
-        render_profiles_tab(
-            df=ctx.df,
-            idx=ctx.idx,
-        )
+        render_profiles_tab()
         
   
