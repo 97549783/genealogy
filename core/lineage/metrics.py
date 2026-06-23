@@ -56,8 +56,8 @@ class LineageMetrics:
     first_observed_year: int | None
     last_observed_year: int | None
     mean_new_descendants_per_year: float | None
-    genealogical_index: float | None
-    genealogical_index_status: Literal["available", "source_required", "not_applicable"]
+    indirect_descendants_per_direct_student: float | None
+    second_generation_descendants_per_direct_student: float | None
     extended_values: tuple[MetricValue, ...]
     technical_values: tuple[MetricValue, ...]
     is_dag: bool
@@ -65,7 +65,7 @@ class LineageMetrics:
 
 
 def _empty(root: str, warning: str) -> LineageMetrics:
-    return LineageMetrics(root, 0, 0, 0, 0, None, 0, None, None, None, None, tuple(), tuple(), 0, 0, None, None, None, None, "not_applicable", tuple(), tuple(), True, (warning,))
+    return LineageMetrics(root, 0, 0, 0, 0, None, 0, None, None, None, None, tuple(), tuple(), 0, 0, None, None, None, None, None, tuple(), tuple(), True, (warning,))
 
 
 def _safe_year(value) -> int | None:
@@ -142,22 +142,31 @@ def _degree_counts(subset: pd.DataFrame, descendants: set[str], author_column: s
     return doctors, candidates, unknown
 
 
-def _branch_sizes(graph: nx.DiGraph, root: str) -> dict[str, int]:
+def _branch_generation_counts(graph: nx.DiGraph, root: str, generations: dict[str, int]) -> dict[str, dict[str, int]]:
     children = sorted(str(c) for c in graph.successors(root))
-    sizes = {child: 0 for child in children}
+    counts = {child: {"all_with_direct_student": 0, "indirect": 0, "second_generation": 0} for child in children}
     owner: dict[str, str] = {}
     for child in children:
         queue = deque([child])
+        seen = {child}
         while queue:
             node = str(queue.popleft())
             if node not in owner:
                 owner[node] = child
             for nxt in sorted(str(c) for c in graph.successors(node)):
-                queue.append(nxt)
+                if nxt not in seen:
+                    seen.add(nxt)
+                    queue.append(nxt)
     for node, child in owner.items():
-        if node != root:
-            sizes[child] += 1
-    return sizes
+        if node == root:
+            continue
+        counts[child]["all_with_direct_student"] += 1
+        generation = generations.get(node)
+        if generation is not None and generation >= 2:
+            counts[child]["indirect"] += 1
+        if generation == 2:
+            counts[child]["second_generation"] += 1
+    return counts
 
 
 def _unit_for_extended_metric(key: str) -> str:
@@ -167,6 +176,8 @@ def _unit_for_extended_metric(key: str) -> str:
         return "индекс 0-1"
     if key in {"mean_branching_factor", "median_branching_factor"}:
         return "учеников"
+    if key in {"median_indirect_descendants_per_direct_student", "median_second_generation_descendants_per_direct_student"}:
+        return "потомков"
     if key == "activity_span_years":
         return "лет"
     return ""
@@ -188,6 +199,7 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
     generations: dict[str, int] = {}
     generation_counts: tuple[GenerationCount, ...] = tuple()
     descendant_generations = levels = max_width = max_width_generation = None
+    indirect_per_direct = second_generation_per_direct = None
     if is_dag:
         generations = _shortest_generations(rg, root)
         by_gen = Counter(generations.values())
@@ -197,6 +209,10 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
         widths = [(k, v) for k, v in sorted(by_gen.items()) if k >= 1]
         if widths:
             max_width_generation, max_width = max(widths, key=lambda kv: (kv[1], -kv[0]))
+        second_generation_count = sum(1 for gen in generations.values() if gen == 2)
+        indirect_count = sum(1 for gen in generations.values() if gen >= 2)
+        indirect_per_direct = indirect_count / direct if direct else None
+        second_generation_per_direct = second_generation_count / direct if direct else None
     else:
         warnings.append("В достижимой части графа найден цикл; метрики поколений, ширины и динамики не рассчитываются.")
         for cycle in islice(nx.simple_cycles(rg), 3):
@@ -219,7 +235,8 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
         points = tuple(items)
         mean_per_year = dated / (last - first + 1)
     ext: list[MetricValue] = []
-    branch_sizes = _branch_sizes(rg, root) if is_dag else {}
+    branch_counts = _branch_generation_counts(rg, root, generations) if is_dag else {}
+    branch_sizes = {child: values["all_with_direct_student"] for child, values in branch_counts.items()}
     if include_extended:
         out_degrees = [int(rg.out_degree(n)) for n in rg.nodes]
         nonzero = [d for d in out_degrees if d > 0]
@@ -248,6 +265,8 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
             max_gap = max(max_gap, cur)
         recent = sum(1 for y in years_by_node.values() if last is not None and y >= last - 4)
         doctors, candidates, unknown = _degree_counts(subset, descendants, author_column, degree_column, warnings)
+        indirect_branch_values = [v["indirect"] for v in branch_counts.values()]
+        second_generation_branch_values = [v["second_generation"] for v in branch_counts.values()]
         values = {
             "terminal_descendants": terminal, "terminal_share_percent": terminal / len(descendants) * 100 if descendants else None,
             "internal_descendants": internal, "internal_share_percent": internal / len(descendants) * 100 if descendants else None,
@@ -256,6 +275,8 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
             "mean_descendant_generation": sum(generations.get(n, 0) for n in descendants) / len(descendants) if is_dag and descendants else None,
             "normalized_depth": descendant_generations / math.log2(len(descendants) + 1) if is_dag and descendants and descendant_generations is not None else None,
             "branch_balance": balance, "largest_branch_share_percent": max(branch_values) / total_branch * 100 if total_branch else None,
+            "median_indirect_descendants_per_direct_student": median(indirect_branch_values) if indirect_branch_values else None,
+            "median_second_generation_descendants_per_direct_student": median(second_generation_branch_values) if second_generation_branch_values else None,
             "structural_h_index": h, "linearity_index_percent": sum(1 for d in out_degrees if d == 1) / len(nonzero) * 100 if nonzero else None,
             "activity_span_years": last - first + 1 if first is not None and last is not None else None, "peak_growth_year": peak_year, "peak_growth_count": peak_count,
             "max_inactive_gap_years": max_gap if points else None, "recent_activity_5_years": recent if points else None,
@@ -271,4 +292,4 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
         MetricValue("undated_descendants", undated, "", "available"),
         MetricValue("undated_share_percent", undated / len(descendants) * 100 if descendants else None, "%", "available" if descendants else "not_applicable"),
     )
-    return LineageMetrics(str(root), rg.number_of_nodes(), rg.number_of_edges(), direct, continuing, rate, len(descendants), descendant_generations, levels, max_width, max_width_generation, generation_counts, points, dated, undated, first, last, mean_per_year, None, "not_applicable", tuple(ext), tech_values, is_dag, tuple(dict.fromkeys(warnings)))
+    return LineageMetrics(str(root), rg.number_of_nodes(), rg.number_of_edges(), direct, continuing, rate, len(descendants), descendant_generations, levels, max_width, max_width_generation, generation_counts, points, dated, undated, first, last, mean_per_year, indirect_per_direct, second_generation_per_direct, tuple(ext), tech_values, is_dag, tuple(dict.fromkeys(warnings)))

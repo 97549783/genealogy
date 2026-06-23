@@ -1,4 +1,4 @@
-from core.lineage import get_metric_definitions
+from core.lineage import get_metric_definitions, get_metric_source_caption
 
 
 def test_metric_definitions_have_clean_visible_text_and_verified_sources():
@@ -30,4 +30,17 @@ def test_metric_definition_exports_are_available():
 
     assert lineage.MetricDefinition
     assert lineage.MetricSource
-    assert lineage.get_metric_definition("genealogical_index").title == "Генеалогический индекс"
+    assert lineage.get_metric_definition("direct_students").title == "Прямые ученики"
+    assert lineage.MetricSourceUse
+
+
+def test_metric_source_captions_use_terms_not_statuses():
+    visible = " ".join(get_metric_source_caption(key) for key in ["direct_students", "continuing_students", "descendant_generations", "max_width"])
+    assert "проверено" not in visible
+    assert "source_required" not in visible
+    assert "verified" not in visible
+    assert "A-score" in visible
+    assert "fecundity" in visible
+    assert "fertility" in visible
+    assert "G-score" in visible
+    assert "W-score" in visible

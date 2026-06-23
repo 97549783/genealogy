@@ -7,7 +7,7 @@ from core.lineage.metrics import LineageMetrics, MetricValue
 
 METRIC_STATUS_LABELS = {
     "available": "доступно",
-    "not_applicable": "пока не рассчитывается",
+    "not_applicable": "не выводится",
     "source_required": "нужен источник",
     "insufficient_data": "недостаточно данных",
 }
@@ -26,8 +26,6 @@ def _metric_type(scope: str) -> str:
 
 
 def _status_for(metrics: LineageMetrics, key: str, value) -> str:
-    if key == "genealogical_index":
-        return metrics.genealogical_index_status
     if value is None:
         return "insufficient_data"
     return "available"
@@ -44,7 +42,7 @@ def _metric_value_row(item: MetricValue) -> dict:
     return {"key": item.key, "Группа": definition.group, "Метрика": definition.title, "Значение": item.value, "Единица": item.unit, "Интерпретация": definition.interpretation, "Статус": METRIC_STATUS_LABELS[item.status], "Тип метрики": _metric_type(definition.scope)}
 
 
-def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extended: bool = True) -> pd.DataFrame:
+def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extended: bool = True, include_technical: bool = False) -> pd.DataFrame:
     rows = [
         _row(metrics, "direct_students", metrics.direct_students),
         _row(metrics, "continuing_students", metrics.continuing_students),
@@ -53,11 +51,13 @@ def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extende
         _row(metrics, "descendant_generations", metrics.descendant_generations),
         _row(metrics, "levels_including_root", metrics.levels_including_root),
         _row(metrics, "max_width", metrics.max_width),
-        _row(metrics, "genealogical_index", metrics.genealogical_index),
+        _row(metrics, "indirect_descendants_per_direct_student", metrics.indirect_descendants_per_direct_student, "потомков"),
+        _row(metrics, "second_generation_descendants_per_direct_student", metrics.second_generation_descendants_per_direct_student, "потомков"),
         _row(metrics, "academic_proliferation", metrics.mean_new_descendants_per_year, "потомков в год"),
     ]
     if include_extended:
         rows.extend(_metric_value_row(v) for v in metrics.extended_values)
+    if include_technical:
         rows.extend(_metric_value_row(v) for v in metrics.technical_values)
     return pd.DataFrame(rows, columns=_COLUMNS)
 

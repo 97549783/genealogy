@@ -5,7 +5,7 @@ import io
 import pandas as pd
 import streamlit as st
 
-from core.lineage.metric_definitions import get_metric_definitions
+from core.lineage.metric_definitions import get_metric_definitions, get_metric_source_caption, get_used_metric_sources
 from core.lineage.metric_tables import METRIC_STATUS_LABELS, build_generation_counts_df, build_lineage_metrics_summary_df, build_proliferation_df
 from core.lineage.metrics import LineageMetrics
 
@@ -40,11 +40,11 @@ def _render_overview(metrics: LineageMetrics) -> None:
     with cols[0]:
         _card("Поколений потомков", metrics.descendant_generations, "G-score / generations")
     with cols[1]:
-        _card("Уровней с корнем", metrics.levels_including_root, "Поколения потомков + уровень корня")
-    with cols[2]:
         _card("Максимальная ширина", metrics.max_width, "W-score: максимум участников в одном поколении")
+    with cols[2]:
+        _card("Прямые потомки у ученика", metrics.second_generation_descendants_per_direct_student, "Среднее число прямых потомков у ученика")
     with cols[3]:
-        _card("Генеалогический индекс", metrics.genealogical_index, "Описан Rossi et al. 2017; в текущей версии значение не выводится")
+        _card("Потомки у ученика", metrics.indirect_descendants_per_direct_student, "Среднее число всех потомков у ученика")
 
 
 def _render_dynamics(metrics: LineageMetrics) -> None:
@@ -64,7 +64,7 @@ def _render_dynamics(metrics: LineageMetrics) -> None:
 
 def _render_values(metrics: LineageMetrics) -> None:
     st.write("Эти показатели помогают дополнительно интерпретировать ветвление, форму дерева, динамику и состав научной линии.")
-    df = build_lineage_metrics_summary_df(metrics, include_extended=True)
+    df = build_lineage_metrics_summary_df(metrics, include_extended=True, include_technical=False)
     extra = df[df["Тип метрики"] == "Дополнительная"].drop(columns=["key"], errors="ignore")
     st.dataframe(extra, hide_index=True, use_container_width=True)
 
@@ -78,7 +78,7 @@ def _render_quality(metrics: LineageMetrics) -> None:
 
 
 def _export_buttons(metrics: LineageMetrics, key_prefix: str) -> None:
-    df = build_lineage_metrics_summary_df(metrics, include_extended=True)
+    df = build_lineage_metrics_summary_df(metrics, include_extended=True, include_technical=False)
     st.download_button("Скачать метрики CSV", df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"), file_name=f"{key_prefix}.lineage_metrics.csv", mime="text/csv", key=f"{key_prefix}_metrics_csv")
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -98,7 +98,7 @@ def render_lineage_metrics_panel(metrics: LineageMetrics, *, key_prefix: str, co
             st.warning(warning)
         if include_help_button and st.button("ℹ️ Как рассчитываются метрики?", key=f"{key_prefix}_metrics_help"):
             show_lineage_metrics_help_dialog(include_extended=include_extended)
-        tabs = st.tabs(["Обзор", "По поколениям", "Динамика", "Дополнительно", "Качество данных"] if include_extended else ["Обзор", "По поколениям", "Динамика"])
+        tabs = st.tabs(["Обзор", "По поколениям", "Динамика", "Дополнительно"] if include_extended else ["Обзор", "По поколениям", "Динамика"])
         with tabs[0]: _render_overview(metrics)
         with tabs[1]:
             gen_df = build_generation_counts_df(metrics)
@@ -110,7 +110,6 @@ def render_lineage_metrics_panel(metrics: LineageMetrics, *, key_prefix: str, co
         with tabs[2]: _render_dynamics(metrics)
         if include_extended:
             with tabs[3]: _render_values(metrics)
-            with tabs[4]: _render_quality(metrics)
         if show_export_buttons:
             _export_buttons(metrics, key_prefix)
 
@@ -118,24 +117,29 @@ def render_lineage_metrics_panel(metrics: LineageMetrics, *, key_prefix: str, co
 def show_lineage_metrics_help_dialog(*, include_extended: bool = True) -> None:
     @st.dialog("Количественные метрики научного руководства", width="large")
     def _show() -> None:
-        st.markdown("### Как приложение работает с несколькими руководителями")
-        st.markdown("- Показанная структура может быть направленным ациклическим графом, а не строгим деревом.\n- Каждый потомок учитывается один раз.\n- Если от корня до вершины есть несколько путей, поколение определяется по кратчайшему пути.\n- Число рёбер может превышать число потомков.\n- Значения относятся только к текущему отфильтрованному и отображаемому графу.")
-        st.markdown("### Основные термины")
-        st.write(
-            "A-score и плодовитость показывают число прямых учеников руководителя. "
-            "Фертильность показывает число прямых учеников, которые сами стали научными руководителями. "
-            "G-score показывает число поколений потомков. "
-            "Генеалогический индекс — отдельный показатель, описанный Rossi, Freire, Mena-Chalco 2017."
-        )
-        for definition in get_metric_definitions(include_extended=include_extended, include_technical=include_extended):
-            st.markdown(f"#### {definition.title}")
-            if definition.aliases:
-                st.write("Синонимы: " + ", ".join(definition.aliases))
-            st.write(definition.short_description)
-            st.markdown(definition.formula_markdown)
-            st.write(definition.interpretation)
-            for caveat in definition.caveats:
-                st.warning(caveat)
-            status_names = {"verified": "проверено", "source_required": "нужен первоисточник", "standard": "стандартная формализация", "derived": "производная метрика"}
-            st.caption("; ".join(f"{s.short_citation}: {status_names[s.status]}" for s in definition.sources))
+        with st.container(height=650):
+            st.markdown("### Как приложение учитывает несколько руководителей")
+            st.markdown("- Каждый потомок учитывается один раз.\n- Если от выбранного руководителя до одного потомка есть несколько путей, поколение определяется по кратчайшему пути.\n- Значения относятся только к текущему отфильтрованному и отображаемому графу.\n\nЭто позволяет корректно считать показатели для случаев совместного научного руководства.")
+            st.markdown("### Используемые обозначения")
+            st.markdown("- `r` — выбранный руководитель;\n- `V_r` — множество участников текущего отображаемого графа, достижимых из `r`;\n- `E_r` — множество связей научного руководства в текущем отображаемом графе;\n- `Ch(v)` — множество прямых учеников участника `v`;\n- `Desc(r)` — множество всех потомков `r` без самого `r`;\n- `g(v)` — поколение участника `v`, то есть кратчайшее расстояние от `r` до `v`;\n- `W_k` — число участников `k`-го поколения;\n- `W_1` — число прямых учеников;\n- `W_2` — число потомков второго поколения;\n- `y(v)` — год защиты участника `v`;\n- `n_t` — число новых потомков в году `t`;\n- `P(t)` — накопленное число потомков к году `t`.")
+            st.markdown("### Основные термины")
+            st.write(
+                "A-score и плодовитость показывают число прямых учеников руководителя. "
+                "Фертильность показывает число прямых учеников, которые сами стали научными руководителями. "
+                "G-score показывает число поколений потомков. W-score показывает максимум участников в одном поколении."
+            )
+            st.markdown("### Список источников, в которых описаны реализованные метрики")
+            for source in get_used_metric_sources(include_extended=include_extended, include_technical=False):
+                suffix = f" DOI/URL: {source.doi_or_url}" if source.doi_or_url else ""
+                st.caption(f"{source.full_citation}{suffix}")
+            for definition in get_metric_definitions(include_extended=include_extended, include_technical=False):
+                st.markdown(f"#### {definition.title}")
+                if definition.aliases:
+                    st.write("Синонимы: " + ", ".join(definition.aliases))
+                st.write(definition.short_description)
+                st.markdown(definition.formula_markdown)
+                st.write(definition.interpretation)
+                for caveat in definition.caveats:
+                    st.warning(caveat)
+                st.caption(get_metric_source_caption(definition.key))
     _show()
