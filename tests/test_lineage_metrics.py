@@ -102,7 +102,7 @@ def test_all_missing_years_preserves_structural_metrics():
     assert metrics.proliferation_points == tuple()
 
 
-def test_duplicate_rows_name_variants_missing_years_and_genealogical_index():
+def test_duplicate_rows_name_variants_missing_years():
     graph = nx.DiGraph([("root", "Иванов Иван Иванович"), ("Иванов Иван Иванович", "Петров П.П.")])
     subset = pd.DataFrame([
         {"candidate_name": "Иванов Иван Иванович", "year": "2005", "degree.degree_level": "доктор наук"},
@@ -113,8 +113,22 @@ def test_duplicate_rows_name_variants_missing_years_and_genealogical_index():
     metrics = compute_lineage_metrics(graph, "root", subset)
     assert metrics.dated_descendants == 2
     assert metrics.undated_descendants == 0
-    assert metrics.genealogical_index is None
-    assert metrics.genealogical_index_status == "not_applicable"
     assert _mv(metrics, "doctor_descendants") == 1
     assert _mv(metrics, "candidate_descendants") == 1
     assert any("нормализации" in warning for warning in metrics.warnings)
+
+
+def test_branch_continuation_metrics():
+    graph = nx.DiGraph([
+        ("root", "A"),
+        ("root", "B"),
+        ("A", "C"),
+        ("A", "D"),
+        ("C", "E"),
+    ])
+    metrics = compute_lineage_metrics(graph, "root", pd.DataFrame())
+
+    assert metrics.indirect_descendants_per_direct_student == 1.5
+    assert metrics.second_generation_descendants_per_direct_student == 1.0
+    assert _mv(metrics, "median_indirect_descendants_per_direct_student") == 1.5
+    assert _mv(metrics, "median_second_generation_descendants_per_direct_student") == 1.0

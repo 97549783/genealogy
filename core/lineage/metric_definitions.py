@@ -19,6 +19,14 @@ class MetricSource:
 
 
 @dataclass(frozen=True)
+class MetricSourceUse:
+    """Связь источника с термином, используемым авторами."""
+
+    source: MetricSource
+    term: str
+
+
+@dataclass(frozen=True)
 class MetricDefinition:
     """Описание метрики для справки, таблиц и документации."""
 
@@ -32,6 +40,10 @@ class MetricDefinition:
     interpretation: str
     caveats: tuple[str, ...]
     sources: tuple[MetricSource, ...]
+
+    @property
+    def source_uses(self) -> tuple["MetricSourceUse", ...]:
+        return tuple(MetricSourceUse(source, _SOURCE_TERMS.get((self.key, source.short_citation), source.note or source.short_citation)) for source in self.sources)
 
 
 RUSSELL_SUGIMOTO_2009 = MetricSource(
@@ -101,7 +113,8 @@ _DEFINITIONS: tuple[MetricDefinition, ...] = (
     MetricDefinition("descendant_generations", "Поколений потомков", ("G-score", "generations", "depth"), "Топология", "chapter", "Максимальное расстояние от корня до потомка.", "$G(r)=\\max_{v\\in Desc(r)} g(v)$", "Показывает глубину линии преемственности.", ("G-score показывает число поколений академических потомков.", "Generations показывает длину крупнейшей цепочки потомков.", "При нескольких путях поколение определяется по кратчайшему пути от корня."), (RUSSELL_SUGIMOTO_2009, ROSSI_2018, DORES_2016, STANDARD)),
     MetricDefinition("levels_including_root", "Уровней с корнем", ("уровни дерева",), "Топология", "chapter", "Число уровней в отображаемом графе с включением корня как уровня 0.", "$L(r)=G(r)+1$", "Помогает читать глубину дерева в интерфейсе.", ("Корень считается уровнем 0.", "Значение на единицу больше числа поколений потомков."), (DERIVED, STANDARD)),
     MetricDefinition("max_width", "Максимальная ширина", ("W-score", "width score", "ширина поколения"), "Топология", "chapter", "Максимальное число потомков в одном поколении.", "$W(r)=\\max_{k\\ge1}|\\{v\\in Desc(r):g(v)=k\\}|$", "Показывает самое широкое поколение научной школы.", ("W-score измеряет размер крупнейшего поколения потомков.", "При равенстве выбирается самое раннее поколение."), (RUSSELL_SUGIMOTO_2009, STANDARD)),
-    MetricDefinition("genealogical_index", "Генеалогический индекс", ("genealogical index", "g-index"), "Руководитель", "chapter", "Индекс, оценивающий наличие разветвлённой структуры потомков на нескольких уровнях.", "$g^{(d)}(v)=\\max\\{k\\in\\mathbb N:l(v)\\ge k\\ \\text{and}\\ |A^{(k)}_{(d)}(v)|\\ge k\\}$", "Характеризует устойчивость воспроизводства научного руководства в нескольких поколениях.", ("Численный расчёт требует отдельной реализации формулы genealogical index.", "В текущей версии значение не выводится."), (ROSSI_2017,)),
+    MetricDefinition("indirect_descendants_per_direct_student", "Среднее число всех потомков на прямого ученика", ("непрямых потомков на ученика",), "Преемственность", "chapter", "Среднее число потомков второго и следующих поколений на одного прямого ученика.", "$M_{\\ge2}(r)=\\frac{|Desc_{\\ge2}(r)|}{W_1}$", "Показывает, насколько в среднем продолжаются ветви, начатые прямыми учениками.", ("Если прямых учеников нет, значение не выводится.", "При нескольких путях потомок учитывается один раз."), (DERIVED, STANDARD)),
+    MetricDefinition("second_generation_descendants_per_direct_student", "Среднее число потомков второго поколения на прямого ученика", ("потомков 2-го поколения на ученика",), "Преемственность", "chapter", "Среднее число уникальных потомков второго поколения на одного прямого ученика.", "$M_2(r)=\\frac{W_2}{W_1}$", "Показывает ближайшее продолжение научного руководства через прямых учеников.", ("Если прямых учеников нет, значение не выводится.", "При нескольких путях потомок учитывается один раз."), (DERIVED, STANDARD)),
     MetricDefinition("academic_proliferation", "Академическая пролиферация", ("academic proliferation", "proliferation rate"), "Динамика", "chapter", "Рост числа академических потомков во времени.", "$P(t)=\\sum_{\\tau\\le t} n_\\tau$", "Показывает, как линия научного руководства разрасталась по годам защит.", ("Proliferation rate у Liénard et al. измеряется как среднее число подготовленных исследователей за десятилетие.", "В приложении используется годовая динамика по наблюдаемым годам защит."), (LIENARD_2018, DERIVED)),
 )
 
@@ -118,6 +131,8 @@ _EXTENDED_DEFINITIONS: tuple[MetricDefinition, ...] = (
     MetricDefinition("normalized_depth", "Глубина относительно размера", (), "Форма дерева", "extended", "Нормированная глубина с учётом размера дерева.", "$\\frac{G(r)}{\\log_2(|Desc(r)|+1)}$", "Позволяет сравнивать глубину школ разного размера.", ("Это прикладная нормировка приложения.",), (DERIVED,)),
     MetricDefinition("branch_balance", "Баланс ветвей первого уровня", (), "Форма дерева", "extended", "Нормированная энтропия распределения потомков по ветвям прямых учеников.", "$-\\frac{\\sum_i p_i\\log p_i}{\\log m}$", "Значение ближе к 1 означает более равномерное развитие ветвей.", (), (DERIVED,)),
     MetricDefinition("largest_branch_share_percent", "Доля крупнейшей ветви", (), "Форма дерева", "extended", "Доля потомков, приходящаяся на крупнейшую ветвь первого уровня.", "$\\frac{\\max_i s_i}{\\sum_i s_i}\\cdot100\\%$", "Показывает, насколько дерево зависит от одной линии преемственности.", (), (DERIVED,)),
+    MetricDefinition("median_indirect_descendants_per_direct_student", "Медиана всех потомков в ветви", (), "Преемственность", "extended", "Медианное число потомков второго и следующих поколений в ветвях прямых учеников.", "$Med_{\\ge2}(r)=median(b_{\\ge2}(c):c\\in Ch(r))$", "Показывает типичный размер продолжения ветви без влияния отдельных крупных ветвей.", ("Если прямых учеников нет, значение не выводится.",), (DERIVED, STANDARD)),
+    MetricDefinition("median_second_generation_descendants_per_direct_student", "Медиана потомков 2-го поколения в ветви", (), "Преемственность", "extended", "Медианное число потомков второго поколения в ветвях прямых учеников.", "$Med_2(r)=median(b_2(c):c\\in Ch(r))$", "Показывает типичное ближайшее продолжение ветви прямого ученика.", ("Если прямых учеников нет, значение не выводится.",), (DERIVED, STANDARD)),
     MetricDefinition("structural_h_index", "Структурный h-индекс линии", (), "Форма дерева", "extended", "Прикладный h-подобный индекс, рассчитанный по размерам ветвей прямых учеников.", "$h=\\max\\{k:\\text{есть хотя бы }k\\text{ ветвей размера не менее }k\\}$", "Компактно объединяет ширину первого уровня и размер ветвей.", ("Это прикладная метрика приложения.",), (DERIVED,)),
     MetricDefinition("linearity_index_percent", "Индекс линейности", (), "Форма дерева", "extended", "Доля активных вершин, у которых ровно один ученик.", "$\\frac{|\\{v\\in V_r:|Ch(v)|=1\\}|}{|\\{v\\in V_r:|Ch(v)|>0\\}|}\\cdot100\\%$", "Показывает, насколько структура похожа на цепочку, а не на разветвлённое дерево.", (), (DERIVED, STANDARD)),
     MetricDefinition("activity_span_years", "Период активности", (), "Динамика", "extended", "Число лет между первым и последним наблюдаемым годом защиты потомков.", "$t_{max}-t_{min}+1$", "Помогает интерпретировать размер школы с учётом длительности наблюдения.", (), (DERIVED,)),
@@ -141,6 +156,22 @@ _TECH_DEFINITIONS: tuple[MetricDefinition, ...] = (
     MetricDefinition("undated_share_percent", "Доля потомков без валидного года", (), "Качество данных", "technical", "Доля потомков без пригодного года защиты.", "$\\frac{undated}{|Desc(r)|}\\cdot100\\%$", "Показывает, насколько надёжна временная динамика.", ("Это показатель полноты данных.",), (DERIVED,)),
 )
 
+_SOURCE_TERMS = {
+    ("direct_students", "Russell, Sugimoto 2009"): "A-score",
+    ("direct_students", "Rossi, Freire, Mena-Chalco 2017"): "direct fertility",
+    ("direct_students", "Rossi et al. 2018"): "fecundity",
+    ("direct_students", "Dores, Benevenuto, Laender 2016"): "out-degree / width",
+    ("direct_students", "Стандартная графовая формализация"): "out-degree",
+    ("continuing_students", "Rossi, Freire, Mena-Chalco 2017"): "1-fertility",
+    ("continuing_students", "Rossi et al. 2018"): "fertility",
+    ("descendant_generations", "Russell, Sugimoto 2009"): "G-score",
+    ("descendant_generations", "Rossi et al. 2018"): "generations",
+    ("descendant_generations", "Dores, Benevenuto, Laender 2016"): "depth",
+    ("max_width", "Russell, Sugimoto 2009"): "W-score",
+    ("max_width", "Стандартная графовая формализация"): "максимум размера поколения",
+}
+
+
 _DEFINITIONS = _DEFINITIONS + _EXTENDED_DEFINITIONS + _TECH_DEFINITIONS
 _BY_KEY = {definition.key: definition for definition in _DEFINITIONS}
 
@@ -157,3 +188,17 @@ def get_metric_definitions(*, include_extended: bool = True, include_technical: 
         or (include_extended and definition.scope == "extended")
         or (include_technical and definition.scope == "technical")
     )
+
+
+def get_metric_source_caption(key: str) -> str:
+    definition = get_metric_definition(key)
+    return "; ".join(f"{use.source.short_citation}: {use.term}" for use in definition.source_uses)
+
+
+def get_used_metric_sources(*, include_extended: bool = True, include_technical: bool = False) -> tuple[MetricSource, ...]:
+    seen: dict[str, MetricSource] = {}
+    for definition in get_metric_definitions(include_extended=include_extended, include_technical=include_technical):
+        for source in definition.sources:
+            if source.full_citation:
+                seen.setdefault(source.short_citation, source)
+    return tuple(seen.values())

@@ -16,7 +16,10 @@ render_lineage_metrics_panel(metrics, key_prefix="demo", context_label="Школ
     assert "tabs.lineages" not in app.session_state
     visible = str(app)
     assert "Фертильность: прямые ученики, ставшие руководителями" in visible
-    assert "Генеалогический индекс" in visible
+    assert "Среднее число всех потомков у ученика" in visible
+    assert "Среднее число прямых потомков у ученика" in visible
+    assert "Уровней с корнем" not in visible
+    assert "Генеалогический индекс" not in visible
     assert "C-score / фертильность" not in visible
     assert "Входит в диссертационный набор" not in visible
     assert "глава" not in visible.lower()
