@@ -5,7 +5,7 @@ import pandas as pd
 from core.lineage.metric_definitions import get_metric_definition
 from core.lineage.metrics import LineageMetrics, MetricValue
 
-_STATUS = {
+METRIC_STATUS_LABELS = {
     "available": "доступно",
     "not_applicable": "пока не рассчитывается",
     "source_required": "нужен источник",
@@ -26,8 +26,8 @@ def _metric_type(scope: str) -> str:
 
 
 def _status_for(metrics: LineageMetrics, key: str, value) -> str:
-    if key == "g_score":
-        return metrics.g_score_status
+    if key == "genealogical_index":
+        return metrics.genealogical_index_status
     if value is None:
         return "insufficient_data"
     return "available"
@@ -36,12 +36,12 @@ def _status_for(metrics: LineageMetrics, key: str, value) -> str:
 def _row(metrics: LineageMetrics, key: str, value, unit: str = "") -> dict:
     definition = get_metric_definition(key)
     status = _status_for(metrics, key, value)
-    return {"key": key, "Группа": definition.group, "Метрика": definition.title, "Значение": value, "Единица": unit, "Интерпретация": definition.interpretation, "Статус": _STATUS[status], "Тип метрики": _metric_type(definition.scope)}
+    return {"key": key, "Группа": definition.group, "Метрика": definition.title, "Значение": value, "Единица": unit, "Интерпретация": definition.interpretation, "Статус": METRIC_STATUS_LABELS[status], "Тип метрики": _metric_type(definition.scope)}
 
 
 def _metric_value_row(item: MetricValue) -> dict:
     definition = get_metric_definition(item.key)
-    return {"key": item.key, "Группа": definition.group, "Метрика": definition.title, "Значение": item.value, "Единица": item.unit, "Интерпретация": definition.interpretation, "Статус": _STATUS[item.status], "Тип метрики": _metric_type(definition.scope)}
+    return {"key": item.key, "Группа": definition.group, "Метрика": definition.title, "Значение": item.value, "Единица": item.unit, "Интерпретация": definition.interpretation, "Статус": METRIC_STATUS_LABELS[item.status], "Тип метрики": _metric_type(definition.scope)}
 
 
 def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extended: bool = True) -> pd.DataFrame:
@@ -53,7 +53,7 @@ def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extende
         _row(metrics, "descendant_generations", metrics.descendant_generations),
         _row(metrics, "levels_including_root", metrics.levels_including_root),
         _row(metrics, "max_width", metrics.max_width),
-        _row(metrics, "g_score", metrics.g_score),
+        _row(metrics, "genealogical_index", metrics.genealogical_index),
         _row(metrics, "academic_proliferation", metrics.mean_new_descendants_per_year, "потомков в год"),
     ]
     if include_extended:

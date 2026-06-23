@@ -30,4 +30,4 @@ def test_metric_definition_exports_are_available():
 
     assert lineage.MetricDefinition
     assert lineage.MetricSource
-    assert lineage.get_metric_definition("g_score").title == "Генеалогический индекс"
+    assert lineage.get_metric_definition("genealogical_index").title == "Генеалогический индекс"

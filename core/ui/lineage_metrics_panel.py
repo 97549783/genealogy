@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from core.lineage.metric_definitions import get_metric_definitions
-from core.lineage.metric_tables import build_generation_counts_df, build_lineage_metrics_summary_df, build_proliferation_df
+from core.lineage.metric_tables import METRIC_STATUS_LABELS, build_generation_counts_df, build_lineage_metrics_summary_df, build_proliferation_df
 from core.lineage.metrics import LineageMetrics
 
 
@@ -44,7 +44,7 @@ def _render_overview(metrics: LineageMetrics) -> None:
     with cols[2]:
         _card("Максимальная ширина", metrics.max_width, "W-score: максимум участников в одном поколении")
     with cols[3]:
-        _card("Генеалогический индекс", metrics.g_score, "Описан Rossi et al. 2017; в текущей версии значение не выводится")
+        _card("Генеалогический индекс", metrics.genealogical_index, "Описан Rossi et al. 2017; в текущей версии значение не выводится")
 
 
 def _render_dynamics(metrics: LineageMetrics) -> None:
@@ -71,8 +71,7 @@ def _render_values(metrics: LineageMetrics) -> None:
 
 def _render_quality(metrics: LineageMetrics) -> None:
     from core.lineage.metric_definitions import get_metric_definition
-    status_names = {"available": "доступно", "not_applicable": "не применимо", "source_required": "нужен первоисточник", "insufficient_data": "недостаточно данных"}
-    rows = [{"Показатель": get_metric_definition(v.key).title, "Значение": v.value, "Единица": v.unit, "Статус": status_names[v.status]} for v in metrics.technical_values]
+    rows = [{"Показатель": get_metric_definition(v.key).title, "Значение": v.value, "Единица": v.unit, "Статус": METRIC_STATUS_LABELS[v.status]} for v in metrics.technical_values]
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     for warning in metrics.warnings:
         st.warning(warning)

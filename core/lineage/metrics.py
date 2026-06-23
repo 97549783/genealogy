@@ -56,8 +56,8 @@ class LineageMetrics:
     first_observed_year: int | None
     last_observed_year: int | None
     mean_new_descendants_per_year: float | None
-    g_score: float | None
-    g_score_status: Literal["available", "source_required", "not_applicable"]
+    genealogical_index: float | None
+    genealogical_index_status: Literal["available", "source_required", "not_applicable"]
     extended_values: tuple[MetricValue, ...]
     technical_values: tuple[MetricValue, ...]
     is_dag: bool
