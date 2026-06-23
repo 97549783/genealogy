@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from itertools import islice
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from statistics import median
@@ -64,7 +65,7 @@ class LineageMetrics:
 
 
 def _empty(root: str, warning: str) -> LineageMetrics:
-    return LineageMetrics(root, 0, 0, 0, 0, None, 0, None, None, None, None, tuple(), tuple(), 0, 0, None, None, None, None, "source_required", tuple(), tuple(), True, (warning,))
+    return LineageMetrics(root, 0, 0, 0, 0, None, 0, None, None, None, None, tuple(), tuple(), 0, 0, None, None, None, None, "not_applicable", tuple(), tuple(), True, (warning,))
 
 
 def _safe_year(value) -> int | None:
@@ -98,6 +99,8 @@ def _years_by_node(subset: pd.DataFrame, descendants: set[str], author_column: s
             continue
         exact[author].append(year)
         normalized[norm(author)].append((author, year))
+    if any(len({name for name, _ in matches}) > 1 for matches in normalized.values()):
+        warnings.append("Несколько вариантов написания имени совпали после нормализации; для динамики выбран самый ранний валидный год.")
     result: dict[str, int] = {}
     for node in sorted(descendants):
         stripped = str(node).strip()
@@ -106,24 +109,27 @@ def _years_by_node(subset: pd.DataFrame, descendants: set[str], author_column: s
             continue
         matches = normalized.get(norm(stripped), [])
         if matches:
-            names = {name for name, _ in matches}
-            if len(names) > 1:
-                warnings.append(f"Нормализованное имя «{stripped}» соответствует нескольким вариантам написания; для динамики выбран самый ранний год.")
             result[node] = min(year for _, year in matches)
     return result
 
 
-def _degree_counts(subset: pd.DataFrame, descendants: set[str], author_column: str, degree_column: str) -> tuple[int, int, int]:
+def _degree_counts(subset: pd.DataFrame, descendants: set[str], author_column: str, degree_column: str, warnings: list[str]) -> tuple[int, int, int]:
     if subset.empty or author_column not in subset.columns or degree_column not in subset.columns:
         return 0, 0, len(descendants)
+    names_by_norm: dict[str, set[str]] = defaultdict(set)
     by_norm: dict[str, str] = {}
     for _, row in subset.iterrows():
         author = str(row.get(author_column, "")).strip()
         if not author:
             continue
+        key = norm(author)
         raw = str(row.get(degree_column, "")).strip().lower()
-        if norm(author) not in by_norm:
-            by_norm[norm(author)] = raw
+        names_by_norm[key].add(author)
+        if key not in by_norm:
+            by_norm[key] = raw
+    ambiguous = any(len(names) > 1 for names in names_by_norm.values())
+    if ambiguous:
+        warnings.append("Несколько вариантов написания имени совпали после нормализации; для состава по степеням использована первая найденная запись.")
     doctors = candidates = unknown = 0
     for node in descendants:
         raw = by_norm.get(norm(str(node)), "")
@@ -154,6 +160,18 @@ def _branch_sizes(graph: nx.DiGraph, root: str) -> dict[str, int]:
     return sizes
 
 
+def _unit_for_extended_metric(key: str) -> str:
+    if key.endswith("percent") or key.endswith("share_percent"):
+        return "%"
+    if key == "branch_balance":
+        return "индекс 0-1"
+    if key in {"mean_branching_factor", "median_branching_factor"}:
+        return "учеников"
+    if key == "activity_span_years":
+        return "лет"
+    return ""
+
+
 def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, *, author_column: str = AUTHOR_COLUMN, year_column: str = "year", degree_column: str = "degree.degree_level", include_extended: bool = True) -> LineageMetrics:
     if root not in graph:
         if graph.number_of_nodes() == 0:
@@ -181,7 +199,7 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
             max_width_generation, max_width = max(widths, key=lambda kv: (kv[1], -kv[0]))
     else:
         warnings.append("В достижимой части графа найден цикл; метрики поколений, ширины и динамики не рассчитываются.")
-        for cycle in list(nx.simple_cycles(rg))[:3]:
+        for cycle in islice(nx.simple_cycles(rg), 3):
             warnings.append("Цикл: " + " → ".join(map(str, cycle)))
     years_by_node = {} if not is_dag else _years_by_node(subset, descendants, author_column, year_column, warnings)
     dated = len(years_by_node)
@@ -229,7 +247,7 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
             cur = cur + 1 if value == 0 else 0
             max_gap = max(max_gap, cur)
         recent = sum(1 for y in years_by_node.values() if last is not None and y >= last - 4)
-        doctors, candidates, unknown = _degree_counts(subset, descendants, author_column, degree_column)
+        doctors, candidates, unknown = _degree_counts(subset, descendants, author_column, degree_column, warnings)
         values = {
             "terminal_descendants": terminal, "terminal_share_percent": terminal / len(descendants) * 100 if descendants else None,
             "internal_descendants": internal, "internal_share_percent": internal / len(descendants) * 100 if descendants else None,
@@ -244,7 +262,7 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
             "doctor_descendants": doctors, "candidate_descendants": candidates, "unknown_degree_descendants": unknown,
             "doctor_share_percent": doctors / len(descendants) * 100 if descendants else None, "candidate_share_percent": candidates / len(descendants) * 100 if descendants else None, "unknown_degree_share_percent": unknown / len(descendants) * 100 if descendants else None,
         }
-        ext = [MetricValue(k, v, "%" if k.endswith("percent") or k.endswith("share_percent") or k == "branch_balance" else "", "available" if v is not None else "insufficient_data") for k, v in values.items()]
+        ext = [MetricValue(k, v, _unit_for_extended_metric(k), "available" if v is not None else "insufficient_data") for k, v in values.items()]
     multi = sum(1 for n in descendants if rg.in_degree(n) > 1)
     tech_values = (
         MetricValue("multi_parent_nodes", multi, "", "available"),
@@ -253,4 +271,4 @@ def compute_lineage_metrics(graph: nx.DiGraph, root: str, subset: pd.DataFrame, 
         MetricValue("undated_descendants", undated, "", "available"),
         MetricValue("undated_share_percent", undated / len(descendants) * 100 if descendants else None, "%", "available" if descendants else "not_applicable"),
     )
-    return LineageMetrics(str(root), rg.number_of_nodes(), rg.number_of_edges(), direct, continuing, rate, len(descendants), descendant_generations, levels, max_width, max_width_generation, generation_counts, points, dated, undated, first, last, mean_per_year, None, "source_required", tuple(ext), tech_values, is_dag, tuple(dict.fromkeys(warnings)))
+    return LineageMetrics(str(root), rg.number_of_nodes(), rg.number_of_edges(), direct, continuing, rate, len(descendants), descendant_generations, levels, max_width, max_width_generation, generation_counts, points, dated, undated, first, last, mean_per_year, None, "not_applicable", tuple(ext), tech_values, is_dag, tuple(dict.fromkeys(warnings)))

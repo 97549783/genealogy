@@ -15,3 +15,5 @@ from .membership import (
 
 from .metrics import GenerationCount, LineageMetrics, MetricValue, ProliferationPoint, compute_lineage_metrics
 from .metric_tables import build_first_level_branches_df, build_generation_counts_df, build_lineage_metrics_summary_df, build_proliferation_df
+
+from .metric_definitions import MetricDefinition, MetricSource, get_metric_definition, get_metric_definitions

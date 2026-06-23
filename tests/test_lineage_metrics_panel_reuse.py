@@ -14,3 +14,10 @@ render_lineage_metrics_panel(metrics, key_prefix="demo", context_label="Школ
     assert not app.exception
     assert any("Количественные метрики" in item.label for item in app.expander)
     assert "tabs.lineages" not in app.session_state
+    visible = str(app)
+    assert "Фертильность: прямые ученики, ставшие руководителями" in visible
+    assert "Генеалогический индекс" in visible
+    assert "C-score / фертильность" not in visible
+    assert "Входит в диссертационный набор" not in visible
+    assert "глава" not in visible.lower()
+    assert "не является" not in visible.lower()

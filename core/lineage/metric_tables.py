@@ -5,17 +5,43 @@ import pandas as pd
 from core.lineage.metric_definitions import get_metric_definition
 from core.lineage.metrics import LineageMetrics, MetricValue
 
-_STATUS = {"available": "доступно", "not_applicable": "не применимо", "source_required": "нужен первоисточник", "insufficient_data": "недостаточно данных"}
+_STATUS = {
+    "available": "доступно",
+    "not_applicable": "пока не рассчитывается",
+    "source_required": "нужен источник",
+    "insufficient_data": "недостаточно данных",
+}
+
+_COLUMNS = ["key", "Группа", "Метрика", "Значение", "Единица", "Интерпретация", "Статус", "Тип метрики"]
+
+
+def _metric_type(scope: str) -> str:
+    if scope == "chapter":
+        return "Основная"
+    if scope == "extended":
+        return "Дополнительная"
+    if scope == "technical":
+        return "Качество данных"
+    return "Метрика"
+
+
+def _status_for(metrics: LineageMetrics, key: str, value) -> str:
+    if key == "g_score":
+        return metrics.g_score_status
+    if value is None:
+        return "insufficient_data"
+    return "available"
 
 
 def _row(metrics: LineageMetrics, key: str, value, unit: str = "") -> dict:
     definition = get_metric_definition(key)
-    return {"key": key, "Группа": definition.group, "Метрика": definition.title, "Значение": value, "Единица": unit, "Интерпретация": definition.interpretation, "Статус": _STATUS["source_required" if key == "g_score" else ("insufficient_data" if value is None else "available")], "Входит в диссертационный набор": definition.scope == "chapter"}
+    status = _status_for(metrics, key, value)
+    return {"key": key, "Группа": definition.group, "Метрика": definition.title, "Значение": value, "Единица": unit, "Интерпретация": definition.interpretation, "Статус": _STATUS[status], "Тип метрики": _metric_type(definition.scope)}
 
 
 def _metric_value_row(item: MetricValue) -> dict:
     definition = get_metric_definition(item.key)
-    return {"key": item.key, "Группа": definition.group, "Метрика": definition.title, "Значение": item.value, "Единица": item.unit, "Интерпретация": definition.interpretation, "Статус": _STATUS[item.status], "Входит в диссертационный набор": False}
+    return {"key": item.key, "Группа": definition.group, "Метрика": definition.title, "Значение": item.value, "Единица": item.unit, "Интерпретация": definition.interpretation, "Статус": _STATUS[item.status], "Тип метрики": _metric_type(definition.scope)}
 
 
 def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extended: bool = True) -> pd.DataFrame:
@@ -32,7 +58,8 @@ def build_lineage_metrics_summary_df(metrics: LineageMetrics, *, include_extende
     ]
     if include_extended:
         rows.extend(_metric_value_row(v) for v in metrics.extended_values)
-    return pd.DataFrame(rows, columns=["key", "Группа", "Метрика", "Значение", "Единица", "Интерпретация", "Статус", "Входит в диссертационный набор"])
+        rows.extend(_metric_value_row(v) for v in metrics.technical_values)
+    return pd.DataFrame(rows, columns=_COLUMNS)
 
 
 def build_generation_counts_df(metrics: LineageMetrics) -> pd.DataFrame:

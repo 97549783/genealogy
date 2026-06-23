@@ -8,6 +8,10 @@ def _mv(metrics, key):
     return next(v.value for v in (*metrics.extended_values, *metrics.technical_values) if v.key == key)
 
 
+def _metric(metrics, key):
+    return next(v for v in (*metrics.extended_values, *metrics.technical_values) if v.key == key)
+
+
 def test_simple_tree_metrics():
     graph = nx.DiGraph([("root", "A"), ("root", "B"), ("A", "C"), ("C", "D")])
     subset = pd.DataFrame({"candidate_name": ["A", "B", "C", "D"], "year": [2000, 2001, 2003, 2006]})
@@ -43,10 +47,36 @@ def test_cycle_returns_warning_and_keeps_basic_metrics():
     assert metrics.warnings
 
 
+def test_cycle_enumeration_uses_bounded_iterator(monkeypatch):
+    import core.lineage.metrics as metrics_module
+
+    consumed = {"count": 0}
+
+    def _fake_cycles(graph):
+        for idx in range(10):
+            consumed["count"] += 1
+            if consumed["count"] > 3:
+                raise AssertionError("Перебрано слишком много циклов")
+            yield ["A", f"B{idx}"]
+
+    monkeypatch.setattr(metrics_module.nx, "simple_cycles", _fake_cycles)
+    graph = nx.DiGraph([("root", "A"), ("A", "B"), ("B", "A")])
+    result = metrics_module.compute_lineage_metrics(graph, "root", pd.DataFrame())
+    assert consumed["count"] == 3
+    assert len([w for w in result.warnings if w.startswith("Цикл:")]) == 3
+
+
 def test_empty_and_missing_root():
     assert compute_lineage_metrics(nx.DiGraph(), "root", pd.DataFrame()).warnings
     graph = nx.DiGraph([("A", "B")])
     assert compute_lineage_metrics(graph, "root", pd.DataFrame()).warnings
+
+
+def test_equal_max_width_selects_earliest_generation():
+    graph = nx.DiGraph([("root", "A"), ("root", "B"), ("A", "C"), ("B", "D")])
+    metrics = compute_lineage_metrics(graph, "root", pd.DataFrame())
+    assert metrics.max_width == 2
+    assert metrics.max_width_generation == 1
 
 
 def test_extended_metrics():
@@ -59,6 +89,17 @@ def test_extended_metrics():
     assert _mv(metrics, "mean_descendant_generation") == 1.8
     assert _mv(metrics, "largest_branch_share_percent") == 80.0
     assert _mv(metrics, "edge_surplus") == 0
+    assert _metric(metrics, "branch_balance").unit == "индекс 0-1"
+
+
+def test_all_missing_years_preserves_structural_metrics():
+    graph = nx.DiGraph([("root", "A"), ("A", "B")])
+    subset = pd.DataFrame({"candidate_name": ["A", "B"], "year": [None, "нет"]})
+    metrics = compute_lineage_metrics(graph, "root", subset)
+    assert metrics.descendants == 2
+    assert metrics.descendant_generations == 2
+    assert metrics.dated_descendants == 0
+    assert metrics.proliferation_points == tuple()
 
 
 def test_duplicate_rows_name_variants_missing_years_and_g_score():
@@ -67,11 +108,13 @@ def test_duplicate_rows_name_variants_missing_years_and_g_score():
         {"candidate_name": "Иванов Иван Иванович", "year": "2005", "degree.degree_level": "доктор наук"},
         {"candidate_name": "Иванов И. И.", "year": "2007", "degree.degree_level": "доктор наук"},
         {"candidate_name": "Петров П.П.", "year": "нет", "degree.degree_level": "кандидат наук"},
+        {"candidate_name": "Петров П. П.", "year": "2008", "degree.degree_level": "кандидат наук"},
     ])
     metrics = compute_lineage_metrics(graph, "root", subset)
-    assert metrics.dated_descendants == 1
-    assert metrics.undated_descendants == 1
+    assert metrics.dated_descendants == 2
+    assert metrics.undated_descendants == 0
     assert metrics.g_score is None
-    assert metrics.g_score_status == "source_required"
+    assert metrics.g_score_status == "not_applicable"
     assert _mv(metrics, "doctor_descendants") == 1
     assert _mv(metrics, "candidate_descendants") == 1
+    assert any("нормализации" in warning for warning in metrics.warnings)

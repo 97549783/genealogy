@@ -27,15 +27,24 @@ def _card(title: str, value, subtitle: str, kind: str = "") -> None:
 
 def _render_overview(metrics: LineageMetrics) -> None:
     cols = st.columns(4)
-    with cols[0]: _card("Прямые ученики", metrics.direct_students, "A-score / плодовитость (fecundity)")
-    with cols[1]: _card("Ученики-продолжатели", metrics.continuing_students, "C-score / фертильность (fertility)")
-    with cols[2]: _card("Доля продолжателей", metrics.continuing_rate_percent, "C-score / A-score", "%")
-    with cols[3]: _card("Все потомки", metrics.descendants, "Уникальные потомки во всех поколениях")
+    with cols[0]:
+        _card("Прямые ученики", metrics.direct_students, "A-score / плодовитость (fecundity)")
+    with cols[1]:
+        _card("Ученики-продолжатели", metrics.continuing_students, "Фертильность: прямые ученики, ставшие руководителями")
+    with cols[2]:
+        _card("Доля продолжателей", metrics.continuing_rate_percent, "Фертильность / прямые ученики", "%")
+    with cols[3]:
+        _card("Все потомки", metrics.descendants, "T-score / descendants")
+
     cols = st.columns(4)
-    with cols[0]: _card("Поколений потомков", metrics.descendant_generations, "Максимальное расстояние от корня")
-    with cols[1]: _card("Уровней с корнем", metrics.levels_including_root, "Корень включён как уровень 0")
-    with cols[2]: _card("Максимальная ширина", metrics.max_width, "Максимум участников в одном поколении")
-    with cols[3]: _card("G-score", metrics.g_score, "Формула уточняется по первоисточнику")
+    with cols[0]:
+        _card("Поколений потомков", metrics.descendant_generations, "G-score / generations")
+    with cols[1]:
+        _card("Уровней с корнем", metrics.levels_including_root, "Поколения потомков + уровень корня")
+    with cols[2]:
+        _card("Максимальная ширина", metrics.max_width, "W-score: максимум участников в одном поколении")
+    with cols[3]:
+        _card("Генеалогический индекс", metrics.g_score, "Описан Rossi et al. 2017; в текущей версии значение не выводится")
 
 
 def _render_dynamics(metrics: LineageMetrics) -> None:
@@ -54,9 +63,9 @@ def _render_dynamics(metrics: LineageMetrics) -> None:
 
 
 def _render_values(metrics: LineageMetrics) -> None:
-    st.write("Эти показатели не входят в основной набор метрик главы, но помогают интерпретировать структуру дерева и качество данных.")
+    st.write("Эти показатели помогают дополнительно интерпретировать ветвление, форму дерева, динамику и состав научной линии.")
     df = build_lineage_metrics_summary_df(metrics, include_extended=True)
-    extra = df[df["Входит в диссертационный набор"] == False].drop(columns=["key"], errors="ignore")
+    extra = df[df["Тип метрики"] == "Дополнительная"].drop(columns=["key"], errors="ignore")
     st.dataframe(extra, hide_index=True, use_container_width=True)
 
 
@@ -112,8 +121,13 @@ def show_lineage_metrics_help_dialog(*, include_extended: bool = True) -> None:
     def _show() -> None:
         st.markdown("### Как приложение работает с несколькими руководителями")
         st.markdown("- Показанная структура может быть направленным ациклическим графом, а не строгим деревом.\n- Каждый потомок учитывается один раз.\n- Если от корня до вершины есть несколько путей, поколение определяется по кратчайшему пути.\n- Число рёбер может превышать число потомков.\n- Значения относятся только к текущему отфильтрованному и отображаемому графу.")
-        st.markdown("### Эквивалентные термины")
-        st.write("В реализованной формализации A-score равен плодовитости, а C-score равен фертильности, поэтому они не дублируются отдельными карточками.")
+        st.markdown("### Основные термины")
+        st.write(
+            "A-score и плодовитость показывают число прямых учеников руководителя. "
+            "Фертильность показывает число прямых учеников, которые сами стали научными руководителями. "
+            "G-score показывает число поколений потомков. "
+            "Генеалогический индекс — отдельный показатель, описанный Rossi, Freire, Mena-Chalco 2017."
+        )
         for definition in get_metric_definitions(include_extended=include_extended, include_technical=include_extended):
             st.markdown(f"#### {definition.title}")
             if definition.aliases:
