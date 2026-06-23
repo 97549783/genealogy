@@ -20,3 +20,5 @@ from .table_display import (
     render_dissertations_widget,
 )
 from .tree_renderers import build_markmap_html
+
+from .lineage_metrics_panel import render_lineage_metrics_panel, show_lineage_metrics_help_dialog

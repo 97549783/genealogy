@@ -52,6 +52,7 @@ from core.db import (
 )
 from core.search.text_matching import FUZZY_THRESHOLD, fuzzy_match_series, normalize_text
 from core.perf import perf_timer
+from core.lineage import compute_lineage_metrics
 from core.lineage.membership import (
     get_cached_roots,
     get_school_subset,
@@ -384,14 +385,6 @@ def search_by_depth(
     Возвращает DataFrame с колонками:
         # | Руководитель | Поколений | Всего членов | Годы активности | Уникальных городов
     """
-    try:
-        import networkx as nx
-    except ImportError:
-        return pd.DataFrame(
-            columns=["#", "Руководитель", "Поколений", "Всего членов",
-                     "Годы активности", "Уникальных городов"]
-        )
-
     with perf_timer("school_search.depth.all_roots"):
         roots = get_all_roots(df)
     rows: List[SearchRow] = []
@@ -402,20 +395,9 @@ def search_by_depth(
             if graph.number_of_nodes() < 2:
                 continue
 
-            depth = 0
-            if nx.is_directed_acyclic_graph(graph):
-                q: deque = deque([(root, 0)])
-                seen: Set[str] = {root}
-                while q:
-                    node, d = q.popleft()
-                    if d > depth:
-                        depth = d
-                    for child in graph.successors(node):
-                        if child not in seen:
-                            seen.add(child)
-                            q.append((child, d + 1))
-
-            if depth == 0:
+            metrics = compute_lineage_metrics(graph, root, subset, include_extended=False)
+            depth = metrics.descendant_generations
+            if not depth:
                 continue
 
             rows.append(build_result_row(0, root, depth, subset, "Поколений"))
