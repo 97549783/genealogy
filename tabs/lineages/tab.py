@@ -18,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from .rendering import draw_matplotlib
+from core.lineage import compute_lineage_metrics
 from core.lineage.graph import TREE_OPTIONS, slug, lineage
 from core.lineage.membership import get_school_lineage
 from core.db import get_db_signature, SUPERVISOR_COLUMNS
@@ -28,6 +29,7 @@ from core.ui.table_display import (
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.chrome import show_instruction
 from core.ui.links import share_button
+from core.ui import render_lineage_metrics_panel
 from core.ui.filters import science_field_state_suffix, science_fields_to_query_params
 from core.ui.science_filtering import render_science_filtered_lineage_context
 
@@ -261,6 +263,21 @@ def render_school_trees_tab(
                         )
                     else:
                         st.empty()
+
+                metrics = compute_lineage_metrics(
+                    graph=G,
+                    root=root,
+                    subset=subset,
+                    include_extended=True,
+                )
+                render_lineage_metrics_panel(
+                    metrics,
+                    key_prefix=f"{sf_suffix}_{file_prefix}",
+                    context_label=f"{label}: {root}",
+                    expanded=False,
+                    include_extended=True,
+                    include_help_button=True,
+                )
 
                 _render_tree_table(subset, key=f"{sf_suffix}_{file_prefix}")
 
