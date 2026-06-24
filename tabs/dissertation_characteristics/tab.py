@@ -38,7 +38,7 @@ def _value(row: pd.Series, column: str) -> str:
 
 
 def _label(row: pd.Series) -> str:
-    parts = [_value(row, "candidate_name"), _value(row, "title"), _value(row, "year"), _value(row, "degree.science_field"), _value(row, "Code")]
+    parts = [_value(row, "candidate_name"), _value(row, "title"), _value(row, "year"), _value(row, "degree.science_field")]
     return " — ".join([p for p in parts if p]) or "Без названия"
 
 

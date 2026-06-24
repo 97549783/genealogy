@@ -6,13 +6,27 @@ import numpy as np
 import pandas as pd
 
 from tabs.dissertation_characteristics import tab
-from tabs.dissertation_characteristics.tab import _abstract_link_values, _linked_df
+from tabs.dissertation_characteristics.tab import _abstract_link_values, _label, _linked_df
 
 
 def test_missing_matrix_does_not_break_first_subtab_helper():
     df = pd.DataFrame({"Code": ["A"], "candidate_name": ["Автор"]})
     index = pd.DataFrame({"Code": ["A"], "section_key": ["research_goal"]})
     assert _linked_df(df, index)["Code"].tolist() == ["A"]
+
+
+def test_label_does_not_show_code():
+    row = pd.Series(
+        {
+            "candidate_name": "Иванов Иван",
+            "title": "Название",
+            "year": "2024",
+            "degree.science_field": "технические науки",
+            "Code": "123_456",
+        }
+    )
+
+    assert "123_456" not in _label(row)
 
 
 def test_abstract_link_values_follow_tree_result_rules(monkeypatch):
