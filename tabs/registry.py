@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 TAB_SPECS: List[Tuple[str, str]] = [
     ("lineages", "Построение деревьев"),
     ("dissertations", "Поиск информации о диссертациях"),
+    ("dissertation_characteristics", "Характеристики диссертаций"),
     ("profiles", "Поиск по тематическим профилям"),
     ("school_search", "Поиск научных школ"),
     ("intersection", "Взаимосвязи научных школ"),
