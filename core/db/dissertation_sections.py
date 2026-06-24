@@ -66,7 +66,7 @@ def _with_section_label(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _batched(values: tuple[str, ...] | tuple[int, ...], size: int = SQL_BATCH_SIZE):
+def _batched(values: tuple[str, ...], size: int = SQL_BATCH_SIZE):
     for start in range(0, len(values), size):
         yield values[start : start + size]
 
@@ -296,7 +296,7 @@ def load_dissertation_sections_by_code(code: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def _load_dissertation_section_texts_by_ids_cached(db_signature: tuple[str, float, int] | None, text_ids: tuple[int, ...]) -> pd.DataFrame:
+def _load_dissertation_section_texts_by_ids_cached(db_signature: tuple[str, float, int] | None, text_ids: tuple[str, ...]) -> pd.DataFrame:
     """Загружает полный текст только для выбранных результатов поиска."""
     if db_signature is None or not text_ids:
         return _empty_index(include_text=True)
@@ -319,7 +319,7 @@ def _load_dissertation_section_texts_by_ids_cached(db_signature: tuple[str, floa
     return _with_section_label(pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0])
 
 
-def load_dissertation_section_texts_by_ids(text_ids: list[int] | tuple[int, ...] | pd.Series) -> pd.DataFrame:
+def load_dissertation_section_texts_by_ids(text_ids: list[str] | tuple[str, ...] | pd.Series) -> pd.DataFrame:
     """Возвращает тексты разделов для финального набора результатов поиска."""
-    normalized_ids = tuple(sorted({int(value) for value in text_ids if pd.notna(value)}))
+    normalized_ids = tuple(sorted({str(value).strip() for value in text_ids if pd.notna(value) and str(value).strip()}))
     return _load_dissertation_section_texts_by_ids_cached(get_dissertation_sections_db_signature(), normalized_ids)
