@@ -6,7 +6,9 @@ import pandas as pd
 import streamlit as st
 
 from core.db.dissertation_sections import (
+    load_dissertation_section_codes,
     load_dissertation_section_index,
+    load_dissertation_section_texts_by_ids,
     load_dissertation_sections_by_code,
     load_dissertation_sections_diagnostics,
     load_vector_metadata,
@@ -75,10 +77,28 @@ def _select_dissertation(df: pd.DataFrame, key_prefix: str) -> pd.Series | None:
     return found.loc[selected]
 
 
+def _specialty_value(row: pd.Series) -> str:
+    """Возвращает специальность из возможных плоских столбцов основной базы."""
+    direct = _value(row, "specialty")
+    if direct:
+        return direct
+    values: list[str] = []
+    for idx in range(1, 6):
+        code = _value(row, f"specialties_{idx}.code")
+        name = _value(row, f"specialties_{idx}.name")
+        if code and name:
+            values.append(f"{code} — {name}")
+        elif code or name:
+            values.append(code or name)
+    return "; ".join(values)
+
+
 def _show_metadata(row: pd.Series) -> None:
-    labels = [("Автор", "candidate_name"), ("Название", "title"), ("Год", "year"), ("Отрасль наук", "degree.science_field"), ("Специальность", "specialty"), ("Code", "Code")]
+    labels = [("Автор", "candidate_name"), ("Название", "title"), ("Год", "year"), ("Отрасль наук", "degree.science_field")]
     for label, col in labels:
         st.markdown(f"**{label}:** {_value(row, col) or '—'}")
+    st.markdown(f"**Специальность:** {_specialty_value(row) or '—'}")
+    st.markdown(f"**Code:** {_value(row, 'Code') or '—'}")
 
 
 def _render_sections_view(df: pd.DataFrame) -> None:
@@ -106,6 +126,11 @@ def _enrich_results(results: pd.DataFrame, df: pd.DataFrame) -> pd.DataFrame:
     out = results.copy()
     for col in ["candidate_name", "title", "year", "degree.science_field"]:
         out[col] = out["Code"].astype(str).map(meta[col] if col in meta.columns else {})
+    if "text" not in out.columns and "text_id" in out.columns:
+        texts = load_dissertation_section_texts_by_ids(out["text_id"].tolist())
+        if not texts.empty:
+            by_id = texts.drop_duplicates("text_id").set_index("text_id")
+            out["text"] = out["text_id"].map(by_id["text"])
     return out
 
 
@@ -203,12 +228,12 @@ def render_dissertation_characteristics_tab(df: pd.DataFrame) -> None:
         st.warning(str(warning))
 
     allowed_codes = set(filtered_df["Code"].astype(str)) if filtered_df is not None and "Code" in filtered_df.columns else set()
-    index_df = load_dissertation_section_index(allowed_codes=allowed_codes, searchable_only=False)
-    linked = _linked_df(filtered_df, index_df)
+    linked_codes = load_dissertation_section_codes(allowed_codes=allowed_codes)
+    linked = _linked_df(filtered_df, linked_codes)
     if linked.empty:
         st.warning("Нет связанных записей между основной базой диссертаций и базой извлечённых разделов.")
 
-    searchable_index = index_df[index_df["section_key"].isin(SEARCHABLE_SECTION_KEYS)].copy()
+    searchable_index = load_dissertation_section_index(allowed_codes=allowed_codes, searchable_only=True, include_text=False)
     metadata = load_vector_metadata() if diagnostics.get("db_exists") else {}
     encoder_available = is_query_encoder_available()
     names = ["Разделы характеристики", "Поиск похожих разделов"] + (["Нейросетевой поиск по разделам"] if encoder_available else [])

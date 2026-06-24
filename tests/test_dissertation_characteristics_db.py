@@ -5,7 +5,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
-from core.db.dissertation_sections import load_dissertation_section_index, resolve_dissertation_sections_db_path
+from core.db.dissertation_sections import load_dissertation_section_index, load_dissertation_section_texts_by_ids, resolve_dissertation_sections_db_path
 from tabs.dissertation_characteristics.labels import DISPLAY_SECTION_KEYS, SEARCHABLE_SECTION_KEYS
 from tabs.dissertation_characteristics.tab import _linked_df
 
@@ -47,3 +47,21 @@ def test_unlinked_records_are_excluded(monkeypatch, tmp_path):
     main = pd.DataFrame({"Code": ["A"], "candidate_name": ["Автор"]})
     linked = _linked_df(main, index)
     assert linked["Code"].tolist() == ["A"]
+
+
+def test_search_index_does_not_load_full_text(monkeypatch, tmp_path):
+    db = tmp_path / "sections.db"
+    _make_db(db)
+    monkeypatch.setenv("DISSERTATION_SECTIONS_DB_PATH", str(db))
+    index = load_dissertation_section_index(allowed_codes={"A"}, searchable_only=True, include_text=False)
+    assert "text" not in index.columns
+    assert index["Code"].tolist() == ["A"]
+
+
+def test_result_texts_are_loaded_only_by_final_ids(monkeypatch, tmp_path):
+    db = tmp_path / "sections.db"
+    _make_db(db)
+    monkeypatch.setenv("DISSERTATION_SECTIONS_DB_PATH", str(db))
+    texts = load_dissertation_section_texts_by_ids([2])
+    assert texts["text_id"].tolist() == [2]
+    assert texts["text"].tolist() == ["цель"]

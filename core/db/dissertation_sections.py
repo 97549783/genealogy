@@ -5,13 +5,18 @@ from __future__ import annotations
 import os
 import sqlite3
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 from tabs.dissertation_characteristics.labels import SEARCHABLE_SECTION_KEYS, SECTION_LABELS_RU
 
 REQUIRED_TEXT_COLUMNS = {"text_id", "Code", "section_key", "section_order", "text", "text_hash", "matrix_row"}
 REQUIRED_TABLES = {"dissertation_section_texts", "dissertation_vector_meta"}
+SQL_BATCH_SIZE = 500
+INDEX_COLUMNS = ["text_id", "Code", "section_key", "section_order", "matrix_row"]
+TEXT_COLUMNS = ["text_id", "Code", "section_key", "section_order", "text", "text_hash", "matrix_row"]
 
 
 def _repo_root() -> Path:
@@ -45,18 +50,43 @@ def get_dissertation_sections_db_signature() -> tuple[str, float, int] | None:
     return (str(path), stat.st_mtime, stat.st_size)
 
 
-def _empty_index() -> pd.DataFrame:
-    return pd.DataFrame(columns=["text_id", "Code", "section_key", "section_order", "text", "text_hash", "matrix_row", "section_label"])
+def _empty_index(include_text: bool = False) -> pd.DataFrame:
+    columns = TEXT_COLUMNS if include_text else INDEX_COLUMNS
+    return pd.DataFrame(columns=[*columns, "section_label"])
 
 
-def load_vector_metadata() -> dict[str, str]:
-    """Загружает метаданные матрицы векторов."""
+def _with_section_label(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        if "section_label" not in df.columns:
+            df = df.copy()
+            df["section_label"] = pd.Series(dtype="object")
+        return df
+    df = df.copy()
+    df["section_label"] = df["section_key"].map(SECTION_LABELS_RU).fillna(df["section_key"])
+    return df.reset_index(drop=True)
+
+
+def _batched(values: tuple[str, ...] | tuple[int, ...], size: int = SQL_BATCH_SIZE):
+    for start in range(0, len(values), size):
+        yield values[start : start + size]
+
+
+@st.cache_data(show_spinner=False)
+def _load_vector_metadata_cached(db_signature: tuple[str, float, int] | None) -> dict[str, str]:
+    """Загружает метаданные матрицы с учётом подписи базы."""
+    if db_signature is None:
+        return {}
     with get_dissertation_sections_connection() as conn:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "dissertation_vector_meta" not in tables:
             return {}
         rows = conn.execute("SELECT key, value FROM dissertation_vector_meta").fetchall()
     return {str(row["key"]): str(row["value"]) for row in rows}
+
+
+def load_vector_metadata() -> dict[str, str]:
+    """Загружает метаданные матрицы векторов."""
+    return _load_vector_metadata_cached(get_dissertation_sections_db_signature())
 
 
 def resolve_matrix_path_from_metadata(metadata: dict[str, str] | None = None) -> Path | None:
@@ -80,11 +110,12 @@ def get_dissertation_matrix_signature() -> tuple[str, float, int] | None:
     return (str(path), stat.st_mtime, stat.st_size)
 
 
-def load_dissertation_sections_diagnostics() -> dict:
-    """Проверяет готовность базы разделов и матрицы к работе."""
+@st.cache_data(show_spinner=False)
+def _load_diagnostics_cached(db_signature: tuple[str, float, int] | None) -> dict:
+    """Проверяет готовность базы разделов и матрицы с кэшированием."""
     path = resolve_dissertation_sections_db_path()
     diag = {"db_path": str(path), "db_exists": path.exists(), "warnings": []}
-    if not path.exists():
+    if db_signature is None or not path.exists():
         diag["warnings"].append("База разделов диссертаций не найдена.")
         return diag
     try:
@@ -125,32 +156,128 @@ def load_dissertation_sections_diagnostics() -> dict:
                 diag["warnings"].append("В базе есть ссылки на строки за пределами матрицы.")
         else:
             diag["warnings"].append("Файл матрицы векторов не найден.")
-    except Exception:
-        diag["warnings"].append("Не удалось проверить базу разделов диссертаций.")
+    except sqlite3.Error as exc:
+        diag["warnings"].append(f"Не удалось прочитать базу разделов диссертаций: ошибка SQLite ({exc.__class__.__name__}).")
+        diag["error_type"] = exc.__class__.__name__
+    except OSError as exc:
+        diag["warnings"].append(f"Не удалось открыть файл базы или матрицы: системная ошибка ({exc.__class__.__name__}).")
+        diag["error_type"] = exc.__class__.__name__
+    except ValueError as exc:
+        diag["warnings"].append(f"Не удалось проверить параметры матрицы: неверное значение ({exc.__class__.__name__}).")
+        diag["error_type"] = exc.__class__.__name__
     return diag
 
 
-def load_dissertation_section_index(allowed_codes: list[str] | set[str] | None = None, searchable_only: bool = False) -> pd.DataFrame:
-    """Загружает индекс разделов с необязательным ограничением по Code."""
+def load_dissertation_sections_diagnostics() -> dict:
+    """Проверяет готовность базы разделов и матрицы к работе."""
+    return _load_diagnostics_cached(get_dissertation_sections_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_dissertation_section_codes_cached(db_signature: tuple[str, float, int] | None, allowed_codes: tuple[str, ...] | None) -> pd.DataFrame:
+    """Загружает только связанные Code без текстов и строк разделов."""
+    if db_signature is None:
+        return pd.DataFrame(columns=["Code"])
+    if allowed_codes is not None and not allowed_codes:
+        return pd.DataFrame(columns=["Code"])
+    frames: list[pd.DataFrame] = []
     try:
-        sql = "SELECT text_id, Code, section_key, section_order, text, text_hash, matrix_row FROM dissertation_section_texts"
-        params: list[str] = []
-        if searchable_only:
-            sql += " WHERE section_key IN (" + ",".join("?" for _ in SEARCHABLE_SECTION_KEYS) + ")"
-            params.extend(SEARCHABLE_SECTION_KEYS)
         with get_dissertation_sections_connection() as conn:
-            df = pd.read_sql_query(sql, conn, params=params)
+            if allowed_codes is None:
+                frames.append(pd.read_sql_query("SELECT DISTINCT Code FROM dissertation_section_texts", conn))
+            else:
+                for code_batch in _batched(allowed_codes):
+                    placeholders = ",".join("?" for _ in code_batch)
+                    frames.append(
+                        pd.read_sql_query(
+                            f"SELECT DISTINCT Code FROM dissertation_section_texts WHERE Code IN ({placeholders})",
+                            conn,
+                            params=list(code_batch),
+                        )
+                    )
     except Exception:
-        return _empty_index()
+        return pd.DataFrame(columns=["Code"])
+    if not frames:
+        return pd.DataFrame(columns=["Code"])
+    return (pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]).drop_duplicates("Code").reset_index(drop=True)
+
+
+def load_dissertation_section_codes(allowed_codes: list[str] | set[str] | tuple[str, ...] | None = None) -> pd.DataFrame:
+    """Возвращает только Code диссертаций, для которых есть извлечённые разделы."""
+    normalized_codes: tuple[str, ...] | None = None
     if allowed_codes is not None:
-        codes = {str(code) for code in allowed_codes if str(code).strip()}
-        df = df[df["Code"].astype(str).isin(codes)] if codes else df.iloc[0:0]
-    df["section_label"] = df["section_key"].map(SECTION_LABELS_RU).fillna(df["section_key"])
-    return df.reset_index(drop=True)
+        normalized_codes = tuple(sorted({str(code).strip() for code in allowed_codes if str(code).strip()}))
+    return _load_dissertation_section_codes_cached(get_dissertation_sections_db_signature(), normalized_codes)
 
 
-def load_dissertation_sections_by_code(code: str) -> pd.DataFrame:
-    """Загружает разделы одной диссертации в порядке исходной характеристики."""
+@st.cache_data(show_spinner=False)
+def _load_dissertation_section_index_cached(
+    db_signature: tuple[str, float, int] | None,
+    allowed_codes: tuple[str, ...] | None,
+    searchable_only: bool,
+    include_text: bool,
+) -> pd.DataFrame:
+    """Загружает лёгкий индекс разделов, применяя ограничение Code на стороне SQLite."""
+    if db_signature is None:
+        return _empty_index(include_text=include_text)
+    if allowed_codes is not None and not allowed_codes:
+        return _empty_index(include_text=include_text)
+
+    columns = TEXT_COLUMNS if include_text else INDEX_COLUMNS
+    select_clause = ", ".join(columns)
+    section_filter = ""
+    section_params: list[str] = []
+    if searchable_only:
+        section_filter = "section_key IN (" + ",".join("?" for _ in SEARCHABLE_SECTION_KEYS) + ")"
+        section_params = list(SEARCHABLE_SECTION_KEYS)
+
+    frames: list[pd.DataFrame] = []
+    try:
+        with get_dissertation_sections_connection() as conn:
+            if allowed_codes is None:
+                where_clause = f" WHERE {section_filter}" if section_filter else ""
+                frames.append(pd.read_sql_query(f"SELECT {select_clause} FROM dissertation_section_texts{where_clause}", conn, params=section_params))
+            else:
+                for code_batch in _batched(allowed_codes):
+                    code_filter = "Code IN (" + ",".join("?" for _ in code_batch) + ")"
+                    filters = [code_filter]
+                    params: list[str] = list(code_batch)
+                    if section_filter:
+                        filters.append(section_filter)
+                        params.extend(section_params)
+                    where_clause = " WHERE " + " AND ".join(filters)
+                    frames.append(pd.read_sql_query(f"SELECT {select_clause} FROM dissertation_section_texts{where_clause}", conn, params=params))
+    except Exception:
+        return _empty_index(include_text=include_text)
+
+    if not frames:
+        return _empty_index(include_text=include_text)
+    df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+    return _with_section_label(df)
+
+
+def load_dissertation_section_index(
+    allowed_codes: list[str] | set[str] | tuple[str, ...] | None = None,
+    searchable_only: bool = False,
+    include_text: bool = False,
+) -> pd.DataFrame:
+    """Загружает индекс разделов без полного текста, если он явно не запрошен."""
+    normalized_codes: tuple[str, ...] | None = None
+    if allowed_codes is not None:
+        normalized_codes = tuple(sorted({str(code).strip() for code in allowed_codes if str(code).strip()}))
+    return _load_dissertation_section_index_cached(
+        get_dissertation_sections_db_signature(),
+        normalized_codes,
+        bool(searchable_only),
+        bool(include_text),
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _load_dissertation_sections_by_code_cached(db_signature: tuple[str, float, int] | None, code: str) -> pd.DataFrame:
+    """Загружает полный текст разделов одной диссертации."""
+    if db_signature is None:
+        return _empty_index(include_text=True)
     try:
         with get_dissertation_sections_connection() as conn:
             df = pd.read_sql_query(
@@ -159,6 +286,40 @@ def load_dissertation_sections_by_code(code: str) -> pd.DataFrame:
                 params=[str(code)],
             )
     except Exception:
-        return _empty_index()
-    df["section_label"] = df["section_key"].map(SECTION_LABELS_RU).fillna(df["section_key"])
-    return df
+        return _empty_index(include_text=True)
+    return _with_section_label(df)
+
+
+def load_dissertation_sections_by_code(code: str) -> pd.DataFrame:
+    """Загружает разделы одной диссертации в порядке исходной характеристики."""
+    return _load_dissertation_sections_by_code_cached(get_dissertation_sections_db_signature(), str(code))
+
+
+@st.cache_data(show_spinner=False)
+def _load_dissertation_section_texts_by_ids_cached(db_signature: tuple[str, float, int] | None, text_ids: tuple[int, ...]) -> pd.DataFrame:
+    """Загружает полный текст только для выбранных результатов поиска."""
+    if db_signature is None or not text_ids:
+        return _empty_index(include_text=True)
+    frames: list[pd.DataFrame] = []
+    try:
+        with get_dissertation_sections_connection() as conn:
+            for id_batch in _batched(text_ids):
+                placeholders = ",".join("?" for _ in id_batch)
+                frames.append(
+                    pd.read_sql_query(
+                        f"SELECT text_id, Code, section_key, section_order, text, text_hash, matrix_row FROM dissertation_section_texts WHERE text_id IN ({placeholders})",
+                        conn,
+                        params=list(id_batch),
+                    )
+                )
+    except Exception:
+        return _empty_index(include_text=True)
+    if not frames:
+        return _empty_index(include_text=True)
+    return _with_section_label(pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0])
+
+
+def load_dissertation_section_texts_by_ids(text_ids: list[int] | tuple[int, ...] | pd.Series) -> pd.DataFrame:
+    """Возвращает тексты разделов для финального набора результатов поиска."""
+    normalized_ids = tuple(sorted({int(value) for value in text_ids if pd.notna(value)}))
+    return _load_dissertation_section_texts_by_ids_cached(get_dissertation_sections_db_signature(), normalized_ids)
