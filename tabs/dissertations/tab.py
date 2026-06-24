@@ -26,8 +26,8 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
     if st.button("📖 Инструкция", key="instruction_dissertations"):
         show_instruction("dissertations")
 
-    st.subheader("Поиск информации о диссертациях")
-    st.write("На этой вкладке доступен поиск диссертаций по формальным критериям.")
+    st.subheader("Поиск по формальным признакам")
+    st.write("На этой подвкладке доступен поиск диссертаций по формальным критериям.")
 
     st.markdown("### 0. Фильтр отраслей наук")
     default_science_fields = st.session_state.pop(
@@ -105,7 +105,7 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
             st.success(f"Найдено диссертаций: {len(result_df)}")
             share_params_button(
                 {
-                    "tab": "dissertations",
+                    "tab": "dissertation_search",
                     "diss_criterion": selected_criteria,
                     **{f"diss_{criterion}": search_params.get(criterion, "") for criterion in selected_criteria},
                     **({"diss_text_search_mode": text_search_mode} if any(c in text_criteria for c in selected_criteria) else {}),

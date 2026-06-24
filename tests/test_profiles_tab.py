@@ -115,7 +115,7 @@ topics.render_search_by_topics(
 
     assert app.session_state["_captured_share_key"] == "profiles_share_results_pedagogy_5_8"
     assert app.session_state["_captured_share_payload"] == {
-        "tab": "profiles",
+        "tab": "dissertation_search",
         "profile_source": "pedagogy_5_8",
         "codes": ["1.1.1"],
         "min_score": 5.5,

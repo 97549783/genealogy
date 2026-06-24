@@ -28,7 +28,7 @@ from .state import hydrate_topics_query_params, profile_state_key, trigger_rerun
 INSTRUCTION_BY_TOPICS = """
 ## 📊 Поиск по конкретным темам
 
-На этой вкладке реализован содержательный поиск диссертаций по конкретным темам. 
+На этой подвкладке реализован содержательный поиск диссертаций по конкретным темам. 
 Он основан не на совпадении слов в заголовке, а на анализе всего текста автореферата 
 диссертационной работы. Поиск осуществляется с использованием иерархического 
 классификатора, содержащего различные критерии, отражающие объект, процесс и 
@@ -248,7 +248,7 @@ def render_search_by_topics(
             st.success(f"✅ Найдено диссертаций: {len(display_df)}")
             share_params_button(
                 {
-                    "tab": "profiles",
+                    "tab": "dissertation_search",
                     "profile_source": profile_source_id,
                     "codes": selected_codes,
                     "min_score": min_score,
