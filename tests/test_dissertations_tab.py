@@ -132,4 +132,5 @@ diss_tab.render_dissertations_tab(sample_df)
     app.query_params["diss_text_search_mode"] = "fuzzy"
     app.run()
     assert app.session_state["_captured_use_fuzzy"] is True
+    assert app.session_state["_captured_share_payload"]["tab"] == "dissertation_search"
     assert app.session_state["_captured_share_payload"]["diss_text_search_mode"] == "fuzzy"

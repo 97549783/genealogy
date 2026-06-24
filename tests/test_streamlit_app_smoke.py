@@ -30,16 +30,18 @@ def test_streamlit_app_imports_and_builds_tabs(monkeypatch, tmp_path) -> None:
     assert any(tab.label == "Анализ статей (демо)" for tab in app.tabs)
 
 
-def test_streamlit_app_respects_tab_query_param(monkeypatch, tmp_path) -> None:
+def test_streamlit_app_has_clean_dissertation_search_top_tab(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "genealogy.db"
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
     app = AppTest.from_file("streamlit_app.py")
-    app.query_params["tab"] = "profiles"
     app.run(timeout=30)
+
     assert not app.exception
-    assert app.query_params["tab"] == ["profiles"]
+    assert any(tab.label == "Поиск диссертаций" for tab in app.tabs)
+    assert not any(tab.label == "Поиск информации о диссертациях" for tab in app.tabs)
+    assert not any(tab.label == "Поиск по тематическим профилям" for tab in app.tabs)
 
 
 def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> None:
@@ -89,17 +91,15 @@ def test_streamlit_app_lazy_renders_only_default_tab(monkeypatch, tmp_path) -> N
     assert "Загружено" not in all_text
 
 
-def test_streamlit_app_lazy_renders_requested_profile_tab(monkeypatch, tmp_path) -> None:
+def test_streamlit_app_renders_new_dissertation_search_tab(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "genealogy.db"
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
     app = AppTest.from_file("streamlit_app.py")
-    app.query_params["tab"] = "profiles"
+    app.query_params["tab"] = "dissertation_search"
     app.run(timeout=30)
 
     assert not app.exception
-
     all_text = _visible_text(app)
-
-    assert "Режим поиска" in all_text
+    assert "Поиск диссертаций" in all_text
