@@ -15,6 +15,7 @@ from core.db.dissertation_sections import (
 )
 from core.domain.science_fields import filter_df_by_science_fields
 from core.ui.filters import hydrate_science_fields_from_query_params, render_science_field_filter, science_field_filter_caption
+from core.ui.table_display import make_abstract_download_url_numeric, make_abstract_read_url
 from tabs.dissertation_characteristics.labels import DISPLAY_SECTION_KEYS, SEARCHABLE_SECTION_KEYS, SECTION_LABELS_RU
 from tabs.dissertation_characteristics.query_search import (
     collect_non_empty_queries,
@@ -37,7 +38,7 @@ def _value(row: pd.Series, column: str) -> str:
 
 
 def _label(row: pd.Series) -> str:
-    parts = [_value(row, "candidate_name"), _value(row, "title"), _value(row, "year"), _value(row, "degree.science_field"), _value(row, "Code")]
+    parts = [_value(row, "candidate_name"), _value(row, "title"), _value(row, "year"), _value(row, "degree.science_field")]
     return " — ".join([p for p in parts if p]) or "Без названия"
 
 
@@ -92,12 +93,32 @@ def _specialty_value(row: pd.Series) -> str:
     return "; ".join(values)
 
 
+def _abstract_link_values(code: str, candidate_name: str) -> dict[str, str]:
+    """Возвращает ссылки на автореферат без вывода служебного кода."""
+    return {
+        "read": make_abstract_read_url(code),
+        "download": make_abstract_download_url_numeric(code, candidate_name),
+    }
+
+
+def _render_abstract_links(code: str, candidate_name: str) -> None:
+    """Показывает ссылки на автореферат без вывода служебного кода."""
+    links = _abstract_link_values(code, candidate_name)
+    visible_links: list[str] = []
+    if links["read"]:
+        visible_links.append(f"[Читать]({links['read']})")
+    if links["download"]:
+        visible_links.append(f"[Скачать]({links['download']})")
+    if visible_links:
+        st.markdown(f"**Автореферат:** {' · '.join(visible_links)}")
+
+
 def _show_metadata(row: pd.Series) -> None:
     labels = [("Автор", "candidate_name"), ("Название", "title"), ("Год", "year"), ("Отрасль наук", "degree.science_field")]
     for label, col in labels:
         st.markdown(f"**{label}:** {_value(row, col) or '—'}")
     st.markdown(f"**Специальность:** {_specialty_value(row) or '—'}")
-    st.markdown(f"**Code:** {_value(row, 'Code') or '—'}")
+    _render_abstract_links(_value(row, "Code"), _value(row, "candidate_name"))
 
 
 def _render_sections_view(df: pd.DataFrame) -> None:
@@ -144,7 +165,7 @@ def _show_results(results: pd.DataFrame) -> None:
             st.markdown(f"**Название:** {row.get('title', '—')}")
             st.markdown(f"**Год:** {row.get('year', '—')}")
             st.markdown(f"**Отрасль наук:** {row.get('degree.science_field', '—')}")
-            st.markdown(f"**Code:** {row.get('Code', '—')}")
+            _render_abstract_links(str(row.get("Code", "")), str(row.get("candidate_name", "")))
             for col in [c for c in results.columns if c.startswith("query_similarity_")]:
                 n = col.rsplit("_", 1)[1]
                 st.caption(f"Сходство с запросом {n}: {float(row[col]):.3f}; вклад запроса {n}: {float(row.get('query_weight_' + n, 0)):.1f}%")
@@ -180,6 +201,10 @@ def _render_similar_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: d
     else:
         section_keys = st.multiselect("Типы разделов для поиска", SEARCHABLE_SECTION_KEYS, default=SEARCHABLE_SECTION_KEYS, format_func=lambda k: SECTION_LABELS_RU.get(k, k), key="diss_char_target_types")
     top_n = st.number_input("Количество результатов", min_value=1, max_value=100, value=10, step=1, key="diss_char_similar_top")
+    run_search = st.button("Поиск", type="primary", key="diss_char_similar_search_button")
+    if not run_search:
+        st.caption("Настройте параметры и нажмите «Поиск».")
+        return
     targets = filter_targets_for_similar_search(index_df, code, section_keys)
     normalized = str(metadata.get("normalized", "true")).casefold() in {"1", "true", "yes", "да"}
     results = search_similar_dissertation_sections(int(source["matrix_row"]), matrix, targets, int(top_n), get_search_batch_size(), normalized)
@@ -194,8 +219,12 @@ def _render_query_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: dic
     queries = collect_non_empty_queries(values, max_queries=5)
     section_keys = st.multiselect("Типы разделов для поиска", SEARCHABLE_SECTION_KEYS, default=SEARCHABLE_SECTION_KEYS, format_func=lambda k: SECTION_LABELS_RU.get(k, k), key="diss_char_query_types")
     top_n = st.number_input("Количество результатов", min_value=1, max_value=100, value=10, step=1, key="diss_char_query_top")
+    run_search = st.button("Поиск", type="primary", key="diss_char_query_search_button")
+    if not run_search:
+        st.caption("Введите запрос и нажмите «Поиск».")
+        return
     if not queries:
-        st.caption("Введите один или несколько запросов.")
+        st.warning("Введите один или несколько запросов.")
         return
     targets = index_df[index_df["section_key"].isin(section_keys)].copy()
     model_name = metadata.get("model_name") or "intfloat/multilingual-e5-base"
