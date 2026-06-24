@@ -56,8 +56,7 @@ def _search_rows(df: pd.DataFrame, text: str, mode: str) -> pd.DataFrame:
     columns = {
         "Только по автору": ["candidate_name"],
         "Только по названию": ["title"],
-        "Только по Code": ["Code"],
-    }.get(mode, ["candidate_name", "title", "Code"])
+    }.get(mode, ["candidate_name", "title"])
     mask = pd.Series(False, index=df.index)
     for col in columns:
         if col in df.columns:
@@ -66,8 +65,8 @@ def _search_rows(df: pd.DataFrame, text: str, mode: str) -> pd.DataFrame:
 
 
 def _select_dissertation(df: pd.DataFrame, key_prefix: str) -> pd.Series | None:
-    query = st.text_input("Поиск по автору, названию или Code", key=f"{key_prefix}_query")
-    mode = st.radio("Искать:", ["По автору, названию или Code", "Только по автору", "Только по названию", "Только по Code"], horizontal=True, key=f"{key_prefix}_mode")
+    query = st.text_input("Поиск по автору или названию", key=f"{key_prefix}_query")
+    mode = st.radio("Искать:", ["По автору или названию", "Только по автору", "Только по названию"], horizontal=True, key=f"{key_prefix}_mode")
     found = _search_rows(df, query, mode).head(300)
     if found.empty:
         st.warning("Подходящие диссертации не найдены.")
