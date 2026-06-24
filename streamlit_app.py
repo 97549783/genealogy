@@ -11,6 +11,7 @@ from core.app import (
 )
 from tabs.articles.tab import render_articles_analysis_tab
 from tabs.dissertations.tab import render_dissertations_tab
+from tabs.dissertation_characteristics.tab import render_dissertation_characteristics_tab
 from tabs.intersection.tab import render_opponents_intersection_tab
 from tabs.lineages.tab import render_school_trees_tab
 from tabs.profiles.tab import render_profiles_tab
@@ -77,6 +78,10 @@ if _should_render_tab("lineages"):
 if _should_render_tab("dissertations"):
     with tab_by_id["dissertations"]:
         render_dissertations_tab(df=ctx.df)
+
+if _should_render_tab("dissertation_characteristics"):
+    with tab_by_id["dissertation_characteristics"]:
+        render_dissertation_characteristics_tab(df=ctx.df)
 
 if _should_render_tab("profiles"):
     with tab_by_id["profiles"]:
