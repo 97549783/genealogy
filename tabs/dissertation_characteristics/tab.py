@@ -73,7 +73,7 @@ def _submitted_search_key(key_prefix: str) -> str:
 def _select_dissertation(df: pd.DataFrame, key_prefix: str) -> pd.Series | None:
     mode_key = f"{key_prefix}_mode"
     query_key = f"{key_prefix}_query"
-    button_key = f"{key_prefix}_search_button"
+    button_key = f"{key_prefix}_dissertation_search_button"
     select_key = f"{key_prefix}_select"
     submitted_key = _submitted_search_key(key_prefix)
 
@@ -231,9 +231,13 @@ def _render_similar_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: d
     else:
         section_keys = st.multiselect("Типы разделов для поиска", SEARCHABLE_SECTION_KEYS, default=SEARCHABLE_SECTION_KEYS, format_func=lambda k: SECTION_LABELS_RU.get(k, k), key="diss_char_target_types")
     top_n = st.number_input("Количество результатов", min_value=1, max_value=100, value=10, step=1, key="diss_char_similar_top")
-    run_search = st.button("Поиск", type="primary", key="diss_char_similar_search_button")
+    run_search = st.button(
+        "Найти похожие",
+        type="primary",
+        key="diss_char_similar_find_similar_button",
+    )
     if not run_search:
-        st.caption("Настройте параметры и нажмите «Поиск».")
+        st.caption("Настройте параметры и нажмите «Найти похожие».")
         return
     matrix, ready = _matrix_ready()
     if not ready:
@@ -249,9 +253,9 @@ def _render_query_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: dic
     queries = collect_non_empty_queries(values, max_queries=5)
     section_keys = st.multiselect("Типы разделов для поиска", SEARCHABLE_SECTION_KEYS, default=SEARCHABLE_SECTION_KEYS, format_func=lambda k: SECTION_LABELS_RU.get(k, k), key="diss_char_query_types")
     top_n = st.number_input("Количество результатов", min_value=1, max_value=100, value=10, step=1, key="diss_char_query_top")
-    run_search = st.button("Поиск", type="primary", key="diss_char_query_search_button")
+    run_search = st.button("Найти по запросу", type="primary", key="diss_char_query_find_button")
     if not run_search:
-        st.caption("Введите запрос и нажмите «Поиск».")
+        st.caption("Введите запрос и нажмите «Найти по запросу».")
         return
     if not queries:
         st.warning("Введите один или несколько запросов.")
