@@ -6,16 +6,16 @@ import numpy as np
 import pandas as pd
 
 from tabs.dissertation_characteristics import tab
-from tabs.dissertation_characteristics.tab import _abstract_link_values, _label, _linked_df
+from tabs.dissertation_characteristics.tab import _abstract_link_values, _label, _linked_df, _search_rows
 
 
-def test_missing_matrix_does_not_break_first_subtab_helper():
+def test_отсутствие_матрицы_не_ломает_связку_первой_подвкладки():
     df = pd.DataFrame({"Code": ["A"], "candidate_name": ["Автор"]})
     index = pd.DataFrame({"Code": ["A"], "section_key": ["research_goal"]})
     assert _linked_df(df, index)["Code"].tolist() == ["A"]
 
 
-def test_label_does_not_show_code():
+def test_подпись_не_показывает_служебный_код():
     row = pd.Series(
         {
             "candidate_name": "Иванов Иван",
@@ -29,7 +29,7 @@ def test_label_does_not_show_code():
     assert "123_456" not in _label(row)
 
 
-def test_abstract_link_values_follow_tree_result_rules(monkeypatch):
+def test_ссылки_автореферата_соблюдают_правила_результатов_дерева(monkeypatch):
     numeric = _abstract_link_values("123_456", "Иванов Иван")
     assert numeric["read"] == "https://viewer.rusneb.ru/ru/123_456?page=1"
     assert numeric["download"].startswith("https://rusneb.ru/local/tools/exalead/getFiles.php?book_id=123_456")
@@ -64,8 +64,9 @@ class _FakeStreamlit:
     def __init__(self, query: str = "") -> None:
         self.captions: list[str] = []
         self.query = query
+        self.session_state: dict[str, object] = {}
 
-    def text_input(self, label, key=None):
+    def text_input(self, label, key=None, **kwargs):
         if key == "diss_char_query_1":
             return self.query
         return ""
@@ -73,8 +74,10 @@ class _FakeStreamlit:
     def radio(self, *args, **kwargs):
         return "По автору или названию"
 
-    def selectbox(self, label, options, format_func=None, key=None):
-        return list(options)[0]
+    def selectbox(self, label, options, format_func=None, key=None, index=0):
+        if index is None:
+            return self.session_state.get(key)
+        return list(options)[index]
 
     def checkbox(self, *args, **kwargs):
         return True
@@ -95,7 +98,54 @@ class _FakeStreamlit:
         raise AssertionError(f"Неожиданное предупреждение: {value}")
 
 
-def test_similar_section_search_waits_for_search_button(monkeypatch):
+def test_поиск_по_режимам_сохраняет_прежнюю_семантику():
+    df = pd.DataFrame(
+        {
+            "Code": ["1", "2", "3"],
+            "candidate_name": ["Иванов Иван", "Петров Пётр", "Сидорова Анна"],
+            "title": ["Исследование школ", "История Иванова метода", "Модели данных"],
+        }
+    )
+
+    assert _search_rows(df, "иванов", "По автору или названию")["Code"].tolist() == ["1", "2"]
+    assert _search_rows(df, "иванов", "Только по автору")["Code"].tolist() == ["1"]
+    assert _search_rows(df, "иванов", "Только по названию")["Code"].tolist() == ["2"]
+
+
+def test_выбор_диссертации_ждёт_отправленного_поиска(monkeypatch):
+    fake_st = _FakeStreamlit()
+    monkeypatch.setattr(tab, "st", fake_st)
+    df = pd.DataFrame({"Code": ["123_456"], "candidate_name": ["Иванов Иван"], "title": ["Название"]})
+
+    assert tab._select_dissertation(df, "diss_char_view") is None
+    assert "Введите параметры и нажмите «Поиск»." in fake_st.captions
+
+
+def test_результаты_поиска_не_выбираются_автоматически(monkeypatch):
+    fake_st = _FakeStreamlit()
+    fake_st.session_state["diss_char_view_submitted_search"] = {"query": "Иванов", "mode": "По автору или названию"}
+    monkeypatch.setattr(tab, "st", fake_st)
+    df = pd.DataFrame({"Code": ["123_456"], "candidate_name": ["Иванов Иван"], "title": ["Название"]})
+
+    assert tab._select_dissertation(df, "diss_char_view") is None
+
+
+def test_похожие_разделы_не_открывают_матрицу_без_выбора_диссертации(monkeypatch):
+    fake_st = _FakeStreamlit()
+    fake_st.session_state["diss_char_similar_submitted_search"] = {"query": "Иванов", "mode": "По автору или названию"}
+    monkeypatch.setattr(tab, "st", fake_st)
+    monkeypatch.setattr(tab, "load_current_dissertation_matrix", Mock(return_value=np.zeros((2, 2))))
+    monkeypatch.setattr(tab, "load_dissertation_sections_by_code", Mock(return_value=pd.DataFrame()))
+
+    df = pd.DataFrame({"Code": ["123_456"], "candidate_name": ["Иванов Иван"], "title": ["Название"]})
+    index_df = pd.DataFrame({"Code": ["789"], "section_key": ["research_goal"], "matrix_row": [1]})
+    tab._render_similar_search(df, index_df, {"normalized": "true"})
+
+    tab.load_current_dissertation_matrix.assert_not_called()
+    tab.load_dissertation_sections_by_code.assert_not_called()
+
+
+def test_поиск_похожих_разделов_ждёт_кнопку_поиска(monkeypatch):
     fake_st = _FakeStreamlit()
     monkeypatch.setattr(tab, "st", fake_st)
     monkeypatch.setattr(tab, "load_current_dissertation_matrix", Mock(return_value=np.zeros((2, 2))))
@@ -124,10 +174,12 @@ def test_similar_section_search_waits_for_search_button(monkeypatch):
 
     filter_targets.assert_not_called()
     search.assert_not_called()
-    assert "Настройте параметры и нажмите «Поиск»." in fake_st.captions
+    assert "Введите параметры и нажмите «Поиск»." in fake_st.captions
+    tab.load_current_dissertation_matrix.assert_not_called()
+    tab.load_dissertation_sections_by_code.assert_not_called()
 
 
-def test_neural_query_search_waits_for_search_button(monkeypatch):
+def test_нейросетевой_поиск_по_запросу_ждёт_кнопку_поиска(monkeypatch):
     fake_st = _FakeStreamlit(query="научная новизна")
     monkeypatch.setattr(tab, "st", fake_st)
     monkeypatch.setattr(tab, "load_current_dissertation_matrix", Mock(return_value=np.zeros((2, 2))))

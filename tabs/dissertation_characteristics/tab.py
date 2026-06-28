@@ -65,15 +65,48 @@ def _search_rows(df: pd.DataFrame, text: str, mode: str) -> pd.DataFrame:
     return df[mask].copy()
 
 
+def _submitted_search_key(key_prefix: str) -> str:
+    """Возвращает ключ сохранённых параметров поиска диссертации."""
+    return f"{key_prefix}_submitted_search"
+
+
 def _select_dissertation(df: pd.DataFrame, key_prefix: str) -> pd.Series | None:
-    query = st.text_input("Поиск по автору или названию", key=f"{key_prefix}_query")
-    mode = st.radio("Искать:", ["По автору или названию", "Только по автору", "Только по названию"], horizontal=True, key=f"{key_prefix}_mode")
-    found = _search_rows(df, query, mode).head(300)
+    mode_key = f"{key_prefix}_mode"
+    query_key = f"{key_prefix}_query"
+    button_key = f"{key_prefix}_search_button"
+    select_key = f"{key_prefix}_select"
+    submitted_key = _submitted_search_key(key_prefix)
+
+    mode = st.radio("Искать:", ["По автору или названию", "Только по автору", "Только по названию"], horizontal=True, key=mode_key)
+    query = st.text_input(
+        "Поиск диссертаций",
+        key=query_key,
+        placeholder="Введите фрагмент имени автора или названия",
+        label_visibility="collapsed",
+    )
+    if st.button("Поиск", type="primary", key=button_key):
+        st.session_state[submitted_key] = {"query": query, "mode": mode}
+        st.session_state[select_key] = None
+
+    submitted = st.session_state.get(submitted_key)
+    if not submitted:
+        st.caption("Введите параметры и нажмите «Поиск».")
+        return None
+
+    found = _search_rows(df, str(submitted.get("query", "")), str(submitted.get("mode", "По автору или названию"))).head(300)
     if found.empty:
         st.warning("Подходящие диссертации не найдены.")
         return None
     options = list(found.index)
-    selected = st.selectbox("Диссертация", options=options, format_func=lambda i: _label(found.loc[i]), key=f"{key_prefix}_select")
+    selected = st.selectbox(
+        "Выберите диссертацию из результатов поиска",
+        options=options,
+        index=None,
+        format_func=lambda i: _label(found.loc[i]),
+        key=select_key,
+    )
+    if selected is None:
+        return None
     return found.loc[selected]
 
 
@@ -181,9 +214,6 @@ def _matrix_ready() -> tuple[object | None, bool]:
 
 
 def _render_similar_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: dict[str, str]) -> None:
-    matrix, ready = _matrix_ready()
-    if not ready:
-        return
     row = _select_dissertation(df, "diss_char_similar")
     if row is None:
         return
@@ -205,6 +235,9 @@ def _render_similar_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: d
     if not run_search:
         st.caption("Настройте параметры и нажмите «Поиск».")
         return
+    matrix, ready = _matrix_ready()
+    if not ready:
+        return
     targets = filter_targets_for_similar_search(index_df, code, section_keys)
     normalized = str(metadata.get("normalized", "true")).casefold() in {"1", "true", "yes", "да"}
     results = search_similar_dissertation_sections(int(source["matrix_row"]), matrix, targets, int(top_n), get_search_batch_size(), normalized)
@@ -212,9 +245,6 @@ def _render_similar_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: d
 
 
 def _render_query_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: dict[str, str]) -> None:
-    matrix, ready = _matrix_ready()
-    if not ready:
-        return
     values = [st.text_input(f"Запрос {i}", key=f"diss_char_query_{i}") for i in range(1, 4)]
     queries = collect_non_empty_queries(values, max_queries=5)
     section_keys = st.multiselect("Типы разделов для поиска", SEARCHABLE_SECTION_KEYS, default=SEARCHABLE_SECTION_KEYS, format_func=lambda k: SECTION_LABELS_RU.get(k, k), key="diss_char_query_types")
@@ -225,6 +255,9 @@ def _render_query_search(df: pd.DataFrame, index_df: pd.DataFrame, metadata: dic
         return
     if not queries:
         st.warning("Введите один или несколько запросов.")
+        return
+    matrix, ready = _matrix_ready()
+    if not ready:
         return
     targets = index_df[index_df["section_key"].isin(section_keys)].copy()
     model_name = metadata.get("model_name") or "intfloat/multilingual-e5-base"
