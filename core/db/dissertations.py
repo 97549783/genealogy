@@ -63,15 +63,8 @@ def _like_expr(column: str) -> str:
     return f"CASEFOLD(COALESCE(CAST({_quote_identifier(column)} AS TEXT), '')) LIKE CASEFOLD(?)"
 
 
-def load_dissertation_metadata() -> pd.DataFrame:
-    """Загружает метаданные диссертаций из таблицы diss_metadata."""
-    return _load_dissertation_metadata_cached(get_db_signature())
-
-
-@st.cache_data(show_spinner=False)
-def _load_dissertation_metadata_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
-    """Загружает метаданные диссертаций из SQLite с кэшированием."""
-    _ = db_signature
+def read_dissertation_metadata() -> pd.DataFrame:
+    """Reads and validates dissertation metadata without applying a Streamlit cache."""
     with get_sqlite_connection() as conn:
         df = pd.read_sql_query("SELECT * FROM diss_metadata", conn)
 
@@ -87,6 +80,18 @@ def _load_dissertation_metadata_cached(db_signature: tuple[str, float, int]) -> 
     df = df[df["Code"] != ""]
     df = df.drop_duplicates(subset=["Code"], keep="first")
     return df
+
+
+def load_dissertation_metadata() -> pd.DataFrame:
+    """Загружает метаданные диссертаций из таблицы diss_metadata."""
+    return _load_dissertation_metadata_cached(get_db_signature())
+
+
+@st.cache_data(show_spinner=False)
+def _load_dissertation_metadata_cached(db_signature: tuple[str, float, int]) -> pd.DataFrame:
+    """Загружает метаданные диссертаций из SQLite с кэшированием."""
+    _ = db_signature
+    return read_dissertation_metadata()
 
 
 def _science_field_like_clauses(

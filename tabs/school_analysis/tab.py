@@ -13,11 +13,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
-from core.domain.science_fields import filter_df_by_science_fields
 from core.classifier import get_classifier_by_profile_source
-from core.db import get_db_signature
 from core.domain.profile_sources import get_profile_summary_groups
 from core.perf import perf_timer
+from core.ui.science_filtering import get_science_filtered_lineage_context
 from core.ui.filters import (
     hydrate_profile_source_from_query_params,
     hydrate_science_fields_from_query_params,
@@ -28,7 +27,7 @@ from core.ui.filters import (
     science_fields_to_query_params,
 )
 
-from core.lineage.graph import build_index, lineage, rows_for
+from core.lineage.graph import lineage, rows_for
 from core.ui.links import share_params_button
 from .analysis import (
     collect_school_subset,
@@ -95,9 +94,9 @@ def _bar_chart(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> plt.Figu
     return fig
 
 
-def _clear_school_cache(root: str, scope: str, sf_suffix: str) -> None:
+def _clear_school_cache(root: str, scope: str, sf_suffix: str, db_signature) -> None:
     """Очищает кэш школы из session_state."""
-    db_sig = str(get_db_signature())
+    db_sig = str(db_signature)
     for s in ("direct", "all"):
         key = f"school_subset_{db_sig}_{sf_suffix}_{root}_{s}"
         if key in st.session_state:
@@ -112,6 +111,8 @@ def _clear_school_cache(root: str, scope: str, sf_suffix: str) -> None:
 def render_school_analysis_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
+    *,
+    db_signature=("", 0.0, 0),
 ) -> None:
     """
     Отрисовывает вкладку «Анализ научной школы».
@@ -133,8 +134,16 @@ def render_school_analysis_tab(
     )
     st.caption(science_field_filter_caption(science_field_ids))
 
-    working_df = filter_df_by_science_fields(df, science_field_ids)
-    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    lineage_context = get_science_filtered_lineage_context(
+        df=df,
+        base_idx=idx,
+        db_signature=db_signature,
+        selected_ids=science_field_ids,
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
+    working_df = lineage_context.df
+    working_idx = lineage_context.idx
+    lineage_context_key = lineage_context.cache_key
     sf_suffix = science_field_state_suffix(science_field_ids)
 
     # =========================================================================
@@ -194,35 +203,45 @@ def render_school_analysis_tab(
     with col_reset:
         if st.button("Сбросить кэш", key="school_analysis_reset",
                      help="Очистить сохранённые результаты и пересчитать"):
-            _clear_school_cache(root, scope, sf_suffix)
+            _clear_school_cache(root, scope, sf_suffix, db_signature)
             st.rerun()
 
     if run_clicked:
         st.session_state["school_analysis_run_state"] = True
 
     if not st.session_state.get("school_analysis_run_state", False):
-        db_sig = str(get_db_signature())
+        db_sig = str(db_signature)
         if f"school_subset_{db_sig}_{sf_suffix}_{root}_direct" not in st.session_state:
             return
 
     # =========================================================================
     # Сбор данных с кэшированием в session_state
     # =========================================================================
-    db_sig = str(get_db_signature())
+    db_sig = str(db_signature)
     key_direct = f"school_subset_{db_sig}_{sf_suffix}_{root}_direct"
     key_all = f"school_subset_{db_sig}_{sf_suffix}_{root}_all"
 
     with st.spinner("Сбор диссертаций школы..."):
         if key_direct not in st.session_state:
             with perf_timer("school_analysis.collect_direct_subset"):
-                st.session_state[key_direct] = collect_school_subset(
-                    working_df, working_idx, root, "direct", lineage, rows_for
-                )
+                try:
+                    st.session_state[key_direct] = collect_school_subset(
+                        working_df, working_idx, root, "direct", lineage, rows_for, lineage_context_key=lineage_context_key
+                    )
+                except TypeError:
+                    st.session_state[key_direct] = collect_school_subset(
+                        working_df, working_idx, root, "direct", lineage, rows_for
+                    )
         if key_all not in st.session_state:
             with perf_timer("school_analysis.collect_all_subset"):
-                st.session_state[key_all] = collect_school_subset(
-                    working_df, working_idx, root, "all", lineage, rows_for
-                )
+                try:
+                    st.session_state[key_all] = collect_school_subset(
+                        working_df, working_idx, root, "all", lineage, rows_for, lineage_context_key=lineage_context_key
+                    )
+                except TypeError:
+                    st.session_state[key_all] = collect_school_subset(
+                        working_df, working_idx, root, "all", lineage, rows_for
+                    )
 
     subset_direct: pd.DataFrame = st.session_state[key_direct]
     subset_all: pd.DataFrame = st.session_state[key_all]

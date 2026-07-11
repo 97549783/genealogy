@@ -25,9 +25,9 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 import numpy as np
 import pandas as pd
 from core.db import get_all_feature_columns, load_dissertation_scores
-from core.db import get_db_signature
 from core.domain.profile_sources import get_profile_summary_groups
 from core.lineage.membership import get_school_subset, get_school_lineage
+from core.app.context import LineageContextKey
 
 # ---------------------------------------------------------------------------
 # Константы основных колонок данных диссертаций
@@ -98,6 +98,8 @@ def collect_school_subset(
     scope: str,
     lineage_func: Callable,
     rows_for_func: Callable,
+    *,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Возвращает DataFrame диссертаций научной школы.
@@ -106,7 +108,7 @@ def collect_school_subset(
     scope='all'    — все поколения (полное дерево).
     """
     _ = lineage_func, rows_for_func
-    return get_school_subset(df, index, root, scope, get_db_signature())
+    return get_school_subset(df, index, root, scope, lineage_context_key[0], context_key=lineage_context_key)
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ from .rendering import draw_matplotlib
 from core.lineage import compute_lineage_metrics
 from core.lineage.graph import TREE_OPTIONS, slug, lineage
 from core.lineage.membership import get_school_lineage
-from core.db import get_db_signature, SUPERVISOR_COLUMNS
+from core.db import SUPERVISOR_COLUMNS
 from core.ui.table_display import (
     build_tree_export_df,
     render_dissertations_widget,
@@ -98,6 +98,8 @@ def render_school_trees_tab(
     idx: Dict[str, Set[int]],
     all_supervisor_names: List[str],
     shared_roots: Optional[List[str]] = None,
+    *,
+    db_signature=("", 0.0, 0),
 ) -> None:
     """Отрисовывает вкладку «Построение деревьев»."""
     if st.button("📖 Инструкция", key="instruction_lineages"):
@@ -106,6 +108,8 @@ def render_school_trees_tab(
     st.markdown("### Фильтр отраслей наук")
     filtered_context = render_science_filtered_lineage_context(
         df=df,
+        base_idx=idx,
+        db_signature=db_signature,
         key_prefix="lineages",
         supervisor_columns=SUPERVISOR_COLUMNS,
     )
@@ -185,7 +189,8 @@ def render_school_trees_tab(
                         idx=filtered_idx,
                         root=root,
                         first_level_filter_name=filter_name,
-                        db_signature=get_db_signature(),
+                        db_signature=db_signature,
+                        context_key=filtered_context.cache_key,
                     )
                 tree_results.append(
                     {

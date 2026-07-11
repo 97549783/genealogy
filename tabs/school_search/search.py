@@ -52,6 +52,7 @@ from core.db import (
 )
 from core.search.text_matching import FUZZY_THRESHOLD, fuzzy_match_series, normalize_text
 from core.perf import perf_timer
+from core.app.context import LineageContextKey
 from core.lineage import compute_lineage_metrics
 from core.lineage.membership import (
     get_cached_roots,
@@ -85,6 +86,10 @@ SCORES_CODE_COLUMN = "Code"
 
 # Строка результирующей таблицы поиска
 SearchRow = Dict
+
+
+def _sig(context_key: LineageContextKey | None):
+    return context_key[0] if context_key is not None else get_db_signature()
 
 # ---------------------------------------------------------------------------
 # Нормализация строк
@@ -144,7 +149,7 @@ def _unique_cities(subset: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 
 
-def get_all_roots(df: pd.DataFrame) -> List[str]:
+def get_all_roots(df: pd.DataFrame, *, lineage_context_key: LineageContextKey | None = None) -> List[str]:
     """
     Возвращает дедублированный отсортированный список научных руководителей.
 
@@ -157,7 +162,7 @@ def get_all_roots(df: pd.DataFrame) -> List[str]:
         «Рожков М. И.», «Рожков М.И.», «Рожков Михаил Иосифович»  → один корень
         «Третьяков П.И.», «Третьяков Пётр Иванович»               → один корень
     """
-    return get_cached_roots(df, get_db_signature())
+    return get_cached_roots(df, _sig(lineage_context_key), context_key=lineage_context_key)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +177,8 @@ def collect_subset(
     scope: str,
     lineage_func: Callable,
     rows_for_func: Callable,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Возвращает DataFrame диссертаций научной школы.
@@ -180,7 +187,7 @@ def collect_subset(
     scope='all'    — все поколения (полное дерево).
     """
     _ = lineage_func, rows_for_func
-    return get_school_subset(df, index, root, scope, get_db_signature())
+    return get_school_subset(df, index, root, scope, _sig(lineage_context_key), context_key=lineage_context_key)
 
 
 # ---------------------------------------------------------------------------
@@ -236,15 +243,17 @@ def _rank_by_matching_codes(
     scope: str,
     top_n: int,
     metric_label: str,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """Ранжирует школы по пересечению состава школы с заданным набором Code."""
     if not matching_codes:
         return pd.DataFrame()
-    sig = get_db_signature()
+    sig = _sig(lineage_context_key)
     with perf_timer("school_search.rank_by_matching_codes.get_all_school_member_codes"):
-        school_codes = get_all_school_member_codes(df, index, scope, sig)
+        school_codes = get_all_school_member_codes(df, index, scope, sig, context_key=lineage_context_key)
     with perf_timer("school_search.rank_by_matching_codes.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, sig)
+        stats = get_school_basic_stats(df, index, scope, sig, context_key=lineage_context_key)
     rows: List[SearchRow] = []
     with perf_timer("school_search.rank_by_matching_codes.rank"):
         for root, codes in school_codes.items():
@@ -302,6 +311,8 @@ def search_by_total_members(
     rows_for_func: Callable,
     scope: str = "all",
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по общему числу членов.
@@ -310,7 +321,7 @@ def search_by_total_members(
         # | Руководитель | Число членов | Всего членов | Годы активности | Уникальных городов
     """
     with perf_timer("school_search.total_members.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, get_db_signature())
+        stats = get_school_basic_stats(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     rows: List[SearchRow] = []
     for root, stat in stats.items():
         count = stat["n_members"]
@@ -335,6 +346,8 @@ def search_by_members_in_period(
     year_to: int,
     scope: str = "all",
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по числу защит в диапазоне [year_from, year_to].
@@ -345,7 +358,7 @@ def search_by_members_in_period(
     with perf_timer("school_search.members_in_period.fetch_codes"):
         matching_codes = fetch_dissertation_codes_by_year_range(year_from, year_to)
     with perf_timer("school_search.members_in_period.rank_by_matching_codes"):
-        return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, "Защит за период")
+        return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, "Защит за период", lineage_context_key=lineage_context_key)
 
 
 def search_by_members_in_year(
@@ -356,6 +369,8 @@ def search_by_members_in_year(
     year: int,
     scope: str = "all",
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по числу защит в конкретный год.
@@ -366,7 +381,7 @@ def search_by_members_in_year(
     with perf_timer("school_search.members_in_year.fetch_codes"):
         matching_codes = fetch_dissertation_codes_by_year(year)
     with perf_timer("school_search.members_in_year.rank_by_matching_codes"):
-        return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, f"Защит в {year} г.")
+        return _rank_by_matching_codes(df, index, matching_codes, scope, top_n, f"Защит в {year} г.", lineage_context_key=lineage_context_key)
 
 
 def search_by_depth(
@@ -375,6 +390,8 @@ def search_by_depth(
     lineage_func: Callable,
     rows_for_func: Callable,
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по глубине дерева (числу поколений).
@@ -386,12 +403,12 @@ def search_by_depth(
         # | Руководитель | Поколений | Всего членов | Годы активности | Уникальных городов
     """
     with perf_timer("school_search.depth.all_roots"):
-        roots = get_all_roots(df)
+        roots = get_all_roots(df, lineage_context_key=lineage_context_key)
     rows: List[SearchRow] = []
 
     with perf_timer("school_search.depth.lineage_loop"):
         for root in roots:
-            graph, subset = get_school_lineage(df, index, root, None, get_db_signature())
+            graph, subset = get_school_lineage(df, index, root, None, _sig(lineage_context_key), context_key=lineage_context_key)
             if graph.number_of_nodes() < 2:
                 continue
 
@@ -417,6 +434,8 @@ def search_by_supervisor_rate(
     rows_for_func: Callable,
     scope: str = "all",
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по доле учеников, ставших научными руководителями
@@ -428,11 +447,11 @@ def search_by_supervisor_rate(
           Прямых учеников | Всего членов | Годы активности | Уникальных городов
     """
     _ = lineage_func, rows_for_func, scope
-    sig = get_db_signature()
+    sig = _sig(lineage_context_key)
     with perf_timer("school_search.supervisor_rate.get_supervisor_rate_stats"):
-        rate_stats = get_supervisor_rate_stats(df, index, sig)
+        rate_stats = get_supervisor_rate_stats(df, index, sig, context_key=lineage_context_key)
     with perf_timer("school_search.supervisor_rate.get_school_basic_stats"):
-        school_stats = get_school_basic_stats(df, index, "all", sig)
+        school_stats = get_school_basic_stats(df, index, "all", sig, context_key=lineage_context_key)
     rows: List[SearchRow] = []
     for root, stat in rate_stats.items():
         direct_count = stat["direct_count"]
@@ -475,6 +494,8 @@ def search_by_city(
     scope: str = "all",
     top_n: int = 10,
     use_fuzzy: bool = False,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу защит в указанном городе (нечёткий поиск).
@@ -495,9 +516,9 @@ def search_by_city(
         return pd.DataFrame(), {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
     with perf_timer("school_search.city.get_all_school_member_codes"):
-        codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
+        codes_by_root = get_all_school_member_codes(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     with perf_timer("school_search.city.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, get_db_signature())
+        stats = get_school_basic_stats(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     matched_by_code = matched.groupby("Code")["value"].apply(lambda s: sorted(set(s.astype(str)))).to_dict()
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
@@ -524,6 +545,8 @@ def search_by_geo_diversity(
     rows_for_func: Callable,
     scope: str = "all",
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по числу уникальных городов защит (географическое разнообразие).
@@ -532,7 +555,7 @@ def search_by_geo_diversity(
         # | Руководитель | Уникальных городов | Всего членов | Годы активности | Уникальных городов
     """
     with perf_timer("school_search.geo_diversity.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, get_db_signature())
+        stats = get_school_basic_stats(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     rows: List[SearchRow] = []
     for root, stat in stats.items():
         n_cities = stat["n_cities"]
@@ -565,6 +588,8 @@ def _search_by_org_column(
     scope: str = "all",
     top_n: int = 10,
     use_fuzzy: bool = False,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Внутренняя функция: топ-N школ по числу диссертаций,
@@ -586,9 +611,9 @@ def _search_by_org_column(
     matched_map: Dict[str, List[str]] = {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
     with perf_timer("school_search.org.get_all_school_member_codes"):
-        codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
+        codes_by_root = get_all_school_member_codes(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     with perf_timer("school_search.org.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, get_db_signature())
+        stats = get_school_basic_stats(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     matched_by_code = matched.groupby("Code")["value"].apply(lambda s: sorted(set(s.astype(str)))).to_dict()
     with perf_timer("school_search.org.rank"):
         for root, codes in codes_by_root.items():
@@ -616,7 +641,7 @@ def search_by_institution_prepared(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной организацией выполнения.
     """
@@ -628,6 +653,7 @@ def search_by_institution_prepared(
         scope=scope,
         top_n=top_n,
         use_fuzzy=use_fuzzy,
+        lineage_context_key=lineage_context_key,
     )
 
 
@@ -640,7 +666,7 @@ def search_by_defense_location(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанным местом (организацией) защиты.
     """
@@ -652,6 +678,7 @@ def search_by_defense_location(
         scope=scope,
         top_n=top_n,
         use_fuzzy=use_fuzzy,
+        lineage_context_key=lineage_context_key,
     )
 
 
@@ -664,7 +691,7 @@ def search_by_leading_organization(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной ведущей организацией.
     """
@@ -676,6 +703,7 @@ def search_by_leading_organization(
         scope=scope,
         top_n=top_n,
         use_fuzzy=use_fuzzy,
+        lineage_context_key=lineage_context_key,
     )
 
 
@@ -693,15 +721,17 @@ def search_by_classifier_score(
     scope: str = "all",
     top_n: int = 10,
     profile_source_id: str = "pedagogy_5_8",
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> pd.DataFrame:
     """
     Топ-N школ по среднему баллу по узлу классификатора.
     """
-    sig = get_db_signature()
+    sig = _sig(lineage_context_key)
     with perf_timer("school_search.classifier.get_all_school_member_codes"):
-        school_codes = get_all_school_member_codes(df, index, scope, sig)
+        school_codes = get_all_school_member_codes(df, index, scope, sig, context_key=lineage_context_key)
     with perf_timer("school_search.classifier.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, sig)
+        stats = get_school_basic_stats(df, index, scope, sig, context_key=lineage_context_key)
     all_codes = {code for codes in school_codes.values() for code in codes if str(code).strip()}
     if not all_codes:
         return pd.DataFrame()
@@ -750,7 +780,7 @@ def search_by_opponent(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False,) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в диссертациях которых указанное лицо выступает оппонентом
     (нечёткий поиск с нормализацией инициалов и ё→е по OPPONENT_COLUMNS).
@@ -774,9 +804,9 @@ def search_by_opponent(
     matched_map: Dict[str, List[str]] = {}
     matching_codes = set(matched["Code"].astype(str).str.strip())
     with perf_timer("school_search.opponent.get_all_school_member_codes"):
-        codes_by_root = get_all_school_member_codes(df, index, scope, get_db_signature())
+        codes_by_root = get_all_school_member_codes(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     with perf_timer("school_search.opponent.get_school_basic_stats"):
-        stats = get_school_basic_stats(df, index, scope, get_db_signature())
+        stats = get_school_basic_stats(df, index, scope, _sig(lineage_context_key), context_key=lineage_context_key)
     matched_by_code = matched.groupby("Code")["value"].apply(lambda s: sorted(set(s.astype(str)))).to_dict()
     with perf_timer("school_search.opponent.rank"):
         for root, codes in codes_by_root.items():
@@ -803,17 +833,19 @@ def search_by_member(
     person_query: str,
     scope: str = "all",
     top_n: int = 10,
+    *,
+    lineage_context_key: LineageContextKey | None = None,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в которых указанное лицо является учеником (автором диссертации)
     (нечёткий поиск с нормализацией инициалов и ё→е по AUTHOR_COLUMN).
     """
-    roots = get_all_roots(df)
+    roots = get_all_roots(df, lineage_context_key=lineage_context_key)
     rows: List[SearchRow] = []
     matched_map: Dict[str, List[str]] = {}
 
     for root in roots:
-        subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func)
+        subset = collect_subset(df, index, root, scope, lineage_func, rows_for_func, lineage_context_key=lineage_context_key)
         if subset.empty or AUTHOR_COLUMN not in subset.columns:
             continue
 

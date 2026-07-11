@@ -31,6 +31,7 @@ core/ui/table_display.py — утилиты для отображения таб
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 from urllib.parse import quote
@@ -159,6 +160,9 @@ _DATA_COLUMNS: list[str] = [c for c in TREE_TABLE_COLUMNS if c != "abstract_html
 # Имена плоских колонок для ссылок в st.dataframe.
 _COL_READ = "Автореферат"
 _COL_DOWNLOAD = "PDF-файл"
+
+DEFAULT_PAGE_SIZE = 200
+PAGE_SIZE_OPTIONS = (100, 200, 500)
 
 
 # ---------------------------------------------------------------------------
@@ -418,30 +422,108 @@ def build_tree_export_df(subset: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     return pd.DataFrame(rows_xlsx), pd.DataFrame(rows_csv)
 
 
+
+def paginate_dataframe(
+    df: pd.DataFrame,
+    page_number: int,
+    page_size: int,
+) -> tuple[pd.DataFrame, int, int]:
+    """Returns page DataFrame, normalized page number, and total page count."""
+    page_size = int(page_size) if int(page_size) > 0 else DEFAULT_PAGE_SIZE
+    total = len(df)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page_number = min(max(int(page_number or 1), 1), total_pages)
+    start = (page_number - 1) * page_size
+    end = start + page_size
+    return df.iloc[start:end], page_number, total_pages
+
+
+def build_dissertation_result_signature(subset: pd.DataFrame) -> str:
+    h = hashlib.blake2b(digest_size=16)
+    h.update(str(len(subset)).encode())
+    h.update("\0".join(map(str, subset.columns)).encode("utf-8", "surrogatepass"))
+    if "Code" in subset.columns:
+        values = subset["Code"].astype(str)
+    else:
+        values = subset.index.astype(str)
+    for value in values:
+        h.update(b"\0")
+        h.update(str(value).encode("utf-8", "surrogatepass"))
+    return h.hexdigest()
+
+
+def build_dissertations_csv_bytes(subset: pd.DataFrame) -> bytes:
+    _, csv_df = build_tree_export_df(subset)
+    return csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
+
+def build_dissertations_xlsx_bytes(subset: pd.DataFrame) -> bytes:
+    xlsx_df, _ = build_tree_export_df(subset)
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        xlsx_df.to_excel(writer, index=False, sheet_name="Диссертации")
+    return buf.getvalue()
+
 def render_dissertations_widget(
     subset: pd.DataFrame,
     key: str,
     title: str = "Результаты",
     expanded: bool = False,
     file_name_prefix: str | None = None,
+    *,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    result_signature: str | None = None,
 ) -> None:
-    """
-    Универсальный UI-виджет таблицы диссертаций + экспорт (Excel/CSV).
+    """Универсальный UI-виджет таблицы диссертаций + ленивый экспорт.
 
-    Используется на разных вкладках (например, «Построение деревьев»
-    и «Поиск научных школ») для единообразного отображения результатов.
+    Phase 1 pagination reduces display transformation and WebSocket transfer,
+    but broad searches may still materialize the complete source DataFrame.
+    Server-side result handles and SQL LIMIT/keyset pagination are deferred.
     """
     import streamlit as st
 
     file_base = file_name_prefix or key
-    label = f"📋 {title} ({len(subset)})"
+    total = len(subset)
+    label = f"📋 {title} ({total})"
 
     with st.expander(label, expanded=expanded):
         if subset.empty:
             st.info("Данные отсутствуют.")
             return
 
-        df_st, col_cfg = build_tree_st_dataframe_df(subset)
+        result_signature = result_signature or build_dissertation_result_signature(subset)
+        export_state_key = f"prepared_export_{key}"
+        state = st.session_state.get(export_state_key)
+        if not isinstance(state, dict) or state.get("signature") != result_signature:
+            state = {"signature": result_signature, "xlsx": None, "csv": None}
+            st.session_state[export_state_key] = state
+
+        selected_page_size = int(page_size)
+        if total > page_size:
+            selected_page_size = st.selectbox(
+                "Строк на странице",
+                PAGE_SIZE_OPTIONS,
+                index=PAGE_SIZE_OPTIONS.index(page_size) if page_size in PAGE_SIZE_OPTIONS else 1,
+                key=f"page_size_{key}",
+            )
+            requested_page = st.number_input(
+                "Страница",
+                min_value=1,
+                value=int(st.session_state.get(f"page_number_{key}", 1)),
+                step=1,
+                key=f"page_number_{key}",
+            )
+        else:
+            requested_page = 1
+
+        page_df, current_page, total_pages = paginate_dataframe(subset, int(requested_page), selected_page_size)
+        if total > selected_page_size:
+            st.session_state[f"page_number_{key}"] = current_page
+        start_row = (current_page - 1) * selected_page_size + 1
+        end_row = min(start_row + len(page_df) - 1, total)
+        st.caption(f"Показаны строки {start_row}–{end_row} из {total}")
+
+        df_st, col_cfg = build_tree_st_dataframe_df(page_df)
         st.dataframe(
             df_st,
             column_config=col_cfg,
@@ -450,30 +532,40 @@ def render_dissertations_widget(
             key=f"df_table_{key}",
         )
 
-        xlsx_df, csv_df = build_tree_export_df(subset)
         col_xlsx, col_csv = st.columns(2)
         with col_xlsx:
-            buf = io.BytesIO()
-            try:
-                with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-                    xlsx_df.to_excel(writer, index=False, sheet_name="Диссертации")
+            if st.button("Подготовить Excel", key=f"prepare_xlsx_{key}", use_container_width=True):
+                try:
+                    with st.spinner("Подготовка Excel…"):
+                        state["xlsx"] = build_dissertations_xlsx_bytes(subset)
+                    st.session_state[export_state_key] = state
+                except Exception as exc:
+                    state["xlsx"] = None
+                    st.error(f"Ошибка создания Excel: {exc}")
+            if state.get("xlsx") is not None:
                 st.download_button(
                     label="📊 Скачать Excel",
-                    data=buf.getvalue(),
+                    data=state["xlsx"],
                     file_name=f"{file_base}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_xlsx_{key}",
                     use_container_width=True,
                 )
-            except Exception as exc:
-                st.error(f"Ошибка создания Excel: {exc}")
         with col_csv:
-            csv_bytes = csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
-            st.download_button(
-                label="📄 Скачать CSV",
-                data=csv_bytes,
-                file_name=f"{file_base}.csv",
-                mime="text/csv",
-                key=f"dl_csv_{key}",
-                use_container_width=True,
-            )
+            if st.button("Подготовить CSV", key=f"prepare_csv_{key}", use_container_width=True):
+                try:
+                    with st.spinner("Подготовка CSV…"):
+                        state["csv"] = build_dissertations_csv_bytes(subset)
+                    st.session_state[export_state_key] = state
+                except Exception as exc:
+                    state["csv"] = None
+                    st.error(f"Ошибка создания CSV: {exc}")
+            if state.get("csv") is not None:
+                st.download_button(
+                    label="📄 Скачать CSV",
+                    data=state["csv"],
+                    file_name=f"{file_base}.csv",
+                    mime="text/csv",
+                    key=f"dl_csv_{key}",
+                    use_container_width=True,
+                )

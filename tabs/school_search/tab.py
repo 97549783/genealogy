@@ -15,7 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from core.classifier import get_classifier_by_profile_source
-from core.lineage.graph import build_index, lineage, rows_for, slug
+from core.lineage.graph import lineage, rows_for, slug
 from .search import (
     AUTHOR_COLUMN,
     FUZZY_THRESHOLD,
@@ -41,7 +41,7 @@ from core.ui.table_display import render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
 from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY, TEXT_SEARCH_MODE_LABELS
-from core.domain.science_fields import filter_df_by_science_fields
+from core.ui.science_filtering import get_science_filtered_lineage_context
 from core.ui.filters import (
     hydrate_profile_source_from_query_params,
     hydrate_science_fields_from_query_params,
@@ -51,7 +51,6 @@ from core.ui.filters import (
     science_fields_to_query_params,
 )
 from core.db import (
-    get_db_signature,
     get_score_columns_for_classifier_node,
 )
 
@@ -344,6 +343,8 @@ def _render_results(
 def render_school_search_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
+    *,
+    db_signature=("", 0.0, 0),
 ) -> None:
     """
     Отрисовывает вкладку «Поиск научных школ».
@@ -428,8 +429,16 @@ def render_school_search_tab(
     )
     st.caption(science_field_filter_caption(science_field_ids))
 
-    working_df = filter_df_by_science_fields(df, science_field_ids)
-    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    lineage_context = get_science_filtered_lineage_context(
+        df=df,
+        base_idx=idx,
+        db_signature=db_signature,
+        selected_ids=science_field_ids,
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
+    working_df = lineage_context.df
+    working_idx = lineage_context.idx
+    lineage_context_key = lineage_context.cache_key
 
     st.markdown("### ⚙️ Параметры поиска")
 
@@ -672,7 +681,7 @@ def render_school_search_tab(
         "top_n": top_n,
         "extra_params": extra_params,
         "science_field_ids": tuple(sorted(science_field_ids)),
-        "db_signature": get_db_signature(),
+        "db_signature": db_signature,
     }
     st.session_state["_school_search_pending_signature"] = current_signature
 
@@ -742,6 +751,7 @@ def render_school_search_tab(
                 df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Число членов",
@@ -760,6 +770,7 @@ def render_school_search_tab(
                 year_from=extra_params["year_from"],
                 year_to=extra_params["year_to"],
                 scope=scope, top_n=top_n,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Защит за период",
@@ -779,6 +790,7 @@ def render_school_search_tab(
                 df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 year=year_val, scope=scope, top_n=top_n,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col=f"Защит в {year_val} г.",
@@ -795,6 +807,7 @@ def render_school_search_tab(
                 df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 top_n=top_n,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Поколений",
@@ -811,6 +824,7 @@ def render_school_search_tab(
                 df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Доля учеников-руководителей, %",
@@ -832,6 +846,7 @@ def render_school_search_tab(
                 city_query=extra_params["city_query"],
                 scope=scope, top_n=top_n,
                 use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Защит в городе",
@@ -848,6 +863,7 @@ def render_school_search_tab(
                 df=working_df, index=working_idx,
                 lineage_func=lineage, rows_for_func=rows_for,
                 scope=scope, top_n=top_n,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Уникальных городов",
@@ -869,6 +885,7 @@ def render_school_search_tab(
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
                 use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Диссертаций (орг. выполнения)",
@@ -887,6 +904,7 @@ def render_school_search_tab(
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
                 use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Диссертаций (место защиты)",
@@ -905,6 +923,7 @@ def render_school_search_tab(
                 org_query=extra_params["org_query"],
                 scope=scope, top_n=top_n,
                 use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Диссертаций (вед. организация)",
@@ -927,6 +946,7 @@ def render_school_search_tab(
                 classifier_node=classifier_node,
                 scope=scope, top_n=top_n,
                 profile_source_id=extra_params["profile_source"],
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df,
@@ -951,6 +971,7 @@ def render_school_search_tab(
                 person_query=extra_params["person_query"],
                 scope=scope, top_n=top_n,
                 use_fuzzy=extra_params.get("text_search_mode") == SEARCH_MODE_FUZZY,
+                lineage_context_key=lineage_context_key,
             )
         _render_results(
             result_df, metric_col="Диссертаций с оппонентом",
