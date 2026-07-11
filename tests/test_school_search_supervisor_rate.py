@@ -6,7 +6,7 @@ from tabs.school_search import search as ss
 
 
 def test_search_by_supervisor_rate_without_rows_for(monkeypatch):
-    monkeypatch.setattr(ss, "get_db_signature", lambda: ("x", 1.0, 1))
+    key = (("x", 1.0, 1), (), ("supervisors_1.name", "supervisors_2.name"))
     monkeypatch.setattr(
         ss,
         "get_supervisor_rate_stats",
@@ -34,6 +34,7 @@ def test_search_by_supervisor_rate_without_rows_for(monkeypatch):
         rows_for_func=rows_for_should_not_be_called,
         scope="all",
         top_n=10,
+        lineage_context_key=key,
     )
     assert out.iloc[0]["Руководитель"] == "Root2"
     assert "Таких учеников" in out.columns

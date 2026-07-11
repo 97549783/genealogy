@@ -428,7 +428,7 @@ def paginate_dataframe(
     page_number: int,
     page_size: int,
 ) -> tuple[pd.DataFrame, int, int]:
-    """Returns page DataFrame, normalized page number, and total page count."""
+    """Возвращает страницу данных, нормализованный номер страницы и число страниц."""
     page_size = int(page_size) if int(page_size) > 0 else DEFAULT_PAGE_SIZE
     total = len(df)
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -439,16 +439,26 @@ def paginate_dataframe(
 
 
 def build_dissertation_result_signature(subset: pd.DataFrame) -> str:
+    """Строит устойчивую подпись результата для инвалидирования подготовленного экспорта."""
     h = hashlib.blake2b(digest_size=16)
     h.update(str(len(subset)).encode())
     h.update("\0".join(map(str, subset.columns)).encode("utf-8", "surrogatepass"))
     if "Code" in subset.columns:
-        values = subset["Code"].astype(str)
+        identity_values = subset["Code"].astype(str)
     else:
-        values = subset.index.astype(str)
-    for value in values:
-        h.update(b"\0")
+        identity_values = subset.index.astype(str)
+    for value in identity_values:
+        h.update(b"\0id:")
         h.update(str(value).encode("utf-8", "surrogatepass"))
+    if not subset.empty:
+        value_hashes = pd.util.hash_pandas_object(
+            subset.reset_index(drop=True).fillna(""),
+            index=False,
+            categorize=True,
+        )
+        for value in value_hashes.astype("uint64"):
+            h.update(b"\0row:")
+            h.update(int(value).to_bytes(8, "little", signed=False))
     return h.hexdigest()
 
 
@@ -476,9 +486,10 @@ def render_dissertations_widget(
 ) -> None:
     """Универсальный UI-виджет таблицы диссертаций + ленивый экспорт.
 
-    Phase 1 pagination reduces display transformation and WebSocket transfer,
-    but broad searches may still materialize the complete source DataFrame.
-    Server-side result handles and SQL LIMIT/keyset pagination are deferred.
+    Пагинация в первой фазе уменьшает преобразование данных для отображения и
+    передачу в браузер, но широкие поиски всё ещё могут материализовать полный
+    DataFrame результата. Серверные дескрипторы результатов и SQL-пагинация
+    остаются задачей следующего этапа.
     """
     import streamlit as st
 
@@ -499,6 +510,7 @@ def render_dissertations_widget(
             st.session_state[export_state_key] = state
 
         selected_page_size = int(page_size)
+        page_state_key = f"page_number_state_{key}"
         if total > page_size:
             selected_page_size = st.selectbox(
                 "Строк на странице",
@@ -506,19 +518,22 @@ def render_dissertations_widget(
                 index=PAGE_SIZE_OPTIONS.index(page_size) if page_size in PAGE_SIZE_OPTIONS else 1,
                 key=f"page_size_{key}",
             )
+            stored_page = int(st.session_state.get(page_state_key, 1))
+            _, normalized_page, total_pages = paginate_dataframe(subset, stored_page, selected_page_size)
             requested_page = st.number_input(
                 "Страница",
                 min_value=1,
-                value=int(st.session_state.get(f"page_number_{key}", 1)),
+                max_value=total_pages,
+                value=normalized_page,
                 step=1,
-                key=f"page_number_{key}",
+                key=f"page_number_input_{key}",
             )
         else:
             requested_page = 1
 
         page_df, current_page, total_pages = paginate_dataframe(subset, int(requested_page), selected_page_size)
         if total > selected_page_size:
-            st.session_state[f"page_number_{key}"] = current_page
+            st.session_state[page_state_key] = current_page
         start_row = (current_page - 1) * selected_page_size + 1
         end_row = min(start_row + len(page_df) - 1, total)
         st.caption(f"Показаны строки {start_row}–{end_row} из {total}")
@@ -539,9 +554,9 @@ def render_dissertations_widget(
                     with st.spinner("Подготовка Excel…"):
                         state["xlsx"] = build_dissertations_xlsx_bytes(subset)
                     st.session_state[export_state_key] = state
-                except Exception as exc:
+                except Exception:
                     state["xlsx"] = None
-                    st.error(f"Ошибка создания Excel: {exc}")
+                    st.error("Не удалось подготовить Excel-файл. Попробуйте повторить позже.")
             if state.get("xlsx") is not None:
                 st.download_button(
                     label="📊 Скачать Excel",
@@ -557,9 +572,9 @@ def render_dissertations_widget(
                     with st.spinner("Подготовка CSV…"):
                         state["csv"] = build_dissertations_csv_bytes(subset)
                     st.session_state[export_state_key] = state
-                except Exception as exc:
+                except Exception:
                     state["csv"] = None
-                    st.error(f"Ошибка создания CSV: {exc}")
+                    st.error("Не удалось подготовить CSV-файл. Попробуйте повторить позже.")
             if state.get("csv") is not None:
                 st.download_button(
                     label="📄 Скачать CSV",

@@ -64,7 +64,7 @@ def _like_expr(column: str) -> str:
 
 
 def read_dissertation_metadata() -> pd.DataFrame:
-    """Reads and validates dissertation metadata without applying a Streamlit cache."""
+    """Читает и валидирует метаданные диссертаций без кэша Streamlit."""
     with get_sqlite_connection() as conn:
         df = pd.read_sql_query("SELECT * FROM diss_metadata", conn)
 

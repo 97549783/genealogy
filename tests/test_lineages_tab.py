@@ -52,6 +52,7 @@ lineages_tab.render_school_trees_tab(
     idx={},
     all_supervisor_names=["Иванов И.И."],
     shared_roots=["Иванов И.И.", "Ручной Руководитель"],
+    db_signature=("test", 1.0, 1),
 )
 """
     )
@@ -137,6 +138,7 @@ lineages_tab.render_school_trees_tab(
     idx={},
     all_supervisor_names=["Иванов И.И."],
     shared_roots=["Иванов И.И."],
+    db_signature=("test", 1.0, 1),
 )
 """
     )

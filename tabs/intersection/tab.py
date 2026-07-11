@@ -295,7 +295,7 @@ def render_opponents_intersection_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
     *,
-    db_signature=("", 0.0, 0),
+    db_signature,
 ) -> None:
     """Отображает вкладку «Взаимосвязи научных школ (через институт оппонентов)»."""
 

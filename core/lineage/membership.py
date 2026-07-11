@@ -1,8 +1,8 @@
 """Кэширование состава и деревьев научных школ.
 
-Все cached helpers получают полный LineageContextKey и только underscore-
-аргументы для больших DataFrame/индексов. Это изолирует результаты разных
-science-фильтров при одинаковой сигнатуре БД.
+Все кэшированные вспомогательные функции получают полный LineageContextKey, а
+крупные DataFrame и индексы передаются только как параметры с подчёркиванием.
+Это изолирует результаты разных отраслевых фильтров при одинаковой сигнатуре БД.
 """
 
 from __future__ import annotations
@@ -44,21 +44,11 @@ def _roots_cached(context_key: LineageContextKey, _df: pd.DataFrame) -> list[str
     return sorted(groups.values())
 
 
-def _default_context_key(db_signature: DbSignature, df: pd.DataFrame | None = None, idx: dict | None = None) -> LineageContextKey:
-    # Compatibility path for tests/legacy callers that have not yet supplied
-    # an explicit science-filter context key. Production tab code passes a
-    # stable key; here we include object ids to avoid unsafe collisions when
-    # different in-memory test DataFrames reuse the same fake DB signature.
-    suffix = () if df is None and idx is None else (f"__df:{id(df)}", f"__idx:{id(idx)}")
-    return (db_signature, suffix, ("supervisors_1.name", "supervisors_2.name"))
-
-
 def _assert_context_signature(context_key: LineageContextKey, db_signature: DbSignature) -> None:
     assert context_key[0] == db_signature
 
 
-def get_cached_roots(df: pd.DataFrame, db_signature: DbSignature, *, context_key: LineageContextKey | None = None) -> list[str]:
-    context_key = context_key or _default_context_key(db_signature, df=df)
+def get_cached_roots(df: pd.DataFrame, db_signature: DbSignature, *, context_key: LineageContextKey) -> list[str]:
     _assert_context_signature(context_key, db_signature)
     return _roots_cached(context_key, df)
 
@@ -85,14 +75,13 @@ def _member_codes_cached(context_key: LineageContextKey, root: str, scope: str, 
         return _compute_school_member_codes_uncached(_df, _idx, root, scope)
 
 
-def get_school_member_codes(df, idx, root, scope, db_signature, *, context_key: LineageContextKey | None = None):
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
+def get_school_member_codes(df, idx, root, scope, db_signature, *, context_key: LineageContextKey):
     _assert_context_signature(context_key, db_signature)
     return _member_codes_cached(context_key, root, scope, df, idx)
 
 
-def get_school_subset(df, idx, root, scope, db_signature, *, context_key: LineageContextKey | None = None):
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
+def get_school_subset(df, idx, root, scope, db_signature, *, context_key: LineageContextKey):
+    _assert_context_signature(context_key, db_signature)
     codes = get_school_member_codes(df, idx, root, scope, db_signature, context_key=context_key)
     return subset_by_codes(df, codes)
 
@@ -106,8 +95,7 @@ def _lineage_cached(context_key: LineageContextKey, root, first_level_filter_nam
     return lineage(_df, _idx, root, first_level_filter=filters[first_level_filter_name])
 
 
-def get_school_lineage(df, idx, root, first_level_filter_name, db_signature, *, context_key: LineageContextKey | None = None) -> tuple[nx.DiGraph, pd.DataFrame]:
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
+def get_school_lineage(df, idx, root, first_level_filter_name, db_signature, *, context_key: LineageContextKey) -> tuple[nx.DiGraph, pd.DataFrame]:
     _assert_context_signature(context_key, db_signature)
     return _lineage_cached(context_key, root, first_level_filter_name, df, idx)
 
@@ -118,10 +106,9 @@ def get_all_school_member_codes(
     scope: str,
     db_signature: tuple[str, float, int],
     *,
-    context_key: LineageContextKey | None = None,
+    context_key: LineageContextKey,
 ) -> dict[str, set[str]]:
     """Возвращает словарь root → множество Code для всех школ."""
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
     _assert_context_signature(context_key, db_signature)
     return _all_school_member_codes_cached(context_key, scope, df, idx)
 
@@ -145,10 +132,9 @@ def get_school_basic_stats(
     scope: str,
     db_signature: tuple[str, float, int],
     *,
-    context_key: LineageContextKey | None = None,
+    context_key: LineageContextKey,
 ) -> dict[str, dict]:
     """Возвращает базовую статистику школ для быстрого построения результатов."""
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
     _assert_context_signature(context_key, db_signature)
     return _school_basic_stats_cached(context_key, scope, df, idx)
 
@@ -189,10 +175,9 @@ def get_author_by_code(
     df: pd.DataFrame,
     db_signature: DbSignature,
     *,
-    context_key: LineageContextKey | None = None,
+    context_key: LineageContextKey,
 ) -> dict[str, str]:
     """Возвращает словарь Code → ФИО автора диссертации."""
-    context_key = context_key or _default_context_key(db_signature, df=df)
     _assert_context_signature(context_key, db_signature)
     return _get_author_by_code_cached(context_key, df)
 
@@ -218,10 +203,9 @@ def get_supervisor_norm_set(
     idx: dict[str, set[int]],
     db_signature: DbSignature,
     *,
-    context_key: LineageContextKey | None = None,
+    context_key: LineageContextKey,
 ) -> set[str]:
     """Возвращает множество нормализованных имён людей, у которых есть ученики."""
-    context_key = context_key or _default_context_key(db_signature, idx=idx)
     _assert_context_signature(context_key, db_signature)
     return _get_supervisor_norm_set_cached(context_key, idx)
 
@@ -248,10 +232,9 @@ def get_author_supervisor_flags_by_code(
     idx: dict[str, set[int]],
     db_signature: tuple[str, float, int],
     *,
-    context_key: LineageContextKey | None = None,
+    context_key: LineageContextKey,
 ) -> dict[str, bool]:
     """Возвращает словарь Code → является ли автор научным руководителем."""
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
     _assert_context_signature(context_key, db_signature)
     return _get_author_supervisor_flags_by_code_cached(context_key, df, idx)
 
@@ -273,10 +256,9 @@ def get_supervisor_rate_stats(
     idx: dict[str, set[int]],
     db_signature: tuple[str, float, int],
     *,
-    context_key: LineageContextKey | None = None,
+    context_key: LineageContextKey,
 ) -> dict[str, dict]:
     """Возвращает статистику доли учеников, ставших руководителями, по всем школам."""
-    context_key = context_key or _default_context_key(db_signature, df=df, idx=idx)
     _assert_context_signature(context_key, db_signature)
     return _get_supervisor_rate_stats_cached(context_key, df, idx)
 

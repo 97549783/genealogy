@@ -99,7 +99,7 @@ def render_school_trees_tab(
     all_supervisor_names: List[str],
     shared_roots: Optional[List[str]] = None,
     *,
-    db_signature=("", 0.0, 0),
+    db_signature,
 ) -> None:
     """Отрисовывает вкладку «Построение деревьев»."""
     if st.button("📖 Инструкция", key="instruction_lineages"):

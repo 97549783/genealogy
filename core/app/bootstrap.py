@@ -35,7 +35,7 @@ def build_app_context() -> AppContext:
 
 @st.cache_resource(show_spinner=False)
 def _load_base_app_data(db_signature: DbSignature) -> BaseAppData:
-    """Загружает общие read-only данные приложения на процесс Streamlit."""
+    """Загружает общие данные приложения только для чтения на процесс Streamlit."""
     with perf_timer("app.base_data.read_metadata"):
         df = read_dissertation_metadata()
 

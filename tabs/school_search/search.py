@@ -44,7 +44,6 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from core.db import (
-    get_db_signature,
     fetch_dissertation_codes_by_year,
     fetch_dissertation_codes_by_year_range,
     fetch_dissertation_text_candidates,
@@ -88,8 +87,8 @@ SCORES_CODE_COLUMN = "Code"
 SearchRow = Dict
 
 
-def _sig(context_key: LineageContextKey | None):
-    return context_key[0] if context_key is not None else get_db_signature()
+def _sig(context_key: LineageContextKey):
+    return context_key[0]
 
 # ---------------------------------------------------------------------------
 # Нормализация строк
@@ -149,7 +148,7 @@ def _unique_cities(subset: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 
 
-def get_all_roots(df: pd.DataFrame, *, lineage_context_key: LineageContextKey | None = None) -> List[str]:
+def get_all_roots(df: pd.DataFrame, *, lineage_context_key: LineageContextKey) -> List[str]:
     """
     Возвращает дедублированный отсортированный список научных руководителей.
 
@@ -178,7 +177,7 @@ def collect_subset(
     lineage_func: Callable,
     rows_for_func: Callable,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Возвращает DataFrame диссертаций научной школы.
@@ -244,7 +243,7 @@ def _rank_by_matching_codes(
     top_n: int,
     metric_label: str,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """Ранжирует школы по пересечению состава школы с заданным набором Code."""
     if not matching_codes:
@@ -312,7 +311,7 @@ def search_by_total_members(
     scope: str = "all",
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по общему числу членов.
@@ -347,7 +346,7 @@ def search_by_members_in_period(
     scope: str = "all",
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по числу защит в диапазоне [year_from, year_to].
@@ -370,7 +369,7 @@ def search_by_members_in_year(
     scope: str = "all",
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по числу защит в конкретный год.
@@ -391,7 +390,7 @@ def search_by_depth(
     rows_for_func: Callable,
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по глубине дерева (числу поколений).
@@ -435,7 +434,7 @@ def search_by_supervisor_rate(
     scope: str = "all",
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по доле учеников, ставших научными руководителями
@@ -495,7 +494,7 @@ def search_by_city(
     top_n: int = 10,
     use_fuzzy: bool = False,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу защит в указанном городе (нечёткий поиск).
@@ -546,7 +545,7 @@ def search_by_geo_diversity(
     scope: str = "all",
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по числу уникальных городов защит (географическое разнообразие).
@@ -589,7 +588,7 @@ def _search_by_org_column(
     top_n: int = 10,
     use_fuzzy: bool = False,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Внутренняя функция: топ-N школ по числу диссертаций,
@@ -641,7 +640,7 @@ def search_by_institution_prepared(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной организацией выполнения.
     """
@@ -666,7 +665,7 @@ def search_by_defense_location(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанным местом (организацией) защиты.
     """
@@ -691,7 +690,7 @@ def search_by_leading_organization(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ по числу диссертаций с указанной ведущей организацией.
     """
@@ -722,7 +721,7 @@ def search_by_classifier_score(
     top_n: int = 10,
     profile_source_id: str = "pedagogy_5_8",
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> pd.DataFrame:
     """
     Топ-N школ по среднему баллу по узлу классификатора.
@@ -780,7 +779,7 @@ def search_by_opponent(
     scope: str = "all",
     top_n: int = 10,
 
-    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey | None = None) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
+    use_fuzzy: bool = False, *, lineage_context_key: LineageContextKey) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в диссертациях которых указанное лицо выступает оппонентом
     (нечёткий поиск с нормализацией инициалов и ё→е по OPPONENT_COLUMNS).
@@ -834,7 +833,7 @@ def search_by_member(
     scope: str = "all",
     top_n: int = 10,
     *,
-    lineage_context_key: LineageContextKey | None = None,
+    lineage_context_key: LineageContextKey,
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
     Топ-N школ, в которых указанное лицо является учеником (автором диссертации)

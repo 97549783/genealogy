@@ -140,7 +140,7 @@ def render_school_comparison_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
     *,
-    db_signature=("", 0.0, 0),
+    db_signature,
 ) -> None:
     """Отрисовывает вкладку сравнения научных школ."""
 

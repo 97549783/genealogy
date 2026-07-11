@@ -88,7 +88,7 @@ sample_df = pd.DataFrame([
     }
 ])
 
-analysis_tab.render_school_analysis_tab(sample_df, idx={})
+analysis_tab.render_school_analysis_tab(sample_df, idx={}, db_signature=("test", 1.0, 1))
 """
     )
 

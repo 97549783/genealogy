@@ -17,13 +17,6 @@ from core.ui.filters import (
 )
 
 
-class ComparableTuple(tuple):
-    def __eq__(self, other):
-        if isinstance(other, list):
-            return list(self) == other
-        return super().__eq__(other)
-
-
 @dataclass(frozen=True)
 class FilteredLineageContext:
     df: pd.DataFrame
@@ -48,11 +41,11 @@ def _build_lineage_context_impl(
     cache_key: LineageContextKey = (db_signature, selected_ids, supervisor_columns)
     if not selected_ids:
         supervisors = get_unique_supervisors(df, supervisor_columns=list(supervisor_columns))
-        return FilteredLineageContext(df, base_idx, ComparableTuple(sorted(supervisors)), ComparableTuple(selected_ids), cache_key)
+        return FilteredLineageContext(df, base_idx, tuple(sorted(supervisors)), selected_ids, cache_key)
     filtered_df = filter_df_by_science_fields(df, selected_ids)
     filtered_idx = build_index(filtered_df, list(supervisor_columns))
     supervisors = get_unique_supervisors(filtered_df, supervisor_columns=list(supervisor_columns))
-    return FilteredLineageContext(filtered_df, filtered_idx, ComparableTuple(sorted(supervisors)), ComparableTuple(selected_ids), cache_key)
+    return FilteredLineageContext(filtered_df, filtered_idx, tuple(sorted(supervisors)), selected_ids, cache_key)
 
 
 @st.cache_resource(show_spinner=False, max_entries=4)
@@ -80,8 +73,6 @@ def get_science_filtered_lineage_context(
     selected_ids,
     supervisor_columns,
 ) -> FilteredLineageContext:
-    if db_signature == ("", 0.0, 0):
-        db_signature = (f"__df:{id(df)}", 0.0, id(base_idx))
     return _get_science_filtered_lineage_context_cached(
         db_signature,
         normalize_science_field_ids(selected_ids),

@@ -112,7 +112,7 @@ def render_school_analysis_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
     *,
-    db_signature=("", 0.0, 0),
+    db_signature,
 ) -> None:
     """
     Отрисовывает вкладку «Анализ научной школы».
