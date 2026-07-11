@@ -68,12 +68,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from core.domain.science_fields import filter_df_by_science_fields
-from core.lineage.graph import build_index, lineage, rows_for
+from core.lineage.graph import lineage, rows_for
 from core.people import get_unique_supervisors
 from core.lineage.names import norm as _norm
-from core.ui.table_display import render_dissertations_widget
+from core.ui.table_display import build_dissertation_result_signature, render_dissertations_widget
 from core.ui.links import share_params_button
+from core.ui.science_filtering import get_science_filtered_lineage_context
 from core.ui.filters import (
     hydrate_science_fields_from_query_params,
     render_science_field_filter,
@@ -294,6 +294,8 @@ def _collect_common_dissertations(
 def render_opponents_intersection_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
+    *,
+    db_signature,
 ) -> None:
     """Отображает вкладку «Взаимосвязи научных школ (через институт оппонентов)»."""
 
@@ -329,8 +331,16 @@ def render_opponents_intersection_tab(
     )
     st.caption(science_field_filter_caption(science_field_ids))
 
-    working_df = filter_df_by_science_fields(df, science_field_ids)
-    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    lineage_context = get_science_filtered_lineage_context(
+        df=df,
+        base_idx=idx,
+        db_signature=db_signature,
+        selected_ids=science_field_ids,
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
+    working_df = lineage_context.df
+    working_idx = lineage_context.idx
+    lineage_context_key = lineage_context.cache_key
 
     # --- Выбор научных руководителей ---
     st.markdown("---")
@@ -529,6 +539,10 @@ def render_opponents_intersection_tab(
             title="Общие диссертации",
             expanded=False,
             file_name_prefix="общие_диссертации_взаимосвязей_школ",
+            result_signature=build_dissertation_result_signature(
+                common_dissertations_df,
+                context_parts=(lineage_context.cache_key, tuple(selected_schools), selected_scope, filter_source),
+            ),
         )
 
     # --- Скачивание ---

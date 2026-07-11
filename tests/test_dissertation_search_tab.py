@@ -12,7 +12,7 @@ import tabs.dissertation_search.tab as tab
 
 calls = []
 
-def _formal(df):
+def _formal(df, **kwargs):
     calls.append("formal")
 
 def _profiles(df, idx):
@@ -24,6 +24,7 @@ tab.render_profiles_tab = _profiles
 tab.render_dissertation_search_tab(
     df=pd.DataFrame([{"Code": "1"}]),
     idx={},
+    db_signature=("diss-search", 1.0, 1),
 )
 
 st.session_state["_calls"] = calls
@@ -44,7 +45,7 @@ import tabs.dissertation_search.tab as tab
 
 calls = []
 
-def _formal(df):
+def _formal(df, **kwargs):
     calls.append("formal")
 
 def _profiles(df, idx):
@@ -56,6 +57,7 @@ tab.render_profiles_tab = _profiles
 tab.render_dissertation_search_tab(
     df=pd.DataFrame([{"Code": "1"}]),
     idx={},
+    db_signature=("diss-search", 1.0, 1),
 )
 
 st.session_state["_calls"] = calls

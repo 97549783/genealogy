@@ -5,6 +5,10 @@ import pandas as pd
 from tabs.school_search import search as ss
 
 
+def _context_key():
+    return (("x", 1.0, 1), (), ("supervisors_1.name", "supervisors_2.name"))
+
+
 def _df() -> pd.DataFrame:
     return pd.DataFrame([
         {"Code": "1", "candidate_name": "A", "year": "2020", "city": "Москва", "institution_prepared": "МГУ", "defense_location": "МГУ", "leading_organization": "РАН", "opponents_1.name": "Петров П.П.", "supervisors_1.name": "Root1", "supervisors_2.name": ""},
@@ -15,7 +19,7 @@ def _df() -> pd.DataFrame:
 
 def test_year_and_text_modes_use_sqlite_first(monkeypatch):
     df = _df()
-    monkeypatch.setattr(ss, "get_db_signature", lambda: ("x", 1.0, 1))
+    key = _context_key()
     monkeypatch.setattr(ss, "get_all_school_member_codes", lambda *a, **k: {"Root1": {"1", "2"}, "Root2": {"3"}})
     monkeypatch.setattr(ss, "get_school_basic_stats", lambda *a, **k: {
         "Root1": {"n_members": 2, "year_range": "2020–2021", "n_cities": 2},
@@ -31,15 +35,15 @@ def test_year_and_text_modes_use_sqlite_first(monkeypatch):
         ),
     )
 
-    by_period = ss.search_by_members_in_period(df, {}, None, None, 2021, 2021)
+    by_period = ss.search_by_members_in_period(df, {}, None, None, 2021, 2021, lineage_context_key=key)
     assert set(by_period["Руководитель"]) == {"Root1", "Root2"}
-    by_city, _ = ss.search_by_city(df, {}, None, None, "Москва")
+    by_city, _ = ss.search_by_city(df, {}, None, None, "Москва", lineage_context_key=key)
     assert set(by_city["Руководитель"]) == {"Root1", "Root2"}
 
 
 def test_org_modes_and_opponent_use_prefilter_by_mode(monkeypatch):
     df = _df()
-    monkeypatch.setattr(ss, "get_db_signature", lambda: ("x", 1.0, 1))
+    key = _context_key()
     monkeypatch.setattr(ss, "get_all_school_member_codes", lambda *a, **k: {"Root1": {"1", "2"}, "Root2": {"3"}})
     monkeypatch.setattr(ss, "get_school_basic_stats", lambda *a, **k: {
         "Root1": {"n_members": 2, "year_range": "2020–2021", "n_cities": 2},
@@ -61,10 +65,10 @@ def test_org_modes_and_opponent_use_prefilter_by_mode(monkeypatch):
 
     monkeypatch.setattr(ss, "fetch_dissertation_text_candidates", _fake_fetch)
 
-    r1, _ = ss.search_by_institution_prepared(df, {}, None, None, "МГУ", use_fuzzy=True)
-    r2, _ = ss.search_by_defense_location(df, {}, None, None, "МГУ", use_fuzzy=True)
-    r3, _ = ss.search_by_leading_organization(df, {}, None, None, "РАН", use_fuzzy=True)
-    r4, _ = ss.search_by_opponent(df, {}, None, None, "Петров", use_fuzzy=True)
+    r1, _ = ss.search_by_institution_prepared(df, {}, None, None, "МГУ", use_fuzzy=True, lineage_context_key=key)
+    r2, _ = ss.search_by_defense_location(df, {}, None, None, "МГУ", use_fuzzy=True, lineage_context_key=key)
+    r3, _ = ss.search_by_leading_organization(df, {}, None, None, "РАН", use_fuzzy=True, lineage_context_key=key)
+    r4, _ = ss.search_by_opponent(df, {}, None, None, "Петров", use_fuzzy=True, lineage_context_key=key)
     assert not r1.empty and not r2.empty and not r4.empty
     assert all(flag is False for _, flag in calls)
 

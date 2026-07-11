@@ -6,6 +6,7 @@ from .graph import (
     rows_for,
 )
 from .names import norm, variants
+from core.app.context import LineageContextKey
 from .membership import (
     get_cached_roots,
     get_school_lineage,

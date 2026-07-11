@@ -67,7 +67,7 @@ sample_df = pd.DataFrame([
     {"supervisors_1.name": "Петров П.П.", "supervisors_2.name": ""},
 ])
 
-intersection_tab.render_opponents_intersection_tab(sample_df, idx={})
+intersection_tab.render_opponents_intersection_tab(sample_df, idx={}, db_signature=("intersection", 1.0, 1))
 """
     )
 

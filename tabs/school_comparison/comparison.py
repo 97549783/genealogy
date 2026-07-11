@@ -18,8 +18,8 @@ from core.db import (
 from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances, cosine_distances
 from core.lineage.membership import get_school_subset
-from core.db import get_db_signature
 from core.perf import perf_timer
+from core.app.context import LineageContextKey
 
 
 # ==============================================================================
@@ -220,11 +220,13 @@ def gather_school_dataset(
     lineage_func: Callable,
     rows_for_func: Callable,
     author_column: str = "candidate_name",
+    *,
+    lineage_context_key: LineageContextKey,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, int]:
     """Собирает данные тематических профилей для научной школы."""
     _ = lineage_func, rows_for_func
     with perf_timer("school_comparison.gather_school_dataset.get_school_subset"):
-        subset = get_school_subset(df, index, root, scope, get_db_signature())
+        subset = get_school_subset(df, index, root, scope, lineage_context_key[0], context_key=lineage_context_key)
 
     if subset is None or subset.empty:
         empty = pd.DataFrame(columns=["Code", "school", author_column])

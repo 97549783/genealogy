@@ -22,7 +22,7 @@ SUBTAB_SPECS = [
 SUBTAB_ID_TO_LABEL = dict(SUBTAB_SPECS)
 
 
-def render_dissertation_search_tab(df: pd.DataFrame, idx: Dict[str, set]) -> None:
+def render_dissertation_search_tab(df: pd.DataFrame, idx: Dict[str, set], *, db_signature) -> None:
     st.subheader("Поиск диссертаций")
     st.write(
         "Здесь объединены два режима: поиск по формальным признакам "
@@ -57,7 +57,7 @@ def render_dissertation_search_tab(df: pd.DataFrame, idx: Dict[str, set]) -> Non
 
     if _should_render_subtab(FORMAL_SUBTAB_ID):
         with subtab_by_id[FORMAL_SUBTAB_ID]:
-            render_dissertations_tab(df=df)
+            render_dissertations_tab(df=df, db_signature=db_signature)
 
     if _should_render_subtab(PROFILES_SUBTAB_ID):
         with subtab_by_id[PROFILES_SUBTAB_ID]:

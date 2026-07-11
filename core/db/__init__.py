@@ -6,6 +6,7 @@ from .dissertations import (
     load_data,
     load_dissertation_filter_options,
     load_dissertation_metadata,
+    read_dissertation_metadata,
     fetch_candidate_name_options,
     fetch_dissertation_codes_by_year,
     fetch_dissertation_codes_by_year_range,

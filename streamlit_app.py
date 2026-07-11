@@ -72,6 +72,7 @@ if _should_render_tab("lineages"):
             idx=ctx.idx,
             all_supervisor_names=ctx.all_supervisor_names,
             shared_roots=ctx.valid_shared_roots,
+            db_signature=ctx.db_signature,
         )
 
 if _should_render_tab("dissertation_search"):
@@ -79,6 +80,7 @@ if _should_render_tab("dissertation_search"):
         render_dissertation_search_tab(
             df=ctx.df,
             idx=ctx.idx,
+            db_signature=ctx.db_signature,
         )
 
 if _should_render_tab("dissertation_characteristics"):
@@ -90,17 +92,19 @@ if _should_render_tab("school_search"):
         render_school_search_tab(
             df=ctx.df,
             idx=ctx.idx,
+            db_signature=ctx.db_signature,
         )
 
 if _should_render_tab("intersection"):
     with tab_by_id["intersection"]:
-        render_opponents_intersection_tab(df=ctx.df, idx=ctx.idx)
+        render_opponents_intersection_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
 
 if _should_render_tab("school_analysis"):
     with tab_by_id["school_analysis"]:
         render_school_analysis_tab(
             df=ctx.df,
             idx=ctx.idx,
+            db_signature=ctx.db_signature,
         )
 
 if _should_render_tab("school_comparison"):
@@ -108,6 +112,7 @@ if _should_render_tab("school_comparison"):
         render_school_comparison_tab(
             df=ctx.df,
             idx=ctx.idx,
+            db_signature=ctx.db_signature,
         )
 
 if _should_render_tab("articles_comparison"):

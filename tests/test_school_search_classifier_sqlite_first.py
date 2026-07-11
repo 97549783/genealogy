@@ -7,7 +7,7 @@ from tabs.school_search import search as ss
 
 def test_classifier_mode_uses_targeted_node_scores(monkeypatch):
     df = pd.DataFrame([{"Code": "1"}, {"Code": "2"}, {"Code": "3"}])
-    monkeypatch.setattr(ss, "get_db_signature", lambda: ("x", 1.0, 1))
+    key = (("x", 1.0, 1), (), ("supervisors_1.name", "supervisors_2.name"))
     monkeypatch.setattr(ss, "get_all_school_member_codes", lambda *a, **k: {"Root1": {"1", "2"}, "Root2": {"3"}})
     monkeypatch.setattr(ss, "get_school_basic_stats", lambda *a, **k: {
         "Root1": {"n_members": 2, "year_range": "2020–2021", "n_cities": 2},
@@ -21,7 +21,7 @@ def test_classifier_mode_uses_targeted_node_scores(monkeypatch):
         ),
     )
 
-    out = ss.search_by_classifier_score(df, {}, None, None, "1.1", scope="all", top_n=10)
+    out = ss.search_by_classifier_score(df, {}, None, None, "1.1", scope="all", top_n=10, lineage_context_key=key)
     assert list(out.columns) == ["#", "Руководитель", "Средний балл (1.1)", "Всего членов", "Годы активности", "Уникальных городов"]
     assert out.iloc[0]["Руководитель"] == "Root2"
     assert out.iloc[0]["Средний балл (1.1)"] == 10.0

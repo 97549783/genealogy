@@ -77,7 +77,7 @@ def test_school_search_classifier_score_accepts_profile_source(monkeypatch):
     from tabs.school_search import search as school_search
 
     captured = {}
-    monkeypatch.setattr(school_search, "get_db_signature", lambda: ("db", 1.0, 1))
+    key = (("db", 1.0, 1), (), ("supervisors_1.name", "supervisors_2.name"))
     monkeypatch.setattr(
         school_search,
         "get_all_school_member_codes",
@@ -104,6 +104,7 @@ def test_school_search_classifier_score_accepts_profile_source(monkeypatch):
         rows_for_func=None,
         classifier_node="2.4",
         profile_source_id="it_2_3",
+        lineage_context_key=key,
     )
 
     assert captured["profile_source_id"] == "it_2_3"

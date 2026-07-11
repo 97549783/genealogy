@@ -12,8 +12,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from core.people import get_unique_supervisors
-from core.domain.science_fields import filter_df_by_science_fields
 from core.classifier import get_classifier_labels_by_profile_source
+from core.ui.science_filtering import get_science_filtered_lineage_context
 from core.ui.filters import (
     hydrate_profile_source_from_query_params,
     hydrate_science_fields_from_query_params,
@@ -24,7 +24,7 @@ from core.ui.filters import (
     science_fields_to_query_params,
 )
 
-from core.lineage.graph import build_index, lineage, rows_for
+from core.lineage.graph import lineage, rows_for
 from core.ui.chrome import download_data_dialog
 from core.ui.links import share_params_button
 from core.db import SUPERVISOR_COLUMNS
@@ -139,6 +139,8 @@ def show_instruction_dialog() -> None:
 def render_school_comparison_tab(
     df: pd.DataFrame,
     idx: Dict[str, Set[int]],
+    *,
+    db_signature,
 ) -> None:
     """Отрисовывает вкладку сравнения научных школ."""
 
@@ -213,8 +215,16 @@ def render_school_comparison_tab(
     )
     st.caption(science_field_filter_caption(science_field_ids))
 
-    working_df = filter_df_by_science_fields(df, science_field_ids)
-    working_idx = build_index(working_df, SUPERVISOR_COLUMNS)
+    lineage_context = get_science_filtered_lineage_context(
+        df=df,
+        base_idx=idx,
+        db_signature=db_signature,
+        selected_ids=science_field_ids,
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
+    working_df = lineage_context.df
+    working_idx = lineage_context.idx
+    lineage_context_key = lineage_context.cache_key
     sf_suffix = science_field_state_suffix(science_field_ids)
     results_key = f"{_RESULTS_KEY}_{source.id}_{sf_suffix}"
 
@@ -449,6 +459,7 @@ def render_school_comparison_tab(
                         lineage_func=lineage,
                         rows_for_func=rows_for,
                         author_column=AUTHOR_COLUMN,
+                        lineage_context_key=lineage_context_key,
                     )
                     datasets[school_name] = dataset
                     if not missing_info.empty:

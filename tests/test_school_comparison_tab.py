@@ -100,7 +100,7 @@ sample_df = pd.DataFrame([
     {"supervisors_1.name": "Петров П.П.", "supervisors_2.name": ""},
 ])
 
-comp_tab.render_school_comparison_tab(sample_df, idx={})
+comp_tab.render_school_comparison_tab(sample_df, idx={}, db_signature=("school-comparison", 1.0, 1))
 """
     )
 

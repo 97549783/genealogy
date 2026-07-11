@@ -1,4 +1,9 @@
-"""Кэширование состава и деревьев научных школ."""
+"""Кэширование состава и деревьев научных школ.
+
+Все кэшированные вспомогательные функции получают полный LineageContextKey, а
+крупные DataFrame и индексы передаются только как параметры с подчёркиванием.
+Это изолирует результаты разных отраслевых фильтров при одинаковой сигнатуре БД.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,7 @@ import networkx as nx
 from core.lineage.graph import is_candidate, is_doctor, lineage, rows_for, subset_by_codes, subset_codes
 from core.lineage.names import norm, variants
 from core.perf import perf_timer
+from core.app.context import DbSignature, LineageContextKey
 
 
 def _norm_initials(s: str) -> str:
@@ -22,9 +28,9 @@ def _norm_initials(s: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def _roots_cached(db_signature: tuple[str, float, int], df: pd.DataFrame) -> list[str]:
+def _roots_cached(context_key: LineageContextKey, _df: pd.DataFrame) -> list[str]:
     """Возвращает кэшированный список корней научных школ."""
-    _ = db_signature
+    df = _df
     raw = set()
     for col in ["supervisors_1.name", "supervisors_2.name"]:
         if col in df.columns:
@@ -38,8 +44,13 @@ def _roots_cached(db_signature: tuple[str, float, int], df: pd.DataFrame) -> lis
     return sorted(groups.values())
 
 
-def get_cached_roots(df: pd.DataFrame, db_signature: tuple[str, float, int]) -> list[str]:
-    return _roots_cached(db_signature, df)
+def _assert_context_signature(context_key: LineageContextKey, db_signature: DbSignature) -> None:
+    assert context_key[0] == db_signature
+
+
+def get_cached_roots(df: pd.DataFrame, db_signature: DbSignature, *, context_key: LineageContextKey) -> list[str]:
+    _assert_context_signature(context_key, db_signature)
+    return _roots_cached(context_key, df)
 
 
 def _compute_school_member_codes_uncached(
@@ -58,34 +69,35 @@ def _compute_school_member_codes_uncached(
     return subset_codes(subset)
 
 @st.cache_data(show_spinner=False)
-def _member_codes_cached(db_signature, df, idx, root: str, scope: str) -> list[str]:
+def _member_codes_cached(context_key: LineageContextKey, root: str, scope: str, _df: pd.DataFrame, _idx: dict) -> list[str]:
     """Возвращает кэшированный список Code для школы."""
-    _ = db_signature
     with perf_timer(f"membership.member_codes.{scope}"):
-        return _compute_school_member_codes_uncached(df, idx, root, scope)
+        return _compute_school_member_codes_uncached(_df, _idx, root, scope)
 
 
-def get_school_member_codes(df, idx, root, scope, db_signature):
-    return _member_codes_cached(db_signature, df, idx, root, scope)
+def get_school_member_codes(df, idx, root, scope, db_signature, *, context_key: LineageContextKey):
+    _assert_context_signature(context_key, db_signature)
+    return _member_codes_cached(context_key, root, scope, df, idx)
 
 
-def get_school_subset(df, idx, root, scope, db_signature):
-    codes = get_school_member_codes(df, idx, root, scope, db_signature)
+def get_school_subset(df, idx, root, scope, db_signature, *, context_key: LineageContextKey):
+    _assert_context_signature(context_key, db_signature)
+    codes = get_school_member_codes(df, idx, root, scope, db_signature, context_key=context_key)
     return subset_by_codes(df, codes)
 
 
 @st.cache_data(show_spinner=False)
-def _lineage_cached(db_signature, df, idx, root, first_level_filter_name):
+def _lineage_cached(context_key: LineageContextKey, root, first_level_filter_name, _df: pd.DataFrame, _idx: dict):
     """Возвращает кэшированное дерево научной школы."""
-    _ = db_signature
     filters = {None: None, 'doctors': is_doctor, 'candidates': is_candidate}
     if first_level_filter_name not in filters:
         raise ValueError("Неизвестный фильтр дерева.")
-    return lineage(df, idx, root, first_level_filter=filters[first_level_filter_name])
+    return lineage(_df, _idx, root, first_level_filter=filters[first_level_filter_name])
 
 
-def get_school_lineage(df, idx, root, first_level_filter_name, db_signature) -> tuple[nx.DiGraph, pd.DataFrame]:
-    return _lineage_cached(db_signature, df, idx, root, first_level_filter_name)
+def get_school_lineage(df, idx, root, first_level_filter_name, db_signature, *, context_key: LineageContextKey) -> tuple[nx.DiGraph, pd.DataFrame]:
+    _assert_context_signature(context_key, db_signature)
+    return _lineage_cached(context_key, root, first_level_filter_name, df, idx)
 
 
 def get_all_school_member_codes(
@@ -93,22 +105,24 @@ def get_all_school_member_codes(
     idx: dict,
     scope: str,
     db_signature: tuple[str, float, int],
+    *,
+    context_key: LineageContextKey,
 ) -> dict[str, set[str]]:
     """Возвращает словарь root → множество Code для всех школ."""
-    return _all_school_member_codes_cached(db_signature, df, idx, scope)
+    _assert_context_signature(context_key, db_signature)
+    return _all_school_member_codes_cached(context_key, scope, df, idx)
 
 
 @st.cache_data(show_spinner=False)
-def _all_school_member_codes_cached(db_signature, df, idx, scope: str) -> dict[str, set[str]]:
+def _all_school_member_codes_cached(context_key: LineageContextKey, scope: str, _df: pd.DataFrame, _idx: dict) -> dict[str, set[str]]:
     """Возвращает кэшированные множества Code для всех школ."""
-    _ = db_signature
     if scope not in {"direct", "all"}:
         raise ValueError("Неизвестная область школы. Допустимо: direct или all.")
     with perf_timer(f"membership.all_school_member_codes.{scope}"):
         out: dict[str, set[str]] = {}
-        roots = get_cached_roots(df, db_signature)
+        roots = _roots_cached(context_key, _df)
         for root in roots:
-            out[root] = set(_compute_school_member_codes_uncached(df, idx, root, scope))
+            out[root] = set(_compute_school_member_codes_uncached(_df, _idx, root, scope))
         return out
 
 
@@ -117,17 +131,20 @@ def get_school_basic_stats(
     idx: dict,
     scope: str,
     db_signature: tuple[str, float, int],
+    *,
+    context_key: LineageContextKey,
 ) -> dict[str, dict]:
     """Возвращает базовую статистику школ для быстрого построения результатов."""
-    return _school_basic_stats_cached(db_signature, df, idx, scope)
+    _assert_context_signature(context_key, db_signature)
+    return _school_basic_stats_cached(context_key, scope, df, idx)
 
 
 @st.cache_data(show_spinner=False)
-def _school_basic_stats_cached(db_signature, df: pd.DataFrame, idx: dict, scope: str) -> dict[str, dict]:
+def _school_basic_stats_cached(context_key: LineageContextKey, scope: str, _df: pd.DataFrame, _idx: dict) -> dict[str, dict]:
     """Возвращает кэшированную базовую статистику по школам."""
     with perf_timer(f"membership.school_basic_stats.{scope}"):
-        codes_by_root = get_all_school_member_codes(df, idx, scope, db_signature)
-        by_code = df.copy()
+        codes_by_root = _all_school_member_codes_cached(context_key, scope, _df, _idx)
+        by_code = _df.copy()
         if "Code" in by_code.columns:
             by_code["Code"] = by_code["Code"].astype(str).str.strip()
             by_code = by_code[by_code["Code"] != ""].drop_duplicates(subset=["Code"], keep="first").set_index("Code", drop=False)
@@ -156,19 +173,22 @@ def _school_basic_stats_cached(db_signature, df: pd.DataFrame, idx: dict, scope:
 
 def get_author_by_code(
     df: pd.DataFrame,
-    db_signature: tuple[str, float, int],
+    db_signature: DbSignature,
+    *,
+    context_key: LineageContextKey,
 ) -> dict[str, str]:
     """Возвращает словарь Code → ФИО автора диссертации."""
-    return _get_author_by_code_cached(df, db_signature)
+    _assert_context_signature(context_key, db_signature)
+    return _get_author_by_code_cached(context_key, df)
 
 
 @st.cache_data(show_spinner=False)
 def _get_author_by_code_cached(
-    df: pd.DataFrame,
-    db_signature: tuple[str, float, int],
+    context_key: LineageContextKey,
+    _df: pd.DataFrame,
 ) -> dict[str, str]:
     """Кэширует соответствие Code → ФИО автора."""
-    _ = db_signature
+    df = _df
     if "Code" not in df.columns or "candidate_name" not in df.columns:
         return {}
     work = df[["Code", "candidate_name"]].copy()
@@ -181,20 +201,22 @@ def _get_author_by_code_cached(
 
 def get_supervisor_norm_set(
     idx: dict[str, set[int]],
-    db_signature: tuple[str, float, int],
+    db_signature: DbSignature,
+    *,
+    context_key: LineageContextKey,
 ) -> set[str]:
     """Возвращает множество нормализованных имён людей, у которых есть ученики."""
-    return _get_supervisor_norm_set_cached(idx, db_signature)
+    _assert_context_signature(context_key, db_signature)
+    return _get_supervisor_norm_set_cached(context_key, idx)
 
 
 @st.cache_data(show_spinner=False)
 def _get_supervisor_norm_set_cached(
-    idx: dict[str, set[int]],
-    db_signature: tuple[str, float, int],
+    context_key: LineageContextKey,
+    _idx: dict[str, set[int]],
 ) -> set[str]:
     """Кэширует множество нормализованных имён руководителей."""
-    _ = db_signature
-    return {norm(str(name)) for name, row_ids in idx.items() if str(name).strip() and row_ids}
+    return {norm(str(name)) for name, row_ids in _idx.items() if str(name).strip() and row_ids}
 
 
 def is_author_supervisor(author_name: str, supervisor_norms: set[str]) -> bool:
@@ -209,20 +231,23 @@ def get_author_supervisor_flags_by_code(
     df: pd.DataFrame,
     idx: dict[str, set[int]],
     db_signature: tuple[str, float, int],
+    *,
+    context_key: LineageContextKey,
 ) -> dict[str, bool]:
     """Возвращает словарь Code → является ли автор научным руководителем."""
-    return _get_author_supervisor_flags_by_code_cached(df, idx, db_signature)
+    _assert_context_signature(context_key, db_signature)
+    return _get_author_supervisor_flags_by_code_cached(context_key, df, idx)
 
 
 @st.cache_data(show_spinner=False)
 def _get_author_supervisor_flags_by_code_cached(
-    df: pd.DataFrame,
-    idx: dict[str, set[int]],
-    db_signature: tuple[str, float, int],
+    context_key: LineageContextKey,
+    _df: pd.DataFrame,
+    _idx: dict[str, set[int]],
 ) -> dict[str, bool]:
     """Кэширует флаги авторов, являющихся научными руководителями."""
-    authors = get_author_by_code(df, db_signature)
-    supervisor_norms = get_supervisor_norm_set(idx, db_signature)
+    authors = _get_author_by_code_cached(context_key, _df)
+    supervisor_norms = _get_supervisor_norm_set_cached(context_key, _idx)
     return {code: is_author_supervisor(author, supervisor_norms) for code, author in authors.items()}
 
 
@@ -230,20 +255,23 @@ def get_supervisor_rate_stats(
     df: pd.DataFrame,
     idx: dict[str, set[int]],
     db_signature: tuple[str, float, int],
+    *,
+    context_key: LineageContextKey,
 ) -> dict[str, dict]:
     """Возвращает статистику доли учеников, ставших руководителями, по всем школам."""
-    return _get_supervisor_rate_stats_cached(df, idx, db_signature)
+    _assert_context_signature(context_key, db_signature)
+    return _get_supervisor_rate_stats_cached(context_key, df, idx)
 
 
 @st.cache_data(show_spinner=False)
 def _get_supervisor_rate_stats_cached(
-    df: pd.DataFrame,
-    idx: dict[str, set[int]],
-    db_signature: tuple[str, float, int],
+    context_key: LineageContextKey,
+    _df: pd.DataFrame,
+    _idx: dict[str, set[int]],
 ) -> dict[str, dict]:
     """Кэширует статистику доли учеников-руководителей по школам."""
-    direct_codes_by_root = get_all_school_member_codes(df=df, idx=idx, scope="direct", db_signature=db_signature)
-    flags = get_author_supervisor_flags_by_code(df, idx, db_signature)
+    direct_codes_by_root = _all_school_member_codes_cached(context_key, "direct", _df, _idx)
+    flags = _get_author_supervisor_flags_by_code_cached(context_key, _df, _idx)
     out: dict[str, dict] = {}
     for root, direct_codes in direct_codes_by_root.items():
         direct = {str(code).strip() for code in direct_codes if str(code).strip()}
