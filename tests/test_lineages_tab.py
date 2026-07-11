@@ -113,7 +113,7 @@ def _fake_render_metrics(metrics, **kwargs):
     st.session_state["_lineages_metrics_context"] = kwargs["context_label"]
 
 
-def _fake_table(subset, key):
+def _fake_table(subset, key, **kwargs):
     st.session_state.setdefault("_lineages_order", []).append("table")
     st.session_state["_lineages_table_subset_id"] = id(subset)
     st.session_state["_lineages_table_key"] = key

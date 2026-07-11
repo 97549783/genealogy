@@ -311,7 +311,7 @@ def build_tree_st_dataframe_df(
     ВАЖНО: НЕ используется pd.MultiIndex и НЕ используется group=
     в column_config — эти опции не поддерживаются в текущей версии Streamlit.
 
-    Returns:
+    Возвращает:
         (df_flat, column_config): DataFrame со строковыми ключами +
         dict с column_config для st.dataframe.
     """
@@ -438,10 +438,19 @@ def paginate_dataframe(
     return df.iloc[start:end], page_number, total_pages
 
 
-def build_dissertation_result_signature(subset: pd.DataFrame) -> str:
-    """Строит устойчивую подпись результата для инвалидирования подготовленного экспорта."""
+def build_dissertation_result_signature(
+    subset: pd.DataFrame,
+    *,
+    context_parts: tuple | list = (),
+) -> str:
+    """Строит дешёвую подпись результата для инвалидирования подготовленного экспорта."""
     h = hashlib.blake2b(digest_size=16)
+    for part in context_parts:
+        h.update(b"\0ctx:")
+        h.update(repr(part).encode("utf-8", "surrogatepass"))
+    h.update(b"\0rows:")
     h.update(str(len(subset)).encode())
+    h.update(b"\0cols:")
     h.update("\0".join(map(str, subset.columns)).encode("utf-8", "surrogatepass"))
     if "Code" in subset.columns:
         identity_values = subset["Code"].astype(str)
@@ -450,15 +459,6 @@ def build_dissertation_result_signature(subset: pd.DataFrame) -> str:
     for value in identity_values:
         h.update(b"\0id:")
         h.update(str(value).encode("utf-8", "surrogatepass"))
-    if not subset.empty:
-        value_hashes = pd.util.hash_pandas_object(
-            subset.reset_index(drop=True).fillna(""),
-            index=False,
-            categorize=True,
-        )
-        for value in value_hashes.astype("uint64"):
-            h.update(b"\0row:")
-            h.update(int(value).to_bytes(8, "little", signed=False))
     return h.hexdigest()
 
 

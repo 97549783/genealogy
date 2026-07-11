@@ -5,7 +5,7 @@ from typing import Dict
 import pandas as pd
 import streamlit as st
 
-from core.ui.table_display import render_dissertations_widget
+from core.ui.table_display import build_dissertation_result_signature, render_dissertations_widget
 from core.ui.chrome import show_instruction
 from core.ui.links import share_params_button
 from core.ui.filters import (
@@ -20,7 +20,7 @@ from .state import hydrate_dissertations_query_params, request_search
 from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY, TEXT_SEARCH_MODE_LABELS
 
 
-def render_dissertations_tab(df: pd.DataFrame) -> None:
+def render_dissertations_tab(df: pd.DataFrame, *, db_signature) -> None:
     hydrate_dissertations_query_params()
 
     if st.button("📖 Инструкция", key="instruction_dissertations"):
@@ -119,4 +119,14 @@ def render_dissertations_tab(df: pd.DataFrame) -> None:
                 title="Результаты",
                 expanded=False,
                 file_name_prefix="список_диссертаций_поиск",
+                result_signature=build_dissertation_result_signature(
+                    result_df,
+                    context_parts=(
+                        db_signature,
+                        tuple(selected_criteria),
+                        tuple(sorted((str(k), str(v)) for k, v in search_params.items())),
+                        tuple(science_field_ids),
+                        text_search_mode,
+                    ),
+                ),
             )

@@ -71,7 +71,7 @@ import streamlit as st
 from core.lineage.graph import lineage, rows_for
 from core.people import get_unique_supervisors
 from core.lineage.names import norm as _norm
-from core.ui.table_display import render_dissertations_widget
+from core.ui.table_display import build_dissertation_result_signature, render_dissertations_widget
 from core.ui.links import share_params_button
 from core.ui.science_filtering import get_science_filtered_lineage_context
 from core.ui.filters import (
@@ -539,6 +539,10 @@ def render_opponents_intersection_tab(
             title="Общие диссертации",
             expanded=False,
             file_name_prefix="общие_диссертации_взаимосвязей_школ",
+            result_signature=build_dissertation_result_signature(
+                common_dissertations_df,
+                context_parts=(lineage_context.cache_key, tuple(selected_schools), selected_scope, filter_source),
+            ),
         )
 
     # --- Скачивание ---

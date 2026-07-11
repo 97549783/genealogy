@@ -80,6 +80,7 @@ if _should_render_tab("dissertation_search"):
         render_dissertation_search_tab(
             df=ctx.df,
             idx=ctx.idx,
+            db_signature=ctx.db_signature,
         )
 
 if _should_render_tab("dissertation_characteristics"):

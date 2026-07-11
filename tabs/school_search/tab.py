@@ -37,7 +37,7 @@ from .search import (
     search_by_supervisor_rate,
     search_by_total_members,
 )
-from core.ui.table_display import render_dissertations_widget
+from core.ui.table_display import build_dissertation_result_signature, render_dissertations_widget
 from core.ui.tree_renderers import build_markmap_html
 from core.ui.links import share_params_button
 from core.search.text_matching import SEARCH_MODE_FAST, SEARCH_MODE_FUZZY, TEXT_SEARCH_MODE_LABELS
@@ -738,6 +738,10 @@ def render_school_search_tab(
                     title="Результаты",
                     expanded=False,
                     file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
+                    result_signature=build_dissertation_result_signature(
+                        subset,
+                        context_parts=(current_signature, "member_cached", i, author_name),
+                    ),
                 )
             share_params_button(share_params, key="school_search_share_member_cached")
             return
@@ -1057,6 +1061,10 @@ def render_school_search_tab(
                 title="Результаты",
                 expanded=False,
                 file_name_prefix=f"поиск_школ_по_персоне_{slug(author_name)}",
+                result_signature=build_dissertation_result_signature(
+                    subset,
+                    context_parts=(current_signature, "member", i, author_name),
+                ),
             )
         st.session_state["school_search_last_signature"] = current_signature
         st.session_state["school_search_last_payload"] = {

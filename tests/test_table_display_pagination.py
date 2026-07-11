@@ -43,10 +43,11 @@ def test_paginate_dataframe_edges_and_order() -> None:
     assert above["Code"].tolist() == ["C004"]
 
 
-def test_result_signature_changes_when_values_change() -> None:
+def test_result_signature_uses_context_parts_instead_of_full_value_hash() -> None:
     first = pd.DataFrame([{"Code": "A", "title": "Старое", "year": "2020"}])
     second = pd.DataFrame([{"Code": "A", "title": "Новое", "year": "2020"}])
-    assert td.build_dissertation_result_signature(first) != td.build_dissertation_result_signature(second)
+    assert td.build_dissertation_result_signature(first) == td.build_dissertation_result_signature(second)
+    assert td.build_dissertation_result_signature(first, context_parts=(("db", 1.0, 1),)) != td.build_dissertation_result_signature(second, context_parts=(("db", 2.0, 1),))
 
 
 class _FakeColumn:
@@ -198,3 +199,13 @@ def test_widget_reuses_prepared_bytes_on_unrelated_rerun(monkeypatch) -> None:
     td.render_dissertations_widget(_df(10), key="review", result_signature="same")
 
     assert fake.downloads[0]["data"] == b"ready"
+
+
+def test_result_signature_does_not_hash_complete_dataframe(monkeypatch) -> None:
+    monkeypatch.setattr(
+        td.pd.util,
+        "hash_pandas_object",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("full dataframe hash")),
+    )
+    signature = td.build_dissertation_result_signature(_df(1000), context_parts=(("db", 1.0, 1), "query"))
+    assert signature

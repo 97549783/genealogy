@@ -66,7 +66,7 @@ diss_tab.render_dissertations_widget = _fake_render
 
 sample_df = pd.DataFrame([{"title": "x"}])
 
-diss_tab.render_dissertations_tab(sample_df)
+diss_tab.render_dissertations_tab(sample_df, db_signature=("diss", 1.0, 1))
 """
     )
 
@@ -124,7 +124,7 @@ diss_tab.share_params_button = _fake_share
 diss_tab.render_dissertations_widget = _fake_render
 
 sample_df = pd.DataFrame([{"title": "x"}])
-diss_tab.render_dissertations_tab(sample_df)
+diss_tab.render_dissertations_tab(sample_df, db_signature=("diss", 1.0, 1))
 """
     )
     app.query_params["diss_criterion"] = ["title"]
