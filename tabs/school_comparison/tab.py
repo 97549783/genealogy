@@ -231,6 +231,12 @@ def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
             section_index = load_dissertation_section_index_for_selection(
                 allowed_codes=all_codes, section_keys=selection.section_keys, include_text=False,
             )
+            index_reason = section_index.attrs.get("diagnostic_reason")
+            if section_index.empty and index_reason in {"section_database_unavailable", "no_selected_vectors"}:
+                message = ("База разделов диссертаций недоступна." if index_reason == "section_database_unavailable"
+                           else "Для выбранных разделов не найдены индексированные векторы.")
+                st.error(message)
+                return
             datasets = {
                 root: gather_semantic_school_dataset(
                     root=root, member_codes=codes_by_root[root], section_index=section_index,

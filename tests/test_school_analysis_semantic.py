@@ -110,3 +110,16 @@ def test_excluded_group_member_keeps_metadata() -> None:
     generations = compute_generation_semantics(dataset, {2: {"1"}}, selection)
     assert generations.dissertation_details[2].iloc[0]["candidate_name"] == "Автор"
     assert generations.dissertation_details[2].iloc[0]["Причина исключения"] == "Недостаточное покрытие выбранных разделов"
+
+
+def test_semantic_export_does_not_multiply_existing_percentage_twice() -> None:
+    empty = pd.DataFrame()
+    payload = build_excel_report(
+        metrics_df=pd.DataFrame({"Показатель": ["Всего"], "Значение": [1]}),
+        generations_df=empty, yearly_df=empty, city_df=empty, institutional={},
+        opponents_df=empty, continuity_df=empty,
+        semantic_generation_dissertations=pd.DataFrame({"Автор": ["А"], "Покрытие, %": [60.0], "Code": ["1"]}),
+    )
+    sheet = load_workbook(BytesIO(payload), data_only=True)["Диссертации поколений"]
+    assert sheet.cell(2, 2).value == 60.0
+    assert "Code" not in [cell.value for cell in sheet[1]]

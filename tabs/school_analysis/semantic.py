@@ -350,7 +350,7 @@ def compute_branch_semantics(
         medoid, medoid_diagnostic = _medoid_for_codes(dataset, eligible, selection)
         if not profile:
             diagnostics_message = f"Ветвь «{branch}»: отсутствует профиль с достаточным покрытием."
-        elif medoid_diagnostic and len(eligible) >= 3:
+        elif medoid_diagnostic:
             diagnostics_message = f"Ветвь «{branch}»: {medoid_diagnostic}"
         else:
             diagnostics_message = None

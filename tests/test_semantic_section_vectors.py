@@ -6,6 +6,7 @@ import pandas as pd
 from core.semantic.models import build_section_selection
 from core.semantic.section_vectors import (
     aggregate_duplicate_section_vectors,
+    build_dissertation_section_vectors,
     composite_distance_matrix,
     composite_similarity,
     score_dissertations_against_query,
@@ -72,3 +73,22 @@ def test_block_pairwise_matches_scalar_reference() -> None:
     expected = 1 - composite_similarity(items[0], items[1], selection)
     assert diagnostics.reason == "ok"
     assert np.isclose(matrix[0, 1], expected)
+
+
+def test_structural_invalid_row_is_attributed_and_zero_coverage_is_not_eligible() -> None:
+    matrix = np.array([[1, 0]], dtype=np.float32)
+    index = pd.DataFrame({"Code": ["A"], "section_key": ["research_goal"], "matrix_row": [99]})
+    selection = build_section_selection("selected", ["research_goal"], min_coverage=0)
+    vectors, coverage = build_dissertation_section_vectors({"A"}, index, matrix, selection, True)
+    assert vectors == {}
+    assert coverage.iloc[0]["invalid_vector_row_count"] == 1
+    assert coverage.iloc[0]["eligible"] == False
+
+
+def test_all_invalid_query_rows_keep_diagnostic_count() -> None:
+    matrix = np.array([[1, 0]], dtype=np.float32)
+    index = pd.DataFrame({"Code": ["A"], "section_key": ["research_goal"], "matrix_row": ["неверно"]})
+    selection = build_section_selection("selected", ["research_goal"])
+    result = score_dissertations_against_query([1, 0], index, matrix, selection, True, 10)
+    assert result.empty
+    assert result.attrs["invalid_vector_row_count"] == 1

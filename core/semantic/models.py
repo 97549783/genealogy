@@ -84,7 +84,7 @@ class PairwiseDistanceDiagnostics:
     undefined_pair_count: int
     selected_section_count: int
     minimum_coverage: float
-    reason: Literal["ok", "undefined_pairs", "item_limit"] = "ok"
+    reason: Literal["ok", "undefined_pairs", "item_limit", "insufficient_samples"] = "ok"
     maximum_pairwise_items: int = 2500
 
 

@@ -45,6 +45,15 @@ def validate_matrix_and_index(
     return result.reset_index(drop=True)
 
 
+def _structural_invalid_counts(matrix: np.ndarray, section_index: pd.DataFrame) -> dict[str, int]:
+    """Считает структурно неверные ссылки с привязкой к исходному Code."""
+    numeric = pd.to_numeric(section_index["matrix_row"], errors="coerce")
+    valid = numeric.notna() & np.isfinite(numeric) & (numeric == np.floor(numeric))
+    valid &= (numeric >= 0) & (numeric < matrix.shape[0])
+    invalid = section_index.loc[~valid, "Code"].astype(str)
+    return invalid.value_counts().astype(int).to_dict()
+
+
 def aggregate_duplicate_section_vectors(
     matrix: np.ndarray, section_index: pd.DataFrame, normalized: bool
 ) -> dict[str, dict[str, np.ndarray]]:
@@ -60,7 +69,7 @@ def _aggregate_duplicate_section_vectors_with_diagnostics(
     valid = validate_matrix_and_index(matrix, section_index)
     buckets: dict[tuple[str, str], list[np.ndarray]] = {}
     invalid_by_code: dict[str, int] = {}
-    structural_invalid_count = len(section_index) - len(valid)
+    structural_by_code = _structural_invalid_counts(matrix, section_index)
     for start in range(0, len(valid), 512):
         part = valid.iloc[start:start + 512]
         values = np.asarray(matrix[part["matrix_row"].to_numpy(dtype=int)], dtype=np.float32).copy()
@@ -78,8 +87,8 @@ def _aggregate_duplicate_section_vectors_with_diagnostics(
         centroid = _normalize(np.mean(vectors, axis=0, dtype=np.float32))
         if centroid is not None:
             result.setdefault(code, {})[key] = centroid.astype(np.float32, copy=False)
-    if structural_invalid_count:
-        invalid_by_code["__structural__"] = structural_invalid_count
+    for code, count in structural_by_code.items():
+        invalid_by_code[code] = invalid_by_code.get(code, 0) + count
     return result, invalid_by_code
 
 
@@ -104,7 +113,7 @@ def build_dissertation_section_vectors(
             "Code": code, "coverage": coverage,
             "available_section_count": len(available),
             "selected_section_count": len(selection.section_keys),
-            "eligible": coverage >= selection.min_coverage,
+            "eligible": bool(available) and coverage >= selection.min_coverage,
             "invalid_vector_row_count": invalid_by_code.get(code, 0),
         })
     coverage_df = pd.DataFrame(rows, columns=["Code", "coverage", "available_section_count", "selected_section_count", "eligible", "invalid_vector_row_count"])
@@ -124,7 +133,9 @@ def score_dissertations_against_query(
     subset = section_index[section_index["section_key"].isin(selection.section_keys)]
     valid = validate_matrix_and_index(matrix, subset)
     if valid.empty:
-        return pd.DataFrame(columns=SCORE_COLUMNS)
+        result = pd.DataFrame(columns=SCORE_COLUMNS)
+        result.attrs["invalid_vector_row_count"] = len(subset)
+        return result
     best: dict[tuple[str, str], tuple[float, object]] = {}
     invalid_vector_row_count = len(subset) - len(valid)
     size = max(1, int(batch_size))

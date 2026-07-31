@@ -315,8 +315,14 @@ def _load_dissertation_section_index_for_selection_cached(
     include_text: bool,
 ) -> pd.DataFrame:
     """Загружает выбранные разделы, применяя оба фильтра в SQLite."""
-    if db_signature is None or not section_keys or (allowed_codes is not None and not allowed_codes):
-        return _empty_index(include_text)
+    if db_signature is None:
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "section_database_unavailable"
+        return result
+    if not section_keys or (allowed_codes is not None and not allowed_codes):
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "empty_filter"
+        return result
     columns = TEXT_COLUMNS if include_text else INDEX_COLUMNS
     select_clause = ", ".join(columns)
     section_clause = "section_key IN (" + ",".join("?" for _ in section_keys) + ")"
@@ -336,10 +342,17 @@ def _load_dissertation_section_index_for_selection_cached(
                         conn, params=[*code_batch, *section_keys],
                     ))
     except (OSError, sqlite3.Error):
-        return _empty_index(include_text)
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "section_database_unavailable"
+        return result
     if not frames:
-        return _empty_index(include_text)
-    return _with_section_label(pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0])
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "no_selected_vectors"
+        return result
+    result = _with_section_label(pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0])
+    if result.empty:
+        result.attrs["diagnostic_reason"] = "no_selected_vectors"
+    return result
 
 
 def load_dissertation_section_index_for_selection(

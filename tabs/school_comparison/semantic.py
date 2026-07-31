@@ -94,7 +94,7 @@ def gather_semantic_school_dataset(
 def _empty_diagnostics(datasets: Mapping[str, SemanticSchoolDataset], selection: SectionSelection) -> PairwiseDistanceDiagnostics:
     return PairwiseDistanceDiagnostics(
         sum(len(dataset.dissertation_vectors) for dataset in datasets.values()), 0,
-        len(selection.section_keys), selection.min_coverage,
+        len(selection.section_keys), selection.min_coverage, "insufficient_samples",
     )
 
 

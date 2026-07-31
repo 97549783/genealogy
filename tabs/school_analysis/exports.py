@@ -17,12 +17,13 @@ def _safe_sheet_name(prefix: str, label: str) -> str:
 
 def _localized_semantic_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """Удаляет технические поля и приводит покрытие к процентам."""
+    coverage_was_fraction = "coverage" in frame.columns and "Покрытие, %" not in frame.columns
     result = frame.drop(columns=["Code", "eligible", "invalid_vector_row_count"], errors="ignore").rename(columns={
         "candidate_name": "Автор", "title": "Название", "year": "Год",
         "coverage": "Покрытие, %", "available_section_count": "Доступно разделов",
         "selected_section_count": "Выбрано разделов",
     }).copy()
-    if "Покрытие, %" in result:
+    if coverage_was_fraction and "Покрытие, %" in result:
         result["Покрытие, %"] = pd.to_numeric(result["Покрытие, %"], errors="coerce") * 100.0
     return result
 

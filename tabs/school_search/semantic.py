@@ -29,6 +29,11 @@ from core.perf import perf_timer
 from tabs.dissertation_characteristics.labels import SECTION_LABELS_RU
 from tabs.dissertation_characteristics.search import load_dissertation_embedding_matrix
 
+INDEX_DIAGNOSTICS_RU = {
+    "section_database_unavailable": "База разделов диссертаций недоступна.",
+    "no_selected_vectors": "Для выбранных разделов не найдены индексированные векторы.",
+}
+
 
 @dataclass(frozen=True)
 class SemanticSchoolQueryResult:
@@ -140,6 +145,9 @@ def search_schools_by_semantic_query(
     section_index = load_dissertation_section_index_for_selection(
         allowed_codes=allowed, section_keys=selection.section_keys, include_text=False,
     )
+    index_reason = section_index.attrs.get("diagnostic_reason")
+    if section_index.empty and index_reason in INDEX_DIAGNOSTICS_RU:
+        return SemanticSchoolQueryResult(pd.DataFrame(), {}, (INDEX_DIAGNOSTICS_RU[index_reason],), selection, metadata, parameters)
     with perf_timer("semantic.query.score_sections"):
         scores = score_dissertations_against_query(
             query, section_index, matrix, selection, metadata.normalized,
@@ -201,6 +209,9 @@ def search_similar_scientific_schools(
     source_index = load_dissertation_section_index_for_selection(
         allowed_codes=codes_by_root[source_root], section_keys=selection.section_keys, include_text=False,
     )
+    index_reason = source_index.attrs.get("diagnostic_reason")
+    if source_index.empty and index_reason in INDEX_DIAGNOSTICS_RU:
+        return SimilarSchoolResult(pd.DataFrame(), {}, (INDEX_DIAGNOSTICS_RU[index_reason],), selection, metadata, parameters)
     source_vectors, source_coverage = build_dissertation_section_vectors(
         codes_by_root[source_root], source_index, matrix, selection, metadata.normalized,
     )
@@ -251,6 +262,7 @@ def search_similar_scientific_schools(
         ).head(top_n).reset_index(drop=True)
         summary["rank"] = range(1, len(summary) + 1)
     stats = get_school_basic_stats(df, idx, scope, lineage_context_key[0], context_key=lineage_context_key)
+    diagnostics: tuple[str, ...] = () if not summary.empty else ("Похожие научные школы с достаточным покрытием не найдены.",)
     if not summary.empty:
         summary["year_range"] = summary["root"].map(lambda root: stats.get(root, {}).get("year_range", "—"))
         final_roots = summary["root"].tolist()
@@ -280,15 +292,19 @@ def search_similar_scientific_schools(
                 "distance_to_source": [distance_to_profile(final_vectors[code], source_centroids, selection) for code in candidate_codes],
                 "coverage": [coverage_map.get(code, 0.0) for code in candidate_codes],
             })
-            candidate_matrix, _ = composite_distance_matrix(
+            candidate_matrix, candidate_diagnostics = composite_distance_matrix(
                 [final_vectors[code] for code in candidate_codes], selection, get_semantic_analysis_limits().batch_size,
             )
             medoid = find_medoid(candidate_codes, candidate_matrix)[0] if candidate_codes and candidate_matrix is not None else None
+            if candidate_codes and candidate_matrix is None:
+                if candidate_diagnostics.reason == "item_limit":
+                    diagnostics = (*diagnostics, f"Для школы «{candidate}» не определена репрезентативная работа: превышен предел {candidate_diagnostics.maximum_pairwise_items}.")
+                else:
+                    diagnostics = (*diagnostics, f"Для школы «{candidate}» не определена репрезентативная работа: отсутствуют общие разделы у части пар.")
             detail["representative"] = detail["Code"].eq(medoid)
             if not meta.empty:
                 detail = detail.merge(meta, on="Code", how="left")
             dissertation_explanations[candidate] = detail.sort_values("distance_to_source", na_position="last").reset_index(drop=True)
-    diagnostics = () if not summary.empty else ("Похожие научные школы с достаточным покрытием не найдены.",)
     if invalid_vector_row_count:
         diagnostics = (*diagnostics, f"Пропущено недопустимых строк векторной матрицы: {invalid_vector_row_count}.")
     returned_roots = set(summary.get("root", pd.Series(dtype=str)))

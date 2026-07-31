@@ -61,7 +61,8 @@ def build_semantic_school_comparison_excel(
         parameter_rows.append({"Параметр": PARAMETERS_RU[key], "Значение": json.dumps(value, ensure_ascii=False, default=str)})
     diagnostic_rows = [{"Диагностика": message} for message in result.diagnostics]
     reason_labels = {"ok": "Расчёт выполнен", "item_limit": "Превышен предел числа диссертаций",
-                     "undefined_pairs": "Не определены расстояния для части пар"}
+                     "undefined_pairs": "Не определены расстояния для части пар",
+                     "insufficient_samples": "Недостаточно данных для попарного расчёта"}
     diagnostic_rows.append({"Диагностика": f"Причина попарного расчёта: {reason_labels[result.pairwise_diagnostics.reason]}"})
     diagnostic_rows.append({"Диагностика": f"Предел числа диссертаций: {result.pairwise_diagnostics.maximum_pairwise_items}"})
     output = BytesIO()

@@ -163,6 +163,12 @@ def _render_school_semantics(
             section_index = load_dissertation_section_index_for_selection(
                 allowed_codes=member_codes, section_keys=selection.section_keys, include_text=False,
             )
+            index_reason = section_index.attrs.get("diagnostic_reason")
+            if section_index.empty and index_reason in {"section_database_unavailable", "no_selected_vectors"}:
+                message = ("База разделов диссертаций недоступна." if index_reason == "section_database_unavailable"
+                           else "Для выбранных разделов не найдены индексированные векторы.")
+                st.error(message)
+                return {}
             matrix = load_dissertation_embedding_matrix(metadata.matrix_signature)
             dissertation_metadata = working_df.copy()
             generation_codes = {}

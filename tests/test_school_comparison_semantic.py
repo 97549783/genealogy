@@ -69,3 +69,14 @@ def test_per_section_eligibility_and_excel_labels() -> None:
     assert any("60.0 %" in str(row) for row in parameters)
     diagnostics = " ".join(str(row) for row in workbook["Диагностика"].values)
     assert "Причина попарного расчёта: Расчёт выполнен" in diagnostics
+
+
+def test_partial_export_does_not_claim_pairwise_success() -> None:
+    matrix = np.array([[1, 0]], dtype=np.float32)
+    datasets = {"А": _dataset("А", ["1"], [0], matrix)}
+    selection = build_section_selection("selected", ["research_goal"])
+    result = compute_semantic_school_comparison(datasets=datasets, selection=selection, distance_batch_size=2)
+    assert result.pairwise_diagnostics.reason == "insufficient_samples"
+    workbook = load_workbook(BytesIO(build_semantic_school_comparison_excel(result, {})), read_only=True)
+    diagnostics = " ".join(str(row) for row in workbook["Диагностика"].values)
+    assert "Недостаточно данных для попарного расчёта" in diagnostics

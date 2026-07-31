@@ -37,6 +37,7 @@ QUERY_SCHOOL_COLUMNS = {
 SIMILAR_SCHOOL_COLUMNS = {
     "rank": "Ранг", "root": "Научный руководитель", "semantic_similarity": "Семантическое сходство",
     "common_section_count": "Общих разделов характеристик", "profiled_dissertations": "Диссертаций с векторами",
+    "source_coverage_ratio": "Полнота исходной школы, %",
     "coverage_ratio": "Полнота данных, %", "jaccard_overlap": "Пересечение состава по Жаккару",
     "total_members": "Всего членов школы", "year_range": "Период активности",
 }
@@ -95,6 +96,7 @@ def build_semantic_query_search_excel(result: SemanticSchoolQueryResult) -> byte
             })
             for key, score in (record.get("section_scores") or {}).items():
                 contribution_rows.append({"Научный руководитель": root, "Автор": record.get("candidate_name"),
+                                          "Название": record.get("title"), "Год": record.get("year"),
                                           "Раздел характеристики": SECTION_LABELS_RU.get(key, key), "Сходство": score})
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -108,7 +110,7 @@ def build_semantic_query_search_excel(result: SemanticSchoolQueryResult) -> byte
 
 def build_similar_school_search_excel(result: SimilarSchoolResult) -> bytes:
     """Экспортирует сходство школ, разделов и репрезентативные работы."""
-    schools = _select_columns(result.summary, SIMILAR_SCHOOL_COLUMNS, ("Полнота данных, %",))
+    schools = _select_columns(result.summary, SIMILAR_SCHOOL_COLUMNS, ("Полнота данных, %", "Полнота исходной школы, %"))
     sections = pd.concat([
         frame.assign(**{"Научный руководитель": root}) for root, frame in result.section_similarities.items()
     ], ignore_index=True) if result.section_similarities else pd.DataFrame()

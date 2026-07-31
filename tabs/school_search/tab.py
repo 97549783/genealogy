@@ -937,12 +937,14 @@ def render_school_search_tab(
             columns = {
                 "rank": "Ранг", "root": "Научный руководитель", "semantic_similarity": "Семантическое сходство",
                 "common_section_count": "Общих разделов характеристик", "profiled_dissertations": "Диссертаций с векторами",
+                "source_coverage_ratio": "Полнота исходной школы, %",
                 "coverage_ratio": "Полнота данных, %", "jaccard_overlap": "Пересечение состава по Жаккару",
                 "total_members": "Всего членов школы", "year_range": "Период активности",
             }
             display = pd.DataFrame({label: result.summary[key] for key, label in columns.items() if key in result.summary})
-            if "Полнота данных, %" in display:
-                display["Полнота данных, %"] *= 100.0
+            for column in ("Полнота данных, %", "Полнота исходной школы, %"):
+                if column in display:
+                    display[column] *= 100.0
         for diagnostic in result.diagnostics:
             st.warning(diagnostic)
         if not display.empty:
@@ -975,6 +977,7 @@ def render_school_search_tab(
                         for section_key, score in (record.get("section_scores") or {}).items():
                             contribution_rows.append({
                                 "Автор": record.get("candidate_name"),
+                                "Название": record.get("title"), "Год": record.get("year"),
                                 "Раздел характеристики": SECTION_LABELS_RU.get(section_key, section_key),
                                 "Сходство": score,
                             })
@@ -987,7 +990,15 @@ def render_school_search_tab(
                         ids = [value for value in details.get("best_text_id", []) if pd.notna(value)]
                         texts = load_dissertation_section_texts_by_ids(ids)
                         for text_row in texts.itertuples(index=False):
-                            with st.expander("Лучше всего совпавший фрагмент"):
+                            matched = details[details["best_text_id"].astype(str) == str(text_row.text_id)]
+                            if not matched.empty:
+                                author = matched.iloc[0].get("candidate_name", "—")
+                                title = matched.iloc[0].get("title", "—")
+                                year = matched.iloc[0].get("year", "—")
+                                fragment_title = f"Лучше всего совпавший фрагмент: {author} — {title} ({year})"
+                            else:
+                                fragment_title = "Лучше всего совпавший фрагмент диссертации"
+                            with st.expander(fragment_title):
                                 st.markdown(f"**{SECTION_LABELS_RU.get(text_row.section_key, text_row.section_key)}**")
                                 st.write(text_row.text)
                     if search_mode == "semantic_similar" and root in result.section_similarities:
