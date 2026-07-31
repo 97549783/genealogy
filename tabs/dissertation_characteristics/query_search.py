@@ -2,33 +2,19 @@
 
 from __future__ import annotations
 
-import importlib.util
-import os
-
 import numpy as np
 import pandas as pd
-import streamlit as st
 
+from core.semantic.query_encoder import (
+    combine_query_vectors,
+    get_query_encoder_device,
+    is_query_encoder_available,
+    load_query_encoder,
+    prepare_queries,
+)
 from tabs.dissertation_characteristics.search import _normalize, _valid_targets
 
 QUERY_CONTRIBUTION_TEMPERATURE = 0.1
-
-
-def is_query_encoder_available() -> bool:
-    """Проверяет наличие библиотеки энкодера запросов."""
-    return importlib.util.find_spec("sentence_transformers") is not None
-
-
-@st.cache_resource(show_spinner=False)
-def load_query_encoder(model_name: str, device: str):
-    """Лениво загружает модель кодирования пользовательских запросов."""
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(model_name, device=device)
-
-
-def get_query_encoder_device() -> str:
-    """Возвращает устройство энкодера запросов из переменной окружения."""
-    return str(os.getenv("DISS_QUERY_ENCODER_DEVICE", "cpu") or "cpu").strip() or "cpu"
 
 
 def collect_non_empty_queries(values: list[str], max_queries: int = 5) -> list[str]:
@@ -38,17 +24,18 @@ def collect_non_empty_queries(values: list[str], max_queries: int = 5) -> list[s
 
 def encode_user_queries(queries: list[str], model_name: str, normalize_embeddings: bool, device: str = "cpu") -> np.ndarray:
     """Кодирует запросы, добавляя префикс query: для моделей E5."""
-    is_e5 = "e5" in str(model_name).casefold()
-    prepared = [(f"query: {q}" if is_e5 else q) for q in queries]
+    prepared = prepare_queries(queries, model_name)
     if not prepared:
         return np.zeros((0, 0), dtype=np.float32)
     encoder = load_query_encoder(model_name, device)
-    return np.asarray(encoder.encode(prepared, normalize_embeddings=normalize_embeddings), dtype=np.float32)
+    return np.asarray(
+        encoder.encode(prepared, normalize_embeddings=normalize_embeddings), dtype=np.float32
+    )
 
 
 def average_query_vectors(query_vectors: np.ndarray) -> np.ndarray:
     """Усредняет векторы запросов и нормализует результат."""
-    return _normalize(np.asarray(query_vectors, dtype=np.float32).mean(axis=0).reshape(1, -1))[0]
+    return combine_query_vectors(query_vectors)
 
 
 def softmax_percentages(values: np.ndarray, temperature: float = QUERY_CONTRIBUTION_TEMPERATURE) -> np.ndarray:

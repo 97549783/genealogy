@@ -16,6 +16,26 @@ SEARCHABLE_SECTION_KEYS = [
     "defensible_propositions", "approbation",
 ]
 
+SECTION_PRESETS = {
+    "all": tuple(SEARCHABLE_SECTION_KEYS),
+    "research_design": (
+        "research_object", "research_subject", "research_goal",
+        "research_hypothesis", "research_tasks",
+    ),
+    "methods": ("research_methods",),
+    "contribution": (
+        "scientific_novelty", "theoretical_significance",
+        "practical_significance", "defensible_propositions",
+    ),
+}
+
+SECTION_PRESET_LABELS_RU = {
+    "all": "Все разделы",
+    "research_design": "Замысел исследования",
+    "methods": "Методы исследования",
+    "contribution": "Научный вклад",
+}
+
 SECTION_LABELS_RU = {
     "research_relevance": "Актуальность исследования",
     "research_problem": "Проблема исследования",
