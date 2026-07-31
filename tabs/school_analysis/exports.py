@@ -24,6 +24,13 @@ def build_excel_report(
     opponents_df: pd.DataFrame,
     continuity_df: pd.DataFrame,
     thematic_groups: Optional[Dict[str, pd.DataFrame]] = None,
+    semantic_summary: pd.DataFrame | None = None,
+    semantic_dissertations: pd.DataFrame | None = None,
+    semantic_generations: pd.DataFrame | None = None,
+    semantic_branches: pd.DataFrame | None = None,
+    semantic_branch_similarity: pd.DataFrame | None = None,
+    semantic_branch_silhouette: pd.DataFrame | None = None,
+    semantic_excluded: pd.DataFrame | None = None,
 ) -> bytes:
     """
     Формирует Excel-файл со всеми листами анализа.
@@ -82,5 +89,18 @@ def build_excel_report(
             continuity_df.to_excel(
                 writer, index=False, sheet_name="Ученики-руководители"
             )
+
+        semantic_sheets = (
+            (semantic_summary, "Семантическая сводка"),
+            (semantic_dissertations, "Семантика диссертаций"),
+            (semantic_generations, "Семантика поколений"),
+            (semantic_branches, "Семантика ветвей"),
+            (semantic_branch_similarity, "Сходство ветвей"),
+            (semantic_branch_silhouette, "Силуэт ветвей"),
+            (semantic_excluded, "Семантика исключения"),
+        )
+        for semantic_df, sheet_name in semantic_sheets:
+            if semantic_df is not None and not semantic_df.empty:
+                semantic_df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
 
     return buf.getvalue()
