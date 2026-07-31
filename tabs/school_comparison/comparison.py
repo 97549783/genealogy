@@ -351,6 +351,7 @@ def create_silhouette_plot(
     school_order: List[str],
     overall_score: float,
     metric_label: str,
+    title: str = "Анализ силуэта тематических профилей",
 ) -> plt.Figure:
     """Создаёт график силуэта для научных школ."""
     n_schools = len(school_order)
@@ -408,7 +409,7 @@ def create_silhouette_plot(
     ax.set_xlabel("Коэффициент силуэта", fontsize=12)
     ax.set_ylabel("Научные школы", fontsize=12)
     ax.set_title(
-        f"Анализ силуэта тематических профилей\n{metric_label}",
+        f"{title}\n{metric_label}",
         fontsize=14,
         fontweight="bold"
     )

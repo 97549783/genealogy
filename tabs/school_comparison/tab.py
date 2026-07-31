@@ -25,9 +25,12 @@ from core.ui.filters import (
 )
 
 from core.lineage.graph import lineage, rows_for
+from core.lineage.membership import get_school_member_codes
+from core.semantic.models import build_section_selection
 from core.ui.chrome import download_data_dialog
 from core.ui.links import share_params_button
 from core.db import SUPERVISOR_COLUMNS
+from tabs.dissertation_characteristics.labels import SEARCHABLE_SECTION_KEYS, SECTION_LABELS_RU
 from .comparison import (
     DistanceMetric,
     ComparisonScope,
@@ -56,6 +59,11 @@ AUTHOR_COLUMN = "candidate_name"
 
 # Ключ в session_state для хранения результатов анализа
 _RESULTS_KEY = "school_comp_results"
+
+REPRESENTATION_LABELS = {
+    "classifier": "Тематические профили по классификатору",
+    "characteristics": "Нейросетевые векторы характеристик диссертаций",
+}
 
 # ==============================================================================
 # ИНСТРУКЦИЯ ДЛЯ ВКЛАДКИ
@@ -132,6 +140,185 @@ def show_instruction_dialog() -> None:
     _show()
 
 
+def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
+    """Отрисовывает сравнение по векторам характеристик без ранней загрузки матрицы."""
+    default_science_fields = st.session_state.pop(
+        "school_comp_science_fields_query", hydrate_science_fields_from_query_params(),
+    )
+    science_field_ids = render_science_field_filter(
+        key_prefix="school_comp", default_selected_ids=default_science_fields,
+    )
+    st.caption(science_field_filter_caption(science_field_ids))
+    context = get_science_filtered_lineage_context(
+        df=df, base_idx=idx, db_signature=db_signature, selected_ids=science_field_ids,
+        supervisor_columns=SUPERVISOR_COLUMNS,
+    )
+    supervisors = get_all_supervisors(context.df)
+    requested = st.session_state.pop("school_comp_selection_query", None)
+    if requested is not None:
+        st.session_state["school_comp_selection"] = [root for root in requested if root in supervisors]
+    selected_schools = st.multiselect(
+        "Выберите руководителей научных школ (минимум 2)", supervisors,
+        key="school_comp_selection",
+    )
+    scope_options = list(SCOPE_LABELS)
+    scope_index = st.radio(
+        "Охват диссертаций", range(len(scope_options)),
+        format_func=lambda position: SCOPE_LABELS[scope_options[position]], key="school_comp_scope",
+    )
+    scope = scope_options[scope_index]
+    sections_mode = st.radio(
+        "Характеристики для сравнения", ["all", "selected"],
+        format_func=lambda value: "Все доступные характеристики" if value == "all" else "Выбранные разделы характеристик",
+        key="school_comp_sections_mode",
+    )
+    section_keys = tuple(SEARCHABLE_SECTION_KEYS)
+    if sections_mode == "selected":
+        section_keys = tuple(st.multiselect(
+            "Выберите разделы характеристик", SEARCHABLE_SECTION_KEYS,
+            format_func=lambda key: SECTION_LABELS_RU[key],
+            default=["research_goal", "research_methods", "scientific_novelty"],
+            key="school_comp_sections",
+        ))
+    minimum_coverage = st.slider(
+        "Минимальное покрытие разделов, %", 0, 100, 60, 5,
+        key="school_comp_min_coverage",
+    ) / 100.0
+    ready = len(selected_schools) >= 2 and bool(section_keys)
+    if len(selected_schools) < 2:
+        st.warning("Выберите минимум две научные школы для сравнения.")
+    if not section_keys:
+        st.warning("Выберите хотя бы один раздел характеристики.")
+    run_clicked = st.button(
+        "🚀 Запустить сравнение характеристик", type="primary",
+        disabled=not ready, key="school_comp_semantic_run",
+    )
+    selection = build_section_selection(sections_mode, section_keys, min_coverage=minimum_coverage) if section_keys else None
+    signature = {
+        "representation": "characteristics", "schools": tuple(selected_schools), "scope": scope,
+        "science_fields": tuple(sorted(science_field_ids)), "sections_mode": sections_mode,
+        "section_keys": section_keys, "minimum_coverage": minimum_coverage,
+        "database_signature": db_signature,
+    }
+    result_key = "school_comp_semantic_result"
+    if run_clicked and selection is not None:
+        from core.db.dissertation_sections import (
+            get_dissertation_sections_db_signature, load_dissertation_section_index_for_selection,
+            load_typed_vector_metadata,
+        )
+        from core.semantic.distances import get_semantic_analysis_limits
+        from tabs.dissertation_characteristics.search import load_dissertation_embedding_matrix
+        from .semantic import gather_semantic_school_dataset, compute_semantic_school_comparison
+
+        metadata = load_typed_vector_metadata()
+        if metadata is None:
+            st.error("Матрица векторов характеристик недоступна или имеет неверный формат.")
+            return
+        complete_signature = {
+            **signature, "section_database_signature": get_dissertation_sections_db_signature(),
+            "model_name": metadata.model_name, "normalized": metadata.normalized,
+            "matrix_signature": metadata.matrix_signature,
+        }
+        try:
+            matrix = load_dissertation_embedding_matrix(metadata.matrix_signature)
+            codes_by_root = {
+                root: set(get_school_member_codes(
+                    context.df, context.idx, root, scope, db_signature,
+                    context_key=context.cache_key,
+                )) for root in selected_schools
+            }
+            all_codes = set().union(*codes_by_root.values()) if codes_by_root else set()
+            section_index = load_dissertation_section_index_for_selection(
+                allowed_codes=all_codes, section_keys=selection.section_keys, include_text=False,
+            )
+            datasets = {
+                root: gather_semantic_school_dataset(
+                    root=root, member_codes=codes_by_root[root], section_index=section_index,
+                    matrix=matrix, selection=selection, normalized=metadata.normalized,
+                    metadata_df=context.df,
+                ) for root in selected_schools
+            }
+            result = compute_semantic_school_comparison(
+                datasets=datasets, selection=selection,
+                distance_batch_size=get_semantic_analysis_limits().batch_size,
+            )
+        except Exception:
+            st.error("Не удалось выполнить сравнение по векторам характеристик.")
+            return
+        st.session_state[result_key] = {
+            "signature": complete_signature, "result": result, "metadata": metadata,
+            "selection": selection,
+        }
+    stored = st.session_state.get(result_key)
+    if stored is None:
+        return
+    current_prefix = {key: stored["signature"].get(key) for key in signature}
+    if current_prefix != signature:
+        st.session_state.pop(result_key, None)
+        return
+    from core.db.dissertation_sections import (
+        get_dissertation_sections_db_signature, load_typed_vector_metadata,
+    )
+    current_metadata = load_typed_vector_metadata()
+    if (
+        current_metadata is None
+        or stored["signature"].get("section_database_signature") != get_dissertation_sections_db_signature()
+        or stored["signature"].get("matrix_signature") != current_metadata.matrix_signature
+        or stored["signature"].get("model_name") != current_metadata.model_name
+        or stored["signature"].get("normalized") != current_metadata.normalized
+    ):
+        st.session_state.pop(result_key, None)
+        st.warning("Данные векторов изменились. Запустите сравнение повторно.")
+        return
+    result = stored["result"]
+    metadata = stored["metadata"]
+    st.caption(
+        "Методическое ограничение: выборки выбранных школ могут пересекаться; расчёт использует "
+        "членство, заданное генеалогическим выбором, без удаления общих диссертаций."
+    )
+    st.markdown(f"**Модель:** `{metadata.model_name}` · **Размерность:** {metadata.dimensions} · **Нормализация:** {'да' if metadata.normalized else 'нет'}")
+    for diagnostic in result.diagnostics:
+        st.error(diagnostic)
+    if result.overall_silhouette is None:
+        return
+    st.metric("Общий коэффициент силуэта", f"{result.overall_silhouette:.3f}")
+    st.info("Положительное значение указывает на тематическую различимость школ; отрицательное — на близость диссертации к другой выбранной школе.")
+    school_positions = {root: position for position, root in enumerate(selected_schools)}
+    labels = result.dissertation_silhouettes["Школа"].map(school_positions).to_numpy()
+    fig = create_silhouette_plot(
+        sample_scores=result.dissertation_silhouettes["Коэффициент силуэта"].to_numpy(),
+        labels=labels, school_order=selected_schools,
+        overall_score=result.overall_silhouette, metric_label="Составное косинусное расстояние по характеристикам",
+        title="Различимость научных школ по характеристикам диссертаций",
+    )
+    st.pyplot(fig)
+    plt.close(fig)
+    st.markdown("### Сводка по научным школам")
+    st.dataframe(result.school_summary, use_container_width=True, hide_index=True)
+    st.markdown("### Различимость по разделам характеристик")
+    st.dataframe(result.per_section_silhouette, use_container_width=True, hide_index=True)
+    negative = result.dissertation_silhouettes[result.dissertation_silhouettes["Коэффициент силуэта"] < 0]
+    st.markdown("### Диссертации с отрицательным коэффициентом силуэта")
+    st.dataframe(negative, use_container_width=True, hide_index=True)
+    if not result.excluded_dissertations.empty:
+        with st.expander("Исключённые диссертации"):
+            st.dataframe(result.excluded_dissertations, use_container_width=True, hide_index=True)
+    from .exports import build_semantic_school_comparison_excel
+    excel = build_semantic_school_comparison_excel(result, stored["signature"])
+    st.download_button(
+        "Скачать отчёт сравнения", excel, "сравнение_школ_по_характеристикам.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="school_comp_semantic_download",
+    )
+    share_params_button({
+        "tab": "school_comparison", "school_comp_representation": "characteristics",
+        "school_comp_schools": selected_schools, "school_comp_scope": scope,
+        "school_comp_sections_mode": sections_mode, "school_comp_section": list(section_keys),
+        "school_comp_min_coverage": minimum_coverage,
+        **science_fields_to_query_params(science_field_ids),
+    }, key="school_comp_semantic_share")
+
+
 # ==============================================================================
 # ОСНОВНАЯ ФУНКЦИЯ РЕНДЕРИНГА ВКЛАДКИ
 # ==============================================================================
@@ -145,6 +332,9 @@ def render_school_comparison_tab(
     """Отрисовывает вкладку сравнения научных школ."""
 
     if not st.session_state.get("school_comp_query_hydrated", False):
+        representation_q = str(st.query_params.get("school_comp_representation", "")).strip()
+        if representation_q in REPRESENTATION_LABELS:
+            st.session_state["school_comp_representation"] = representation_q
         schools_q = [s.strip() for s in st.query_params.get_all("school_comp_schools") if str(s).strip()]
         if schools_q:
             st.session_state["school_comp_selection_query"] = schools_q
@@ -183,6 +373,21 @@ def render_school_comparison_tab(
                     st.session_state["school_comp_decay"] = decay_val
             except ValueError:
                 pass
+        sections_mode_q = str(st.query_params.get("school_comp_sections_mode", "")).strip()
+        if sections_mode_q in {"all", "selected"}:
+            st.session_state["school_comp_sections_mode"] = sections_mode_q
+        semantic_sections_q = [
+            key for key in st.query_params.get_all("school_comp_section")
+            if key in SEARCHABLE_SECTION_KEYS
+        ]
+        if semantic_sections_q:
+            st.session_state["school_comp_sections"] = semantic_sections_q
+        minimum_coverage_q = str(st.query_params.get("school_comp_min_coverage", "")).strip()
+        try:
+            if minimum_coverage_q:
+                st.session_state["school_comp_min_coverage"] = round(float(minimum_coverage_q) * 100)
+        except ValueError:
+            pass
         st.session_state["school_comp_query_hydrated"] = True
 
     # --- Кнопка инструкции ---
@@ -195,6 +400,15 @@ def render_school_comparison_tab(
     Основная метрика — **коэффициент силуэта**, показывающий степень различия
     тематических направлений.
     """)
+
+    representation = st.radio(
+        "Представление диссертаций", options=list(REPRESENTATION_LABELS),
+        format_func=lambda value: REPRESENTATION_LABELS[value],
+        key="school_comp_representation", horizontal=True,
+    )
+    if representation == "characteristics":
+        _render_semantic_comparison_mode(df, idx, db_signature)
+        return
 
     default_source_id = hydrate_profile_source_from_query_params(
         param_name="school_comp_profile_source"
