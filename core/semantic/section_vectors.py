@@ -49,8 +49,18 @@ def aggregate_duplicate_section_vectors(
     matrix: np.ndarray, section_index: pd.DataFrame, normalized: bool
 ) -> dict[str, dict[str, np.ndarray]]:
     """Усредняет дубликаты разделов и нормализует каждый итоговый центр."""
+    result, _ = _aggregate_duplicate_section_vectors_with_diagnostics(matrix, section_index, normalized)
+    return result
+
+
+def _aggregate_duplicate_section_vectors_with_diagnostics(
+    matrix: np.ndarray, section_index: pd.DataFrame, normalized: bool,
+) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, int]]:
+    """Агрегирует векторы и считает недопустимые строки по диссертациям."""
     valid = validate_matrix_and_index(matrix, section_index)
     buckets: dict[tuple[str, str], list[np.ndarray]] = {}
+    invalid_by_code: dict[str, int] = {}
+    structural_invalid_count = len(section_index) - len(valid)
     for start in range(0, len(valid), 512):
         part = valid.iloc[start:start + 512]
         values = np.asarray(matrix[part["matrix_row"].to_numpy(dtype=int)], dtype=np.float32).copy()
@@ -60,12 +70,17 @@ def aggregate_duplicate_section_vectors(
         for position, row in enumerate(part.itertuples(index=False)):
             if usable[position]:
                 buckets.setdefault((str(row.Code), str(row.section_key)), []).append(values[position])
+            else:
+                code = str(row.Code)
+                invalid_by_code[code] = invalid_by_code.get(code, 0) + 1
     result: dict[str, dict[str, np.ndarray]] = {}
     for (code, key), vectors in buckets.items():
         centroid = _normalize(np.mean(vectors, axis=0, dtype=np.float32))
         if centroid is not None:
             result.setdefault(code, {})[key] = centroid.astype(np.float32, copy=False)
-    return result
+    if structural_invalid_count:
+        invalid_by_code["__structural__"] = structural_invalid_count
+    return result, invalid_by_code
 
 
 def build_dissertation_section_vectors(
@@ -78,7 +93,7 @@ def build_dissertation_section_vectors(
         section_index["Code"].astype(str).isin(wanted)
         & section_index["section_key"].isin(selection.section_keys)
     ]
-    vectors = aggregate_duplicate_section_vectors(matrix, subset, normalized)
+    vectors, invalid_by_code = _aggregate_duplicate_section_vectors_with_diagnostics(matrix, subset, normalized)
     weights = dict(selection.weights)
     total = sum(weights.values())
     rows = []
@@ -90,8 +105,10 @@ def build_dissertation_section_vectors(
             "available_section_count": len(available),
             "selected_section_count": len(selection.section_keys),
             "eligible": coverage >= selection.min_coverage,
+            "invalid_vector_row_count": invalid_by_code.get(code, 0),
         })
-    coverage_df = pd.DataFrame(rows, columns=["Code", "coverage", "available_section_count", "selected_section_count", "eligible"])
+    coverage_df = pd.DataFrame(rows, columns=["Code", "coverage", "available_section_count", "selected_section_count", "eligible", "invalid_vector_row_count"])
+    coverage_df.attrs["invalid_vector_row_count"] = sum(invalid_by_code.values())
     eligible = set(coverage_df.loc[coverage_df["eligible"], "Code"])
     return {code: value for code, value in vectors.items() if code in eligible}, coverage_df
 
@@ -109,7 +126,7 @@ def score_dissertations_against_query(
     if valid.empty:
         return pd.DataFrame(columns=SCORE_COLUMNS)
     best: dict[tuple[str, str], tuple[float, object]] = {}
-    invalid_vector_row_count = 0
+    invalid_vector_row_count = len(subset) - len(valid)
     size = max(1, int(batch_size))
     for start in range(0, len(valid), size):
         part = valid.iloc[start:start + size]

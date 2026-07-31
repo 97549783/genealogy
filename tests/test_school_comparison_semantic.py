@@ -60,5 +60,12 @@ def test_per_section_eligibility_and_excel_labels() -> None:
     assert section.columns.tolist() == ["Раздел характеристики", "Коэффициент силуэта", "Число школ", "Число диссертаций", "Полнота данных, %", "Статус"]
     selection = build_section_selection("selected", ["research_goal"], min_coverage=1)
     result = compute_semantic_school_comparison(datasets=datasets, selection=selection, distance_batch_size=2)
-    workbook = load_workbook(BytesIO(build_semantic_school_comparison_excel(result, {"режим": "характеристики"})), read_only=True)
+    workbook = load_workbook(BytesIO(build_semantic_school_comparison_excel(result, {
+        "representation": "characteristics", "sections_mode": "all", "minimum_coverage": .6,
+    })), read_only=True)
     assert workbook.sheetnames == ["Параметры", "Сводка по школам", "Силуэт по диссертациям", "Силуэт по разделам", "Исключённые диссертации", "Диагностика"]
+    parameters = list(workbook["Параметры"].values)
+    assert any("Все доступные характеристики" in str(row) for row in parameters)
+    assert any("60.0 %" in str(row) for row in parameters)
+    diagnostics = " ".join(str(row) for row in workbook["Диагностика"].values)
+    assert "Причина попарного расчёта: Расчёт выполнен" in diagnostics

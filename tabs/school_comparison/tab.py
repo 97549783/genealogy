@@ -294,6 +294,13 @@ def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
         })
         with st.expander("Исключённые диссертации"):
             st.dataframe(excluded_display, use_container_width=True, hide_index=True)
+    from .exports import build_semantic_school_comparison_excel
+    excel = build_semantic_school_comparison_excel(result, stored["signature"])
+    st.download_button(
+        "Скачать отчёт сравнения", excel, "сравнение_школ_по_характеристикам.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="school_comp_semantic_download",
+    )
     if result.overall_silhouette is None:
         return
     st.metric("Общий коэффициент силуэта", f"{result.overall_silhouette:.3f}")
@@ -318,13 +325,6 @@ def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
     })
     st.markdown("### Диссертации с отрицательным коэффициентом силуэта")
     st.dataframe(negative_display, use_container_width=True, hide_index=True)
-    from .exports import build_semantic_school_comparison_excel
-    excel = build_semantic_school_comparison_excel(result, stored["signature"])
-    st.download_button(
-        "Скачать отчёт сравнения", excel, "сравнение_школ_по_характеристикам.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="school_comp_semantic_download",
-    )
     share_params_button({
         "tab": "school_comparison", "school_comp_representation": "characteristics",
         "school_comp_schools": selected_schools, "school_comp_scope": scope,

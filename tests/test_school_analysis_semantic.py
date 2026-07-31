@@ -96,3 +96,17 @@ def test_zero_eligible_dissertations_returns_stable_schema() -> None:
     assert result.dissertation_distances.columns.tolist()[-1] == "Code"
     assert result.dissertation_distances.empty
     assert "Нет диссертаций" in result.diagnostics[0]
+    assert dataset.metadata.iloc[0]["Code"] == "1"
+
+
+def test_excluded_group_member_keeps_metadata() -> None:
+    selection = build_section_selection("selected", ["research_goal", "research_methods"], min_coverage=1)
+    dataset = build_school_semantic_dataset(
+        root="Школа", member_codes={"1"},
+        section_index=pd.DataFrame({"Code": ["1"], "section_key": ["research_goal"], "matrix_row": [0]}),
+        matrix=np.array([[1, 0]], dtype=np.float32), selection=selection, normalized=True,
+        dissertation_metadata=pd.DataFrame({"Code": ["1"], "candidate_name": ["Автор"], "title": ["Название"], "year": [2020], "Поколение": [2]}),
+    )
+    generations = compute_generation_semantics(dataset, {2: {"1"}}, selection)
+    assert generations.dissertation_details[2].iloc[0]["candidate_name"] == "Автор"
+    assert generations.dissertation_details[2].iloc[0]["Причина исключения"] == "Недостаточное покрытие выбранных разделов"

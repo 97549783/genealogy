@@ -44,7 +44,7 @@ SIMILAR_SCHOOL_COLUMNS = {
 
 def _parameters_frame(parameters: dict[str, object]) -> pd.DataFrame:
     """Переводит названия и значения параметров для пользователя."""
-    values = {"direct": "Прямые ученики", "all": "Все поколения", "broad": "Широкая специализация",
+    values = {"direct": "Прямые ученики", "broad": "Широкая специализация",
               "focused": "Сильное направление", "selected": "Выбранные разделы"}
     rows = []
     for key, value in sorted(parameters.items()):
@@ -53,11 +53,18 @@ def _parameters_frame(parameters: dict[str, object]) -> pd.DataFrame:
         if isinstance(value, bool):
             value = "Да" if value else "Нет"
         elif isinstance(value, str):
-            value = values.get(value, SECTION_LABELS_RU.get(value, value))
+            if key == "section_mode" and value == "all":
+                value = "Все доступные характеристики"
+            elif key == "scope" and value == "all":
+                value = "Все поколения"
+            else:
+                value = values.get(value, SECTION_LABELS_RU.get(value, value))
         elif key == "section_keys":
             value = [SECTION_LABELS_RU.get(str(item), str(item)) for item in value]
         elif key == "section_weights":
             value = [[SECTION_LABELS_RU.get(str(item[0]), str(item[0])), item[1]] for item in value]
+        if key in {"minimum_coverage", "relevance_threshold", "near_duplicate_jaccard"} and isinstance(value, (int, float)):
+            value = f"{float(value) * 100:.1f} %"
         rows.append({"Параметр": PARAMETER_LABELS[key], "Значение": json.dumps(value, ensure_ascii=False, default=str)})
     return pd.DataFrame(rows, columns=["Параметр", "Значение"])
 

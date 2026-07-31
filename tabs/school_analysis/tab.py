@@ -345,7 +345,7 @@ def _render_school_semantics(
         detail.assign(**{"Ветвь": branch}) for branch, detail in (branches.dissertation_details.items() if branches else [])
     ], ignore_index=True) if branches and branches.dissertation_details else pd.DataFrame()
     detail_export_mapping = {
-        "candidate_name": "Автор", "title": "Название", "year": "Год", "coverage": "Покрытие",
+        "candidate_name": "Автор", "title": "Название", "year": "Год", "coverage": "Покрытие, %",
         "Тематическое расстояние до профиля поколения": "Расстояние до профиля поколения",
         "Тематическое расстояние до профиля ветви": "Расстояние до профиля ветви",
         "Репрезентативная диссертация": "Репрезентативная диссертация",
@@ -354,6 +354,9 @@ def _render_school_semantics(
     }
     generation_export = pd.DataFrame({label: generation_export[key] for key, label in detail_export_mapping.items() if key in generation_export})
     branch_export = pd.DataFrame({label: branch_export[key] for key, label in detail_export_mapping.items() if key in branch_export})
+    for frame in (generation_export, branch_export):
+        if "Покрытие, %" in frame:
+            frame["Покрытие, %"] *= 100.0
     diagnostics_export = pd.DataFrame({"Диагностика": [
         *heterogeneity.diagnostics, *stored.get("lineage_diagnostics", ()),
         *(generations.diagnostics if generations else ()), *(branches.diagnostics if branches else ()),
@@ -366,7 +369,7 @@ def _render_school_semantics(
     })
     return {
         "semantic_summary": heterogeneity.summary,
-        "semantic_dissertations": heterogeneity.dissertation_distances,
+        "semantic_dissertations": heterogeneity.dissertation_distances.drop(columns=["Code"], errors="ignore"),
         "semantic_generations": generations.summary if generations is not None else pd.DataFrame(),
         "semantic_generation_dissertations": generation_export,
         "semantic_branches": branches.summary if branches is not None else pd.DataFrame(),

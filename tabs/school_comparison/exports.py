@@ -41,19 +41,28 @@ def build_semantic_school_comparison_excel(
     """Создаёт книгу с русскими параметрами, таблицами и диагностикой."""
     parameter_rows = []
     value_labels = {"classifier": "Тематические профили по классификатору", "characteristics": "Векторы характеристик",
-                    "direct": "Прямые ученики", "all": "Все поколения", "selected": "Выбранные разделы"}
+                    "direct": "Прямые ученики", "selected": "Выбранные разделы"}
     for key, value in sorted(parameters.items()):
         if key not in PARAMETERS_RU:
             continue
         if isinstance(value, bool):
             value = "Да" if value else "Нет"
         elif isinstance(value, str):
-            value = value_labels.get(value, value)
+            if key == "sections_mode" and value == "all":
+                value = "Все доступные характеристики"
+            elif key == "scope" and value == "all":
+                value = "Все поколения"
+            else:
+                value = value_labels.get(value, value)
         elif key == "section_keys":
             value = [SECTION_LABELS_RU.get(str(item), str(item)) for item in value]
+        if key == "minimum_coverage" and isinstance(value, (int, float)):
+            value = f"{float(value) * 100:.1f} %"
         parameter_rows.append({"Параметр": PARAMETERS_RU[key], "Значение": json.dumps(value, ensure_ascii=False, default=str)})
     diagnostic_rows = [{"Диагностика": message} for message in result.diagnostics]
-    diagnostic_rows.append({"Диагностика": f"Причина попарного расчёта: {result.pairwise_diagnostics.reason}"})
+    reason_labels = {"ok": "Расчёт выполнен", "item_limit": "Превышен предел числа диссертаций",
+                     "undefined_pairs": "Не определены расстояния для части пар"}
+    diagnostic_rows.append({"Диагностика": f"Причина попарного расчёта: {reason_labels[result.pairwise_diagnostics.reason]}"})
     diagnostic_rows.append({"Диагностика": f"Предел числа диссертаций: {result.pairwise_diagnostics.maximum_pairwise_items}"})
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:

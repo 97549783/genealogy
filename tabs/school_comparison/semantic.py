@@ -82,7 +82,11 @@ def gather_semantic_school_dataset(
     excluded = metadata[~metadata["Code"].isin(included_codes)].copy()
     excluded["Школа"] = root
     excluded = excluded.merge(coverage, on="Code", how="left")
-    excluded["Причина исключения"] = "Недостаточное покрытие выбранных разделов"
+    excluded["Причина исключения"] = np.where(
+        excluded.get("invalid_vector_row_count", 0).fillna(0) > 0,
+        "Недопустимые или нулевые строки векторной матрицы",
+        "Недостаточное покрытие выбранных разделов",
+    )
     return SemanticSchoolDataset(root, all_vectors, vectors, included.reset_index(drop=True), coverage,
                                  excluded.reset_index(drop=True), len(members))
 

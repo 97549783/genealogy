@@ -90,13 +90,14 @@ def build_school_semantic_dataset(
         members, section_index, matrix, selection, normalized,
     )
     metadata = _metadata_for_members(dissertation_metadata, members)
-    included = metadata[metadata["Code"].isin(vectors)].merge(
-        coverage.drop(columns=["eligible"], errors="ignore"), on="Code", how="left",
-    )
     excluded = metadata[~metadata["Code"].isin(vectors)].merge(coverage, on="Code", how="left")
-    excluded["Причина исключения"] = "Недостаточное покрытие выбранных разделов"
+    excluded["Причина исключения"] = np.where(
+        excluded.get("invalid_vector_row_count", 0).fillna(0) > 0,
+        "Недопустимые или нулевые строки векторной матрицы",
+        "Недостаточное покрытие выбранных разделов",
+    )
     return SchoolSemanticDataset(
-        root, vectors, included.reset_index(drop=True), coverage,
+        root, vectors, metadata.reset_index(drop=True), coverage,
         excluded.reset_index(drop=True), len(members),
     )
 
@@ -225,16 +226,22 @@ def _subset_profile(dataset: SchoolSemanticDataset, codes: Collection[str], sele
     return build_school_section_profile(dataset.dissertation_vectors, eligible, selection)[0], eligible
 
 
-def _medoid_for_codes(dataset: SchoolSemanticDataset, codes: set[str], selection: SectionSelection) -> str | None:
-    """Возвращает медоид подмножества, если попарная матрица определена."""
+def _medoid_for_codes(
+    dataset: SchoolSemanticDataset, codes: set[str], selection: SectionSelection,
+) -> tuple[str | None, str | None]:
+    """Возвращает медоид подмножества и различимую причину отказа."""
     ordered = sorted(codes)
     if len(ordered) < 3:
-        return None
-    matrix, _ = composite_distance_matrix(
+        return None, "Недостаточно диссертаций для расчёта медоида."
+    matrix, diagnostics = composite_distance_matrix(
         [dataset.dissertation_vectors[code] for code in ordered], selection,
         get_semantic_analysis_limits().batch_size,
     )
-    return find_medoid(ordered, matrix)[0] if matrix is not None else None
+    if matrix is not None:
+        return find_medoid(ordered, matrix)[0], None
+    if diagnostics.reason == "item_limit":
+        return None, f"Превышен предел попарного анализа: {diagnostics.maximum_pairwise_items}."
+    return None, "Не определены попарные расстояния для расчёта медоида."
 
 
 def compute_generation_semantics(
@@ -262,25 +269,30 @@ def compute_generation_semantics(
             values = [distance_to_profile(dataset.dissertation_vectors[code], profile, selection) for code in eligible]
             finite = [value for value in values if value is not None]
             internal = float(np.mean(finite)) if finite else None
-            medoid = _medoid_for_codes(dataset, eligible, selection)
+            medoid, medoid_diagnostic = _medoid_for_codes(dataset, eligible, selection)
+            if medoid_diagnostic:
+                diagnostics.append(f"Поколение {generation}: {medoid_diagnostic}")
             if len(eligible) < 5:
                 diagnostics.append(f"Для поколения {generation} количественные выводы требуют осторожности: доступно менее пяти диссертаций.")
         elif eligible:
             diagnostics.append(f"Для поколения {generation} недостаточно данных для интерпретации неоднородности и медоида.")
+        else:
+            diagnostics.append(f"Для поколения {generation} отсутствует профиль с достаточным покрытием.")
         continuity = composite_similarity(profiles[previous], profile, selection) if previous is not None else None
         first_similarity = composite_similarity(profiles[first_generation], profile, selection) if first_generation is not None else None
         school_similarity = composite_similarity(profile, overall, selection)
         generation_members = {str(code) for code in generation_codes[generation]}
         detail = _metadata_for_members(dataset.metadata, generation_members)
-        detail = detail.merge(dataset.coverage[["Code", "coverage", "eligible"]], on="Code", how="left")
+        detail = detail.merge(dataset.coverage[["Code", "coverage", "eligible", "invalid_vector_row_count"]], on="Code", how="left")
         detail["Тематическое расстояние до профиля поколения"] = detail["Code"].map(
             lambda code: distance_to_profile(dataset.dissertation_vectors[code], profile, selection)
             if code in dataset.dissertation_vectors else None
         )
         detail["Репрезентативная диссертация"] = detail["Code"].eq(medoid)
-        detail["Причина исключения"] = np.where(
-            detail["Code"].isin(eligible), None, "Недостаточное покрытие выбранных разделов",
-        )
+        detail["Причина исключения"] = np.where(detail["Code"].isin(eligible), None, np.where(
+            detail["invalid_vector_row_count"].fillna(0) > 0,
+            "Недопустимые или нулевые строки векторной матрицы", "Недостаточное покрытие выбранных разделов",
+        ))
         details[generation] = detail
         coverage_values = [float(coverage_index.loc[code, "coverage"]) for code in generation_members
                            if not coverage_index.empty and code in coverage_index.index]
@@ -327,6 +339,7 @@ def compute_branch_semantics(
     )
     rows = []
     details: dict[str, pd.DataFrame] = {}
+    diagnostics: list[str] = []
     coverage_index = dataset.coverage.set_index("Code") if not dataset.coverage.empty else pd.DataFrame()
     for branch in branch_codes:
         eligible = eligible_by_branch[branch]
@@ -334,22 +347,31 @@ def compute_branch_semantics(
         distances = [(code, distance_to_profile(dataset.dissertation_vectors[code], profile, selection)) for code in eligible]
         finite = [(code, value) for code, value in distances if value is not None]
         heterogeneity = float(np.mean([value for _, value in finite])) if len(finite) >= 3 else None
-        medoid = _medoid_for_codes(dataset, eligible, selection)
+        medoid, medoid_diagnostic = _medoid_for_codes(dataset, eligible, selection)
+        if not profile:
+            diagnostics_message = f"Ветвь «{branch}»: отсутствует профиль с достаточным покрытием."
+        elif medoid_diagnostic and len(eligible) >= 3:
+            diagnostics_message = f"Ветвь «{branch}»: {medoid_diagnostic}"
+        else:
+            diagnostics_message = None
         farthest = max(finite, key=lambda item: item[1])[0] if finite else None
-        generations = dataset.metadata.loc[dataset.metadata["Code"].isin(eligible), "Поколение"] if "Поколение" in dataset.metadata else pd.Series(dtype=float)
+        generations = dataset.metadata.loc[
+            dataset.metadata["Code"].isin({str(code) for code in branch_codes[branch]}), "Поколение"
+        ] if "Поколение" in dataset.metadata else pd.Series(dtype=float)
         coverage_values = [float(coverage_index.loc[code, "coverage"]) for code in branch_codes[branch]
                            if not coverage_index.empty and code in coverage_index.index]
         detail = _metadata_for_members(dataset.metadata, {str(code) for code in branch_codes[branch]})
-        detail = detail.merge(dataset.coverage[["Code", "coverage", "eligible"]], on="Code", how="left")
+        detail = detail.merge(dataset.coverage[["Code", "coverage", "eligible", "invalid_vector_row_count"]], on="Code", how="left")
         detail["Тематическое расстояние до профиля ветви"] = detail["Code"].map(
             lambda code: distance_to_profile(dataset.dissertation_vectors[code], profile, selection)
             if code in dataset.dissertation_vectors else None
         )
         detail["Репрезентативная диссертация"] = detail["Code"].eq(medoid)
         detail["Наиболее удалённая диссертация"] = detail["Code"].eq(farthest)
-        detail["Причина исключения"] = np.where(
-            detail["Code"].isin(eligible), None, "Недостаточное покрытие выбранных разделов",
-        )
+        detail["Причина исключения"] = np.where(detail["Code"].isin(eligible), None, np.where(
+            detail["invalid_vector_row_count"].fillna(0) > 0,
+            "Недопустимые или нулевые строки векторной матрицы", "Недостаточное покрытие выбранных разделов",
+        ))
         details[branch] = detail
         rows.append({
             "Ветвь": branch, "Всего диссертаций": len(branch_codes[branch]),
@@ -361,6 +383,8 @@ def compute_branch_semantics(
             "Репрезентативная диссертация": _representative_label(dataset, medoid),
             "Наиболее удалённая диссертация": _representative_label(dataset, farthest),
         })
+        if diagnostics_message:
+            diagnostics.append(diagnostics_message)
     branches = list(branch_codes)
     similarity = pd.DataFrame(index=branches, columns=branches, dtype=float)
     for left in branches:
@@ -372,7 +396,7 @@ def compute_branch_semantics(
     }
     included = {branch: codes for branch, codes in unique_by_branch.items() if len(codes) >= 3}
     silhouette_overall = None
-    silhouette_rows, sample_rows, diagnostics = [], [], []
+    silhouette_rows, sample_rows = [], []
     if len(included) >= 2:
         items, labels, sample_codes = [], [], []
         included_branches = list(included)

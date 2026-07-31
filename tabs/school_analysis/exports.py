@@ -15,6 +15,18 @@ def _safe_sheet_name(prefix: str, label: str) -> str:
     return name[:31]
 
 
+def _localized_semantic_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Удаляет технические поля и приводит покрытие к процентам."""
+    result = frame.drop(columns=["Code", "eligible", "invalid_vector_row_count"], errors="ignore").rename(columns={
+        "candidate_name": "Автор", "title": "Название", "year": "Год",
+        "coverage": "Покрытие, %", "available_section_count": "Доступно разделов",
+        "selected_section_count": "Выбрано разделов",
+    }).copy()
+    if "Покрытие, %" in result:
+        result["Покрытие, %"] = pd.to_numeric(result["Покрытие, %"], errors="coerce") * 100.0
+    return result
+
+
 def build_excel_report(
     metrics_df: pd.DataFrame,
     generations_df: pd.DataFrame,
@@ -109,6 +121,6 @@ def build_excel_report(
         )
         for semantic_df, sheet_name in semantic_sheets:
             if semantic_df is not None and not semantic_df.empty:
-                semantic_df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+                _localized_semantic_frame(semantic_df).to_excel(writer, index=False, sheet_name=sheet_name[:31])
 
     return buf.getvalue()
