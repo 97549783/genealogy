@@ -45,3 +45,30 @@ def test_no_common_section_makes_pairwise_distance_undefined() -> None:
     matrix, diagnostics = composite_distance_matrix([left, right], selection, 1)
     assert matrix is None
     assert diagnostics.undefined_pair_count == 1
+    assert diagnostics.reason == "undefined_pairs"
+
+
+def test_pairwise_limit_has_explicit_reason(monkeypatch) -> None:
+    monkeypatch.setenv("SEMANTIC_MAX_PAIRWISE_ITEMS", "1")
+    selection = build_section_selection("selected", ["research_goal"])
+    matrix, diagnostics = composite_distance_matrix([
+        {"research_goal": np.array([1, 0])}, {"research_goal": np.array([0, 1])},
+    ], selection, 1)
+    assert matrix is None
+    assert diagnostics.reason == "item_limit"
+    assert diagnostics.maximum_pairwise_items == 1
+
+
+def test_block_pairwise_matches_scalar_reference() -> None:
+    selection = build_section_selection(
+        "selected", ["research_goal", "research_methods"],
+        {"research_goal": 2, "research_methods": 1},
+    )
+    items = [
+        {"research_goal": np.array([1, 0]), "research_methods": np.array([0, 1])},
+        {"research_goal": np.array([1, 1]), "research_methods": np.array([1, 0])},
+    ]
+    matrix, diagnostics = composite_distance_matrix(items, selection, 1)
+    expected = 1 - composite_similarity(items[0], items[1], selection)
+    assert diagnostics.reason == "ok"
+    assert np.isclose(matrix[0, 1], expected)

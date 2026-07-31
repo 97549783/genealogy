@@ -279,6 +279,21 @@ def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
     st.markdown(f"**Модель:** `{metadata.model_name}` · **Размерность:** {metadata.dimensions} · **Нормализация:** {'да' if metadata.normalized else 'нет'}")
     for diagnostic in result.diagnostics:
         st.error(diagnostic)
+    st.markdown("### Сводка по научным школам")
+    st.dataframe(result.school_summary, use_container_width=True, hide_index=True)
+    st.markdown("### Различимость по разделам характеристик")
+    st.dataframe(result.per_section_silhouette, use_container_width=True, hide_index=True)
+    if not result.excluded_dissertations.empty:
+        excluded = result.excluded_dissertations
+        excluded_display = pd.DataFrame({
+            "Научная школа": excluded.get("Школа"), "Автор": excluded.get("candidate_name"),
+            "Название": excluded.get("title"), "Год": excluded.get("year"),
+            "Отрасль науки": excluded.get("degree.science_field", excluded.get("science_field")),
+            "Полнота характеристик, %": excluded.get("coverage", pd.Series(dtype=float)) * 100,
+            "Причина исключения": excluded.get("Причина исключения"),
+        })
+        with st.expander("Исключённые диссертации"):
+            st.dataframe(excluded_display, use_container_width=True, hide_index=True)
     if result.overall_silhouette is None:
         return
     st.metric("Общий коэффициент силуэта", f"{result.overall_silhouette:.3f}")
@@ -293,16 +308,16 @@ def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
     )
     st.pyplot(fig)
     plt.close(fig)
-    st.markdown("### Сводка по научным школам")
-    st.dataframe(result.school_summary, use_container_width=True, hide_index=True)
-    st.markdown("### Различимость по разделам характеристик")
-    st.dataframe(result.per_section_silhouette, use_container_width=True, hide_index=True)
     negative = result.dissertation_silhouettes[result.dissertation_silhouettes["Коэффициент силуэта"] < 0]
+    negative_display = pd.DataFrame({
+        "Научная школа": negative.get("Школа"), "Автор": negative.get("candidate_name"),
+        "Название": negative.get("title"), "Год": negative.get("year"),
+        "Отрасль науки": negative.get("degree.science_field", negative.get("science_field")),
+        "Полнота характеристик, %": negative.get("coverage", pd.Series(dtype=float)) * 100,
+        "Коэффициент силуэта": negative.get("Коэффициент силуэта"),
+    })
     st.markdown("### Диссертации с отрицательным коэффициентом силуэта")
-    st.dataframe(negative, use_container_width=True, hide_index=True)
-    if not result.excluded_dissertations.empty:
-        with st.expander("Исключённые диссертации"):
-            st.dataframe(result.excluded_dissertations, use_container_width=True, hide_index=True)
+    st.dataframe(negative_display, use_container_width=True, hide_index=True)
     from .exports import build_semantic_school_comparison_excel
     excel = build_semantic_school_comparison_excel(result, stored["signature"])
     st.download_button(

@@ -46,7 +46,10 @@ def find_medoid(codes: Sequence[str], distance_matrix: np.ndarray) -> tuple[str,
     matrix = np.array(distance_matrix, dtype=np.float64, copy=True)
     if matrix.shape != (len(codes), len(codes)) or not codes or not np.all(np.isfinite(matrix)):
         raise ValueError("Матрица расстояний не соответствует списку диссертаций.")
-    means = matrix.mean(axis=1)
+    np.fill_diagonal(matrix, 0.0)
+    if len(codes) == 1:
+        return str(codes[0]), 0.0
+    means = matrix.sum(axis=1) / (len(codes) - 1)
     index = int(np.argmin(means))
     return str(codes[index]), float(means[index])
 
@@ -87,7 +90,7 @@ def compute_precomputed_silhouette(
     distance_matrix: np.ndarray, labels: Sequence[int]
 ) -> tuple[float, np.ndarray]:
     """Вычисляет общий и пообъектный силуэт для готовых расстояний."""
-    matrix = np.asarray(distance_matrix, dtype=np.float64)
+    matrix = np.array(distance_matrix, dtype=np.float64, copy=True)
     label_values = np.asarray(labels)
     if matrix.shape != (len(label_values), len(label_values)) or not np.all(np.isfinite(matrix)):
         raise ValueError("Матрица расстояний имеет неверный размер или содержит недопустимые значения.")

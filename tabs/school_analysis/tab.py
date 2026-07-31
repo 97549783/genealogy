@@ -28,7 +28,7 @@ from core.ui.filters import (
 )
 
 from core.lineage.graph import lineage, rows_for
-from core.lineage.membership import get_school_branch_codes, get_school_generation_codes
+from core.lineage.membership import get_school_branch_traversal, get_school_generation_traversal
 from core.semantic.models import build_section_selection
 from core.ui.links import share_params_button
 from core.ui.table_display import build_dissertation_result_signature, render_dissertations_widget
@@ -168,12 +168,14 @@ def _render_school_semantics(
             generation_codes = {}
             branch_codes = {}
             if scope == "all":
-                generation_codes = get_school_generation_codes(
+                generation_traversal = get_school_generation_traversal(
                     working_df, working_idx, root, db_signature, context_key=lineage_context_key,
                 )
-                branch_codes = get_school_branch_codes(
+                branch_traversal = get_school_branch_traversal(
                     working_df, working_idx, root, db_signature, context_key=lineage_context_key,
                 )
+                generation_codes = generation_traversal.groups
+                branch_codes = branch_traversal.groups
                 generation_by_code = {code: generation for generation, codes in generation_codes.items() for code in codes}
                 dissertation_metadata["Поколение"] = dissertation_metadata["Code"].astype(str).map(generation_by_code)
             dataset = build_school_semantic_dataset(
@@ -183,8 +185,14 @@ def _render_school_semantics(
             )
             center = compute_school_semantic_center(dataset, selection)
             heterogeneity = compute_school_heterogeneity(dataset, center, selection)
-            generations = compute_generation_semantics(dataset, generation_codes, selection) if scope == "all" else None
-            branches = compute_branch_semantics(dataset, branch_codes, selection) if scope == "all" else None
+            if scope == "all":
+                with perf_timer("semantic.analysis.generations"):
+                    generations = compute_generation_semantics(dataset, generation_codes, selection)
+                with perf_timer("semantic.analysis.branches"):
+                    branches = compute_branch_semantics(dataset, branch_codes, selection)
+            else:
+                generations = None
+                branches = None
         except Exception:
             st.error("Не удалось рассчитать семантическую структуру научной школы.")
             return {}
@@ -196,6 +204,7 @@ def _render_school_semantics(
         st.session_state[state_key] = {
             "signature": complete_signature, "metadata": metadata, "dataset": dataset,
             "heterogeneity": heterogeneity, "generations": generations, "branches": branches,
+            "lineage_diagnostics": tuple((*generation_traversal.diagnostics, *branch_traversal.diagnostics)) if scope == "all" else (),
         }
     stored = st.session_state.get(state_key)
     if stored is None:
@@ -222,6 +231,8 @@ def _render_school_semantics(
     st.dataframe(heterogeneity.summary, use_container_width=True, hide_index=True)
     for diagnostic in heterogeneity.diagnostics:
         st.warning(diagnostic)
+    for diagnostic in stored.get("lineage_diagnostics", ()):
+        st.warning(diagnostic)
     if heterogeneity.medoid_code:
         st.markdown("#### Наиболее репрезентативная диссертация")
         representative = subset[subset["Code"].astype(str) == heterogeneity.medoid_code]
@@ -245,6 +256,26 @@ def _render_school_semantics(
         st.dataframe(generations.summary, use_container_width=True, hide_index=True)
         for diagnostic in generations.diagnostics:
             st.caption(diagnostic)
+        for generation, detail in generations.dissertation_details.items():
+            with st.expander(f"Поколение {generation}: диссертации"):
+                display = pd.DataFrame({
+                    "Автор": detail.get("candidate_name"), "Название": detail.get("title"),
+                    "Год": detail.get("year"),
+                    "Полнота характеристик, %": detail.get("coverage", pd.Series(dtype=float)) * 100,
+                    "Расстояние до профиля поколения": detail.get("Тематическое расстояние до профиля поколения"),
+                    "Репрезентативная диссертация": detail.get("Репрезентативная диссертация"),
+                    "Причина исключения": detail.get("Причина исключения"),
+                })
+                st.dataframe(display, use_container_width=True, hide_index=True)
+                medoid_codes = detail.loc[detail.get("Репрезентативная диссертация", False) == True, "Code"] if "Code" in detail else pd.Series(dtype=str)
+                representative = subset[subset["Code"].astype(str).isin(medoid_codes.astype(str))]
+                if not representative.empty:
+                    render_dissertations_widget(
+                        subset=representative, key=f"school_analysis_generation_medoid_{generation}",
+                        title="Репрезентативная диссертация поколения", expanded=False,
+                        file_name_prefix=f"репрезентативная_диссертация_поколения_{generation}",
+                        result_signature=build_dissertation_result_signature(representative, context_parts=(stored["signature"], generation)),
+                    )
         if not generations.summary.empty:
             chart = generations.summary.set_index("Поколение")[[
                 "Расстояние от первого поколения", "Тематическая неоднородность",
@@ -253,6 +284,29 @@ def _render_school_semantics(
     if scope == "all" and branches is not None:
         st.markdown("#### Естественные генеалогические ветви")
         st.dataframe(branches.summary, use_container_width=True, hide_index=True)
+        for branch, detail in branches.dissertation_details.items():
+            with st.expander(f"Ветвь «{branch}»: диссертации"):
+                display = pd.DataFrame({
+                    "Автор": detail.get("candidate_name"), "Название": detail.get("title"), "Год": detail.get("year"),
+                    "Полнота характеристик, %": detail.get("coverage", pd.Series(dtype=float)) * 100,
+                    "Расстояние до профиля ветви": detail.get("Тематическое расстояние до профиля ветви"),
+                    "Репрезентативная диссертация": detail.get("Репрезентативная диссертация"),
+                    "Наиболее удалённая диссертация": detail.get("Наиболее удалённая диссертация"),
+                    "Причина исключения": detail.get("Причина исключения"),
+                })
+                st.dataframe(display, use_container_width=True, hide_index=True)
+                special = detail[
+                    detail.get("Репрезентативная диссертация", False).fillna(False)
+                    | detail.get("Наиболее удалённая диссертация", False).fillna(False)
+                ] if "Репрезентативная диссертация" in detail else pd.DataFrame()
+                linked = subset[subset["Code"].astype(str).isin(special.get("Code", pd.Series(dtype=str)).astype(str))]
+                if not linked.empty:
+                    render_dissertations_widget(
+                        subset=linked, key=f"school_analysis_branch_works_{abs(hash(branch))}",
+                        title="Репрезентативная и наиболее удалённая диссертации", expanded=False,
+                        file_name_prefix="диссертации_ветви",
+                        result_signature=build_dissertation_result_signature(linked, context_parts=(stored["signature"], branch)),
+                    )
         st.markdown("##### Сходство ветвей")
         st.dataframe(branches.similarity_matrix, use_container_width=True, hide_index=True)
         st.caption("Для силуэта ветвей диссертации с несколькими ветвями исключаются, поскольку каждой работе требуется единственная метка.")
@@ -272,22 +326,56 @@ def _render_school_semantics(
         for diagnostic in branches.diagnostics:
             st.warning(diagnostic)
         if not branches.ambiguous_dissertations.empty:
+            st.metric("Неоднозначно назначенных диссертаций", len(branches.ambiguous_dissertations))
             with st.expander("Неоднозначно назначенные диссертации"):
-                st.dataframe(branches.ambiguous_dissertations, use_container_width=True, hide_index=True)
+                st.dataframe(branches.ambiguous_dissertations.drop(columns=["Code"], errors="ignore"), use_container_width=True, hide_index=True)
     if not dataset.excluded.empty:
         with st.expander("Исключённые из семантического анализа диссертации"):
-            st.dataframe(dataset.excluded, use_container_width=True, hide_index=True)
+            excluded_display = pd.DataFrame({
+                "Автор": dataset.excluded.get("candidate_name"), "Название": dataset.excluded.get("title"),
+                "Год": dataset.excluded.get("year"),
+                "Полнота характеристик, %": dataset.excluded.get("coverage", pd.Series(dtype=float)) * 100,
+                "Причина исключения": dataset.excluded.get("Причина исключения"),
+            })
+            st.dataframe(excluded_display, use_container_width=True, hide_index=True)
+    generation_export = pd.concat([
+        detail.assign(**{"Поколение": generation}) for generation, detail in (generations.dissertation_details.items() if generations else [])
+    ], ignore_index=True) if generations and generations.dissertation_details else pd.DataFrame()
+    branch_export = pd.concat([
+        detail.assign(**{"Ветвь": branch}) for branch, detail in (branches.dissertation_details.items() if branches else [])
+    ], ignore_index=True) if branches and branches.dissertation_details else pd.DataFrame()
+    detail_export_mapping = {
+        "candidate_name": "Автор", "title": "Название", "year": "Год", "coverage": "Покрытие",
+        "Тематическое расстояние до профиля поколения": "Расстояние до профиля поколения",
+        "Тематическое расстояние до профиля ветви": "Расстояние до профиля ветви",
+        "Репрезентативная диссертация": "Репрезентативная диссертация",
+        "Наиболее удалённая диссертация": "Наиболее удалённая диссертация",
+        "Причина исключения": "Причина исключения", "Поколение": "Поколение", "Ветвь": "Ветвь",
+    }
+    generation_export = pd.DataFrame({label: generation_export[key] for key, label in detail_export_mapping.items() if key in generation_export})
+    branch_export = pd.DataFrame({label: branch_export[key] for key, label in detail_export_mapping.items() if key in branch_export})
+    diagnostics_export = pd.DataFrame({"Диагностика": [
+        *heterogeneity.diagnostics, *stored.get("lineage_diagnostics", ()),
+        *(generations.diagnostics if generations else ()), *(branches.diagnostics if branches else ()),
+    ]})
+    excluded_export = pd.DataFrame({
+        "Автор": dataset.excluded.get("candidate_name"), "Название": dataset.excluded.get("title"),
+        "Год": dataset.excluded.get("year"),
+        "Покрытие, %": dataset.excluded.get("coverage", pd.Series(dtype=float)) * 100,
+        "Причина исключения": dataset.excluded.get("Причина исключения"),
+    })
     return {
         "semantic_summary": heterogeneity.summary,
         "semantic_dissertations": heterogeneity.dissertation_distances,
         "semantic_generations": generations.summary if generations is not None else pd.DataFrame(),
+        "semantic_generation_dissertations": generation_export,
         "semantic_branches": branches.summary if branches is not None else pd.DataFrame(),
+        "semantic_branch_dissertations": branch_export,
         "semantic_branch_similarity": branches.similarity_matrix if branches is not None else pd.DataFrame(),
         "semantic_branch_silhouette": branches.silhouette_by_branch if branches is not None else pd.DataFrame(),
-        "semantic_excluded": pd.concat([
-            dataset.excluded,
-            branches.ambiguous_dissertations if branches is not None else pd.DataFrame(),
-        ], ignore_index=True),
+        "semantic_ambiguous": branches.ambiguous_dissertations.drop(columns=["Code"], errors="ignore") if branches is not None else pd.DataFrame(),
+        "semantic_excluded": excluded_export,
+        "semantic_diagnostics": diagnostics_export,
     }
 
 

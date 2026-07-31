@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import numpy as np
 
 import pandas as pd
 
@@ -21,6 +23,10 @@ from core.semantic.school_profiles import (
     aggregate_query_scores_by_school, build_school_section_profile, rank_similar_schools,
 )
 from core.semantic.section_vectors import build_dissertation_section_vectors, score_dissertations_against_query
+from core.semantic.distances import distance_to_profile, find_medoid
+from core.semantic.section_vectors import composite_distance_matrix, composite_similarity
+from core.perf import perf_timer
+from tabs.dissertation_characteristics.labels import SECTION_LABELS_RU
 from tabs.dissertation_characteristics.search import load_dissertation_embedding_matrix
 
 
@@ -46,6 +52,7 @@ class SimilarSchoolResult:
     selection: SectionSelection
     vector_metadata: VectorMetadata | None
     parameters: dict[str, object]
+    section_similarities: dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
 def _filtered_codes(
@@ -74,13 +81,16 @@ def _filtered_codes(
 
 def _parameters(
     *, selection: SectionSelection, metadata: VectorMetadata | None,
-    db_signature: object, values: dict[str, object],
+    db_signature: object, main_db_signature: object,
+    lineage_context_key: object, values: dict[str, object],
 ) -> dict[str, object]:
     """Формирует полную подпись входов для экспорта и кэширования."""
     return {
         **values, "section_mode": selection.mode, "section_keys": selection.section_keys,
         "section_weights": selection.weights, "minimum_coverage": selection.min_coverage,
         "section_database_signature": db_signature,
+        "main_database_signature": main_db_signature,
+        "lineage_context_key": lineage_context_key,
         "model_name": metadata.model_name if metadata else None,
         "normalized": metadata.normalized if metadata else None,
         "matrix_signature": metadata.matrix_signature if metadata else None,
@@ -92,6 +102,7 @@ def search_schools_by_semantic_query(
     lineage_context_key: LineageContextKey, scope: SemanticScope,
     selection: SectionSelection, ranking_config: QueryRankingConfig, top_n: int,
     year_from: int | None, year_to: int | None, degree_levels: Collection[str],
+    main_db_signature: object | None = None,
 ) -> SemanticSchoolQueryResult:
     """Выполняет полный поиск школ по одному–пяти запросам."""
     prepared = prepare_queries(queries, "")
@@ -108,14 +119,17 @@ def search_schools_by_semantic_query(
         "top_n": top_n, "year_from": year_from, "year_to": year_to,
         "degree_levels": tuple(sorted(str(value) for value in degree_levels)),
     }
-    parameters = _parameters(selection=selection, metadata=metadata, db_signature=db_signature, values=base_values)
+    main_signature = main_db_signature if main_db_signature is not None else lineage_context_key[0]
+    parameters = _parameters(selection=selection, metadata=metadata, db_signature=db_signature,
+                             main_db_signature=main_signature, lineage_context_key=lineage_context_key, values=base_values)
     if metadata is None:
         return SemanticSchoolQueryResult(pd.DataFrame(), {}, ("Матрица векторов недоступна или имеет неверный формат.",), selection, None, parameters)
     allowed = _filtered_codes(df, year_from, year_to, degree_levels)
     if not allowed:
         return SemanticSchoolQueryResult(pd.DataFrame(), {}, ("После применения фильтров не осталось диссертаций.",), selection, metadata, parameters)
     try:
-        query_vectors = encode_queries(prepared, metadata.model_name, metadata.normalized, get_query_encoder_device())
+        with perf_timer("semantic.query.encode"):
+            query_vectors = encode_queries(prepared, metadata.model_name, metadata.normalized, get_query_encoder_device())
     except Exception:
         return SemanticSchoolQueryResult(pd.DataFrame(), {}, ("Не удалось загрузить модель кодирования запросов.",), selection, metadata, parameters)
     query = combine_query_vectors(query_vectors)
@@ -126,13 +140,27 @@ def search_schools_by_semantic_query(
     section_index = load_dissertation_section_index_for_selection(
         allowed_codes=allowed, section_keys=selection.section_keys, include_text=False,
     )
-    scores = score_dissertations_against_query(
-        query, section_index, matrix, selection, metadata.normalized,
-        get_semantic_analysis_limits().batch_size,
-    )
+    with perf_timer("semantic.query.score_sections"):
+        scores = score_dissertations_against_query(
+            query, section_index, matrix, selection, metadata.normalized,
+            get_semantic_analysis_limits().batch_size,
+        )
+    with perf_timer("semantic.query.aggregate_dissertations"):
+        scores = scores.copy()
+    display_columns = [column for column in (
+        "Code", "candidate_name", "title", "year", "degree.degree_level",
+        "science_field", "degree.science_field",
+    ) if column in df.columns]
+    if display_columns:
+        metadata_frame = df[display_columns].copy().drop_duplicates("Code", keep="first")
+        metadata_frame["Code"] = metadata_frame["Code"].astype(str)
+        scores = scores.merge(metadata_frame, on="Code", how="left")
     school_codes = get_all_school_member_codes(df, idx, scope, lineage_context_key[0], context_key=lineage_context_key)
     stats = get_school_basic_stats(df, idx, scope, lineage_context_key[0], context_key=lineage_context_key)
-    summary, details = aggregate_query_scores_by_school(scores, school_codes, stats, ranking_config, top_n)
+    for root, root_stats in stats.items():
+        root_stats["filtered_members"] = len(set(school_codes.get(root, set())) & allowed)
+    with perf_timer("semantic.query.aggregate_schools"):
+        summary, details = aggregate_query_scores_by_school(scores, school_codes, stats, ranking_config, top_n)
     diagnostics = () if not summary.empty else ("Научные школы с достаточным покрытием не найдены.",)
     return SemanticSchoolQueryResult(summary, details, diagnostics, selection, metadata, parameters)
 
@@ -143,6 +171,7 @@ def search_similar_scientific_schools(
     selection: SectionSelection, minimum_school_size: int,
     minimum_profiled_dissertations: int, top_n: int, hide_near_duplicates: bool,
     near_duplicate_jaccard: float,
+    main_db_signature: object | None = None,
 ) -> SimilarSchoolResult:
     """Ищет школы по сходству отдельных центров характеристик."""
     db_signature = get_dissertation_sections_db_signature()
@@ -152,7 +181,9 @@ def search_similar_scientific_schools(
         "minimum_profiled_dissertations": minimum_profiled_dissertations, "top_n": top_n,
         "hide_near_duplicates": hide_near_duplicates, "near_duplicate_jaccard": near_duplicate_jaccard,
     }
-    parameters = _parameters(selection=selection, metadata=metadata, db_signature=db_signature, values=values)
+    main_signature = main_db_signature if main_db_signature is not None else lineage_context_key[0]
+    parameters = _parameters(selection=selection, metadata=metadata, db_signature=db_signature,
+                             main_db_signature=main_signature, lineage_context_key=lineage_context_key, values=values)
     if metadata is None:
         return SimilarSchoolResult(pd.DataFrame(), {}, ("Матрица векторов недоступна или имеет неверный формат.",), selection, None, parameters)
     codes_by_root = get_all_school_member_codes(df, idx, scope, lineage_context_key[0], context_key=lineage_context_key)
@@ -175,16 +206,20 @@ def search_similar_scientific_schools(
             pd.DataFrame(), {}, ("В исходной школе недостаточно диссертаций с требуемым покрытием.",),
             selection, metadata, parameters,
         )
-    source_profile = build_school_section_profile(source_vectors, codes_by_root[source_root], selection)
+    with perf_timer("semantic.similar.build_source_profile"):
+        source_profile = build_school_section_profile(source_vectors, codes_by_root[source_root], selection)
+    source_centroids, source_info = source_profile
     batch_size = get_semantic_analysis_limits().school_batch_size
     batches: list[pd.DataFrame] = []
+    section_explanations: dict[str, pd.DataFrame] = {}
+    dissertation_explanations: dict[str, pd.DataFrame] = {}
     for start in range(0, len(eligible_roots), batch_size):
         roots = eligible_roots[start:start + batch_size]
         batch_codes = set().union(*(codes_by_root[root] for root in roots)) if roots else set()
         batch_index = load_dissertation_section_index_for_selection(
             allowed_codes=batch_codes, section_keys=selection.section_keys, include_text=False,
         )
-        batch_vectors, _ = build_dissertation_section_vectors(
+        batch_vectors, batch_coverage = build_dissertation_section_vectors(
             batch_codes, batch_index, matrix, selection, metadata.normalized,
         )
 
@@ -196,10 +231,45 @@ def search_similar_scientific_schools(
 
         profiled_roots = [root for root in roots
                           if sum(code in batch_vectors for code in codes_by_root[root]) >= minimum_profiled_dissertations]
-        part = rank_similar_schools(
-            source_root, codes_by_root[source_root], profiled_roots, codes_by_root, builder,
-            selection, top_n, hide_near_duplicates, near_duplicate_jaccard,
-        )
+        with perf_timer("semantic.similar.rank_school_batch"):
+            part = rank_similar_schools(
+                source_root, codes_by_root[source_root], profiled_roots, codes_by_root, builder,
+                selection, top_n, hide_near_duplicates, near_duplicate_jaccard,
+            )
+        for candidate in part.get("root", pd.Series(dtype=str)):
+            candidate_profile, candidate_info = builder(candidate, codes_by_root[candidate])
+            common_rows = []
+            for key in selection.section_keys:
+                if key in source_centroids and key in candidate_profile:
+                    similarity = composite_similarity({key: source_centroids[key]}, {key: candidate_profile[key]}, selection)
+                    common_rows.append({
+                        "Раздел характеристики": SECTION_LABELS_RU[key],
+                        "Покрытие исходной школы, %": source_info["section_coverage"].get(key, 0.0) * 100,
+                        "Покрытие найденной школы, %": candidate_info["section_coverage"].get(key, 0.0) * 100,
+                        "Сходство центроидов": similarity,
+                    })
+            section_explanations[candidate] = pd.DataFrame(common_rows)
+            candidate_codes = sorted(set(codes_by_root[candidate]) & set(batch_vectors))
+            distances = [distance_to_profile(batch_vectors[code], source_centroids, selection) for code in candidate_codes]
+            detail = pd.DataFrame({"Code": candidate_codes, "distance_to_source": distances})
+            coverage_map = {
+                str(row.Code): row.coverage for row in batch_coverage.itertuples(index=False)
+                if str(row.Code) in candidate_codes
+            }
+            detail["coverage"] = detail["Code"].map(coverage_map)
+            if candidate_codes:
+                candidate_matrix, _ = composite_distance_matrix(
+                    [batch_vectors[code] for code in candidate_codes], selection,
+                    get_semantic_analysis_limits().batch_size,
+                )
+                medoid = find_medoid(candidate_codes, candidate_matrix)[0] if candidate_matrix is not None else None
+                detail["representative"] = detail["Code"].eq(medoid)
+            metadata_columns = [column for column in ("Code", "candidate_name", "title", "year") if column in df.columns]
+            if metadata_columns:
+                meta = df[metadata_columns].copy().drop_duplicates("Code", keep="first")
+                meta["Code"] = meta["Code"].astype(str)
+                detail = detail.merge(meta, on="Code", how="left")
+            dissertation_explanations[candidate] = detail.sort_values("distance_to_source", na_position="last").reset_index(drop=True)
         if not part.empty:
             batches.append(part)
     summary = pd.concat(batches, ignore_index=True) if batches else pd.DataFrame()
@@ -213,4 +283,9 @@ def search_similar_scientific_schools(
     if not summary.empty:
         summary["year_range"] = summary["root"].map(lambda root: stats.get(root, {}).get("year_range", "—"))
     diagnostics = () if not summary.empty else ("Похожие научные школы с достаточным покрытием не найдены.",)
-    return SimilarSchoolResult(summary, {}, diagnostics, selection, metadata, parameters)
+    returned_roots = set(summary.get("root", pd.Series(dtype=str)))
+    return SimilarSchoolResult(
+        summary, {root: dissertation_explanations[root] for root in returned_roots if root in dissertation_explanations},
+        diagnostics, selection, metadata, parameters,
+        {root: section_explanations[root] for root in returned_roots if root in section_explanations},
+    )

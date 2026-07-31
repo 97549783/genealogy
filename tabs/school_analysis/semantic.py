@@ -10,12 +10,13 @@ import pandas as pd
 
 from core.semantic.distances import (
     categorize_distances, compute_precomputed_silhouette, distance_to_profile,
-    find_medoid, summarize_heterogeneity,
+    find_medoid, get_semantic_analysis_limits, summarize_heterogeneity,
 )
 from core.semantic.models import PairwiseDistanceDiagnostics, SectionSelection
 from core.semantic.school_profiles import build_school_section_profile
 from core.semantic.section_vectors import composite_distance_matrix, composite_similarity, build_dissertation_section_vectors
 from tabs.dissertation_characteristics.labels import SECTION_LABELS_RU
+from core.perf import perf_timer
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class BranchSemanticResult:
     silhouette_overall: float | None
     silhouette_by_branch: pd.DataFrame
     dissertation_silhouettes: pd.DataFrame
+    dissertation_details: dict[str, pd.DataFrame]
     ambiguous_dissertations: pd.DataFrame
     diagnostics: tuple[str, ...]
 
@@ -103,9 +105,10 @@ def compute_school_semantic_center(
     dataset: SchoolSemanticDataset, selection: SectionSelection,
 ) -> dict[str, np.ndarray]:
     """Вычисляет нормализованный центр школы отдельно для каждого раздела."""
-    profile, _ = build_school_section_profile(
-        dataset.dissertation_vectors, dataset.dissertation_vectors.keys(), selection,
-    )
+    with perf_timer("semantic.analysis.build_center"):
+        profile, _ = build_school_section_profile(
+            dataset.dissertation_vectors, dataset.dissertation_vectors.keys(), selection,
+        )
     return profile
 
 
@@ -170,7 +173,12 @@ def compute_school_heterogeneity(
             "Наиболее близкий раздел": closest, "Наиболее отличающийся раздел": different,
             "Code": code,
         })
-    distance_table = pd.DataFrame(rows)
+    distance_columns = [
+        "Автор", "Название", "Год", "Поколение", "Тематическое расстояние до центра",
+        "Категория", "Полнота характеристик, %", "Наиболее близкий раздел",
+        "Наиболее отличающийся раздел", "Code",
+    ]
+    distance_table = pd.DataFrame(rows, columns=distance_columns)
     if distances:
         categories = categorize_distances(codes, distances).set_index("Code")
         distance_table["Категория"] = distance_table["Code"].map(categories["category"])
@@ -181,12 +189,15 @@ def compute_school_heterogeneity(
             "minimum_distance", "maximum_distance",
         )}
     items = [dataset.dissertation_vectors[code] for code in codes]
-    matrix, pairwise = composite_distance_matrix(items, selection, 512)
+    matrix, pairwise = composite_distance_matrix(items, selection, get_semantic_analysis_limits().batch_size)
     medoid_code = None
     medoid_mean = None
     diagnostics = []
+    if not codes:
+        diagnostics.append("Нет диссертаций с достаточным покрытием выбранных разделов.")
     if matrix is not None and codes:
-        medoid_code, medoid_mean = find_medoid(codes, matrix)
+        with perf_timer("semantic.analysis.compute_medoid"):
+            medoid_code, medoid_mean = find_medoid(codes, matrix)
     elif pairwise.undefined_pair_count:
         diagnostics.append("Для части диссертаций не определены попарные расстояния по общим разделам.")
     elif items:
@@ -219,7 +230,10 @@ def _medoid_for_codes(dataset: SchoolSemanticDataset, codes: set[str], selection
     ordered = sorted(codes)
     if len(ordered) < 3:
         return None
-    matrix, _ = composite_distance_matrix([dataset.dissertation_vectors[code] for code in ordered], selection, 512)
+    matrix, _ = composite_distance_matrix(
+        [dataset.dissertation_vectors[code] for code in ordered], selection,
+        get_semantic_analysis_limits().batch_size,
+    )
     return find_medoid(ordered, matrix)[0] if matrix is not None else None
 
 
@@ -241,7 +255,6 @@ def compute_generation_semantics(
     coverage_index = dataset.coverage.set_index("Code") if not dataset.coverage.empty else pd.DataFrame()
     for generation in sorted(profiles):
         eligible = eligible_by_generation[generation]
-        details[generation] = dataset.metadata[dataset.metadata["Code"].isin(eligible)].copy()
         profile = profiles[generation]
         internal = None
         medoid = None
@@ -257,12 +270,25 @@ def compute_generation_semantics(
         continuity = composite_similarity(profiles[previous], profile, selection) if previous is not None else None
         first_similarity = composite_similarity(profiles[first_generation], profile, selection) if first_generation is not None else None
         school_similarity = composite_similarity(profile, overall, selection)
-        coverage_values = [float(coverage_index.loc[code, "coverage"]) for code in generation_codes[generation]
+        generation_members = {str(code) for code in generation_codes[generation]}
+        detail = _metadata_for_members(dataset.metadata, generation_members)
+        detail = detail.merge(dataset.coverage[["Code", "coverage", "eligible"]], on="Code", how="left")
+        detail["Тематическое расстояние до профиля поколения"] = detail["Code"].map(
+            lambda code: distance_to_profile(dataset.dissertation_vectors[code], profile, selection)
+            if code in dataset.dissertation_vectors else None
+        )
+        detail["Репрезентативная диссертация"] = detail["Code"].eq(medoid)
+        detail["Причина исключения"] = np.where(
+            detail["Code"].isin(eligible), None, "Недостаточное покрытие выбранных разделов",
+        )
+        details[generation] = detail
+        coverage_values = [float(coverage_index.loc[code, "coverage"]) for code in generation_members
                            if not coverage_index.empty and code in coverage_index.index]
         rows.append({
             "Поколение": generation, "Всего диссертаций": len(generation_codes[generation]),
             "Диссертаций с векторами": len(eligible),
-            "Полнота данных, %": len(eligible) / len(generation_codes[generation]) * 100 if generation_codes[generation] else 0.0,
+            "Доля диссертаций с достаточным покрытием, %": len(eligible) / len(generation_members) * 100 if generation_members else 0.0,
+            "Среднее покрытие выбранных разделов, %": float(np.mean(coverage_values) * 100) if coverage_values else 0.0,
             "Тематическая неоднородность": internal,
             "Сходство с предыдущим поколением": continuity,
             "Расстояние от первого поколения": None if first_similarity is None else 1.0 - first_similarity,
@@ -286,10 +312,21 @@ def compute_branch_semantics(
         for code in eligible_by_branch[branch]:
             membership_count[code] = membership_count.get(code, 0) + 1
     ambiguous_codes = {code for code, count in membership_count.items() if count > 1}
-    ambiguous = dataset.metadata[dataset.metadata["Code"].isin(ambiguous_codes)].copy()
-    if not ambiguous.empty:
-        ambiguous["Причина исключения"] = "Диссертация относится к нескольким естественным ветвям"
+    ambiguous_rows = []
+    for code in sorted(ambiguous_codes):
+        metadata = _display_metadata(dataset, code)
+        memberships = [branch for branch, codes in eligible_by_branch.items() if code in codes]
+        ambiguous_rows.append({
+            "Автор": metadata["Автор"], "Название": metadata["Название"], "Год": metadata["Год"],
+            "Ветви": "; ".join(memberships),
+            "Причина исключения": "Диссертация относится к нескольким естественным ветвям",
+            "Code": code,
+        })
+    ambiguous = pd.DataFrame(
+        ambiguous_rows, columns=["Автор", "Название", "Год", "Ветви", "Причина исключения", "Code"],
+    )
     rows = []
+    details: dict[str, pd.DataFrame] = {}
     coverage_index = dataset.coverage.set_index("Code") if not dataset.coverage.empty else pd.DataFrame()
     for branch in branch_codes:
         eligible = eligible_by_branch[branch]
@@ -302,10 +339,23 @@ def compute_branch_semantics(
         generations = dataset.metadata.loc[dataset.metadata["Code"].isin(eligible), "Поколение"] if "Поколение" in dataset.metadata else pd.Series(dtype=float)
         coverage_values = [float(coverage_index.loc[code, "coverage"]) for code in branch_codes[branch]
                            if not coverage_index.empty and code in coverage_index.index]
+        detail = _metadata_for_members(dataset.metadata, {str(code) for code in branch_codes[branch]})
+        detail = detail.merge(dataset.coverage[["Code", "coverage", "eligible"]], on="Code", how="left")
+        detail["Тематическое расстояние до профиля ветви"] = detail["Code"].map(
+            lambda code: distance_to_profile(dataset.dissertation_vectors[code], profile, selection)
+            if code in dataset.dissertation_vectors else None
+        )
+        detail["Репрезентативная диссертация"] = detail["Code"].eq(medoid)
+        detail["Наиболее удалённая диссертация"] = detail["Code"].eq(farthest)
+        detail["Причина исключения"] = np.where(
+            detail["Code"].isin(eligible), None, "Недостаточное покрытие выбранных разделов",
+        )
+        details[branch] = detail
         rows.append({
             "Ветвь": branch, "Всего диссертаций": len(branch_codes[branch]),
             "Диссертаций с векторами": len(eligible), "Поколений": int(generations.dropna().nunique()),
-            "Полнота данных, %": len(eligible) / len(branch_codes[branch]) * 100 if branch_codes[branch] else 0.0,
+            "Доля диссертаций с достаточным покрытием, %": len(eligible) / len(branch_codes[branch]) * 100 if branch_codes[branch] else 0.0,
+            "Среднее покрытие выбранных разделов, %": float(np.mean(coverage_values) * 100) if coverage_values else 0.0,
             "Тематическая неоднородность": heterogeneity,
             "Сходство с профилем школы": composite_similarity(profile, overall, selection),
             "Репрезентативная диссертация": _representative_label(dataset, medoid),
@@ -329,7 +379,7 @@ def compute_branch_semantics(
         for label, branch in enumerate(included_branches):
             for code in sorted(included[branch]):
                 items.append(dataset.dissertation_vectors[code]); labels.append(label); sample_codes.append((branch, code))
-        matrix, pairwise = composite_distance_matrix(items, selection, 512)
+        matrix, pairwise = composite_distance_matrix(items, selection, get_semantic_analysis_limits().batch_size)
         if matrix is not None:
             silhouette_overall, samples = compute_precomputed_silhouette(matrix, labels)
             for (branch, code), value in zip(sample_codes, samples):
@@ -350,5 +400,6 @@ def compute_branch_semantics(
         diagnostics.append("Для силуэта нужны минимум две ветви с тремя уникально назначенными диссертациями в каждой.")
     return BranchSemanticResult(
         pd.DataFrame(rows), profiles, similarity.reset_index(), silhouette_overall,
-        pd.DataFrame(silhouette_rows), pd.DataFrame(sample_rows), ambiguous.reset_index(drop=True), tuple(diagnostics),
+        pd.DataFrame(silhouette_rows), pd.DataFrame(sample_rows), details,
+        ambiguous.reset_index(drop=True), tuple(diagnostics),
     )

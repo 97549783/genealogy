@@ -101,11 +101,24 @@ def load_typed_vector_metadata() -> VectorMetadata | None:
         dimensions = int(metadata.get("dimensions", "0"))
     except ValueError:
         return None
-    if dimensions <= 0:
+    model_name = str(metadata.get("model_name", "")).strip()
+    if dimensions <= 0 or not model_name:
         return None
-    normalized = str(metadata.get("normalized", "true")).casefold() in {"1", "true", "yes", "да"}
+    normalized_value = str(metadata.get("normalized", "")).strip().casefold()
+    if normalized_value in {"1", "true", "yes", "да"}:
+        normalized = True
+    elif normalized_value in {"0", "false", "no", "нет"}:
+        normalized = False
+    else:
+        return None
+    try:
+        matrix = np.load(signature[0], mmap_mode="r")
+        if matrix.ndim != 2 or int(matrix.shape[1]) != dimensions:
+            return None
+    except (OSError, ValueError):
+        return None
     return VectorMetadata(
-        model_name=str(metadata.get("model_name", "")), normalized=normalized,
+        model_name=model_name, normalized=normalized,
         dimensions=dimensions, matrix_signature=signature,
     )
 

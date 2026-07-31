@@ -27,10 +27,14 @@ def build_excel_report(
     semantic_summary: pd.DataFrame | None = None,
     semantic_dissertations: pd.DataFrame | None = None,
     semantic_generations: pd.DataFrame | None = None,
+    semantic_generation_dissertations: pd.DataFrame | None = None,
     semantic_branches: pd.DataFrame | None = None,
+    semantic_branch_dissertations: pd.DataFrame | None = None,
     semantic_branch_similarity: pd.DataFrame | None = None,
     semantic_branch_silhouette: pd.DataFrame | None = None,
     semantic_excluded: pd.DataFrame | None = None,
+    semantic_ambiguous: pd.DataFrame | None = None,
+    semantic_diagnostics: pd.DataFrame | None = None,
 ) -> bytes:
     """
     Формирует Excel-файл со всеми листами анализа.
@@ -94,10 +98,14 @@ def build_excel_report(
             (semantic_summary, "Семантическая сводка"),
             (semantic_dissertations, "Семантика диссертаций"),
             (semantic_generations, "Семантика поколений"),
+            (semantic_generation_dissertations, "Диссертации поколений"),
             (semantic_branches, "Семантика ветвей"),
+            (semantic_branch_dissertations, "Диссертации ветвей"),
             (semantic_branch_similarity, "Сходство ветвей"),
             (semantic_branch_silhouette, "Силуэт ветвей"),
-            (semantic_excluded, "Семантика исключения"),
+            (semantic_ambiguous, "Неоднозначные диссертации"),
+            (semantic_excluded, "Исключённые диссертации"),
+            (semantic_diagnostics, "Диагностика семантики"),
         )
         for semantic_df, sheet_name in semantic_sheets:
             if semantic_df is not None and not semantic_df.empty:

@@ -858,6 +858,10 @@ def render_school_search_tab(
         return
 
     if search_mode in {"semantic_query", "semantic_similar"}:
+        from core.db.dissertation_sections import (
+            get_dissertation_sections_db_signature, load_dissertation_section_texts_by_ids,
+            load_typed_vector_metadata,
+        )
         from .exports import build_semantic_query_search_excel, build_similar_school_search_excel
         from .semantic import search_schools_by_semantic_query, search_similar_scientific_schools
 
@@ -865,7 +869,22 @@ def render_school_search_tab(
             extra_params["sections_mode"], extra_params["section_keys"],
             min_coverage=extra_params["min_coverage"],
         )
-        with st.spinner("Выполняется семантический анализ научных школ…"):
+        stored = st.session_state.get("school_search_semantic_result")
+        current_metadata = load_typed_vector_metadata() if stored is not None else None
+        stored_valid = bool(
+            stored
+            and stored.get("base_signature") == current_signature
+            and current_metadata is not None
+            and stored["result"].parameters.get("section_database_signature") == get_dissertation_sections_db_signature()
+            and stored["result"].parameters.get("matrix_signature") == current_metadata.matrix_signature
+            and stored["result"].parameters.get("model_name") == current_metadata.model_name
+            and stored["result"].parameters.get("normalized") == current_metadata.normalized
+        )
+        if not stored_valid:
+            stored = None
+            st.session_state.pop("school_search_semantic_result", None)
+        if stored is None:
+          with st.spinner("Выполняется семантический анализ научных школ…"):
             if search_mode == "semantic_query":
                 config = QueryRankingConfig(
                     extra_params["ranking_mode"], extra_params["relevance_threshold"], 5.0,
@@ -876,14 +895,8 @@ def render_school_search_tab(
                     lineage_context_key=lineage_context_key, scope=scope, selection=selection,
                     ranking_config=config, top_n=top_n, year_from=extra_params["year_from"],
                     year_to=extra_params["year_to"], degree_levels=extra_params["degree_levels"],
+                    main_db_signature=db_signature,
                 )
-                display = result.summary.rename(columns={
-                    "rank": "Ранг", "root": "Научный руководитель", "ranking_score": "Оценка ранжирования",
-                    "covered_dissertations": "Диссертаций с векторами", "coverage_ratio": "Полнота данных",
-                    "share_above_threshold": "Доля выше порога", "total_members": "Всего членов школы",
-                })
-                if "Полнота данных" in display:
-                    display["Полнота данных"] = display["Полнота данных"] * 100.0
                 excel = build_semantic_query_search_excel(result)
                 file_name = "семантический_поиск_научных_школ.xlsx"
             else:
@@ -894,17 +907,42 @@ def render_school_search_tab(
                     minimum_profiled_dissertations=extra_params["minimum_profiled"], top_n=top_n,
                     hide_near_duplicates=extra_params["hide_near_duplicates"],
                     near_duplicate_jaccard=extra_params["near_duplicate_jaccard"],
+                    main_db_signature=db_signature,
                 )
-                display = result.summary.rename(columns={
-                    "rank": "Ранг", "root": "Научный руководитель", "semantic_similarity": "Семантическое сходство",
-                    "common_section_count": "Общих разделов характеристик", "profiled_dissertations": "Диссертаций с векторами",
-                    "coverage_ratio": "Полнота данных, %", "jaccard_overlap": "Пересечение состава по Жаккару",
-                    "total_members": "Всего членов школы", "year_range": "Период активности",
-                })
-                if "Полнота данных, %" in display:
-                    display["Полнота данных, %"] = display["Полнота данных, %"] * 100.0
                 excel = build_similar_school_search_excel(result)
                 file_name = "поиск_похожих_научных_школ.xlsx"
+          st.session_state["school_search_semantic_result"] = {
+              "base_signature": current_signature, "result": result,
+              "excel_bytes": excel, "file_name": file_name,
+          }
+        else:
+            result = stored["result"]
+            excel = stored["excel_bytes"]
+            file_name = stored["file_name"]
+        if search_mode == "semantic_query":
+            columns = {
+                "rank": "Ранг", "root": "Научный руководитель", "ranking_score": "Оценка ранжирования",
+                "total_members": "Всего членов школы", "filtered_members": "Членов после фильтров",
+                "covered_dissertations": "Диссертаций с векторами", "coverage_ratio": "Полнота данных, %",
+                "mean_similarity": "Среднее сходство", "median_similarity": "Медианное сходство",
+                "upper_quartile_similarity": "Верхний квартиль сходства", "top_20_percent_mean": "Среднее лучших 20 %",
+                "share_above_threshold": "Доля выше порога, %", "maximum_similarity": "Максимальное сходство",
+                "year_range": "Период активности",
+            }
+            display = pd.DataFrame({label: result.summary[key] for key, label in columns.items() if key in result.summary})
+            for column in ("Полнота данных, %", "Доля выше порога, %"):
+                if column in display:
+                    display[column] *= 100.0
+        else:
+            columns = {
+                "rank": "Ранг", "root": "Научный руководитель", "semantic_similarity": "Семантическое сходство",
+                "common_section_count": "Общих разделов характеристик", "profiled_dissertations": "Диссертаций с векторами",
+                "coverage_ratio": "Полнота данных, %", "jaccard_overlap": "Пересечение состава по Жаккару",
+                "total_members": "Всего членов школы", "year_range": "Период активности",
+            }
+            display = pd.DataFrame({label: result.summary[key] for key, label in columns.items() if key in result.summary})
+            if "Полнота данных, %" in display:
+                display["Полнота данных, %"] *= 100.0
         for diagnostic in result.diagnostics:
             st.warning(diagnostic)
         if not display.empty:
@@ -913,19 +951,48 @@ def render_school_search_tab(
             st.dataframe(display, use_container_width=True, hide_index=True)
             for root, details in result.dissertation_details.items():
                 with st.expander(f"Лучшие диссертации: {root}"):
-                    shown = details.drop(columns=["section_scores"], errors="ignore")
+                    if search_mode == "semantic_query":
+                        detail_columns = {
+                            "candidate_name": "Автор", "title": "Название", "year": "Год",
+                            "degree.science_field": "Отрасль науки", "science_field": "Отрасль науки",
+                            "semantic_score": "Семантическое сходство", "coverage": "Полнота характеристик, %",
+                            "best_section_key": "Лучший раздел", "best_section_similarity": "Сходство лучшего раздела",
+                        }
+                    else:
+                        detail_columns = {
+                            "candidate_name": "Автор", "title": "Название", "year": "Год",
+                            "distance_to_source": "Расстояние до профиля исходной школы",
+                            "coverage": "Полнота характеристик, %", "representative": "Репрезентативная работа",
+                        }
+                    shown = pd.DataFrame({label: details[key] for key, label in detail_columns.items() if key in details})
+                    if "Полнота характеристик, %" in shown:
+                        shown["Полнота характеристик, %"] *= 100.0
+                    if "Лучший раздел" in shown:
+                        shown["Лучший раздел"] = shown["Лучший раздел"].map(SECTION_LABELS_RU)
                     st.dataframe(shown, use_container_width=True, hide_index=True)
                     contribution_rows = []
                     for record in details.to_dict("records"):
                         for section_key, score in (record.get("section_scores") or {}).items():
                             contribution_rows.append({
-                                "Code": record.get("Code"),
+                                "Автор": record.get("candidate_name"),
                                 "Раздел характеристики": SECTION_LABELS_RU.get(section_key, section_key),
                                 "Сходство": score,
                             })
                     if contribution_rows:
                         st.markdown("##### Вклад разделов характеристик")
                         st.dataframe(pd.DataFrame(contribution_rows), use_container_width=True, hide_index=True)
+                    if search_mode == "semantic_query" and st.button(
+                        "Показать лучше всего совпавшие фрагменты", key=f"school_search_best_text_{slug(root)}",
+                    ):
+                        ids = [value for value in details.get("best_text_id", []) if pd.notna(value)]
+                        texts = load_dissertation_section_texts_by_ids(ids)
+                        for text_row in texts.itertuples(index=False):
+                            with st.expander("Лучше всего совпавший фрагмент"):
+                                st.markdown(f"**{SECTION_LABELS_RU.get(text_row.section_key, text_row.section_key)}**")
+                                st.write(text_row.text)
+                    if search_mode == "semantic_similar" and root in result.section_similarities:
+                        st.markdown("##### Сходство по разделам характеристик")
+                        st.dataframe(result.section_similarities[root], use_container_width=True, hide_index=True)
                     detail_codes = set(details.get("Code", pd.Series(dtype=str)).astype(str))
                     detail_subset = working_df[working_df.get("Code", pd.Series(index=working_df.index, dtype=str)).astype(str).isin(detail_codes)]
                     if not detail_subset.empty:

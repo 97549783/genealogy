@@ -64,6 +64,17 @@ class QueryRankingConfig:
     minimum_school_size: int
     minimum_covered_dissertations: int
 
+    def __post_init__(self) -> None:
+        if self.ranking_mode not in ("broad", "focused"):
+            raise ValueError("Неизвестный режим ранжирования научных школ.")
+        if not isfinite(float(self.relevance_threshold)) or not -1.0 <= float(self.relevance_threshold) <= 1.0:
+            raise ValueError("Порог релевантности должен находиться в диапазоне от -1 до 1.")
+        if not isfinite(float(self.shrinkage_strength)) or float(self.shrinkage_strength) < 0.0:
+            raise ValueError("Сила сглаживания должна быть конечным неотрицательным числом.")
+        for value in (self.minimum_school_size, self.minimum_covered_dissertations):
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError("Минимальные размеры должны быть положительными целыми числами.")
+
 
 @dataclass(frozen=True)
 class PairwiseDistanceDiagnostics:
@@ -73,6 +84,8 @@ class PairwiseDistanceDiagnostics:
     undefined_pair_count: int
     selected_section_count: int
     minimum_coverage: float
+    reason: Literal["ok", "undefined_pairs", "item_limit"] = "ok"
+    maximum_pairwise_items: int = 2500
 
 
 @dataclass(frozen=True)

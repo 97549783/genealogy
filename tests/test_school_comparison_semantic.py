@@ -57,7 +57,7 @@ def test_per_section_eligibility_and_excel_labels() -> None:
     datasets = {"А": _dataset("А", ["1", "2"], [0, 1], matrix), "Б": _dataset("Б", ["3", "4"], [2, 3], matrix)}
     section_selection = build_section_selection("selected", ["research_goal", "research_methods"], min_coverage=.5)
     section = compute_per_section_silhouette(datasets=datasets, selection=section_selection)
-    assert section.columns.tolist() == ["Раздел характеристики", "Коэффициент силуэта", "Число школ", "Число диссертаций", "Полнота данных, %"]
+    assert section.columns.tolist() == ["Раздел характеристики", "Коэффициент силуэта", "Число школ", "Число диссертаций", "Полнота данных, %", "Статус"]
     selection = build_section_selection("selected", ["research_goal"], min_coverage=1)
     result = compute_semantic_school_comparison(datasets=datasets, selection=selection, distance_batch_size=2)
     workbook = load_workbook(BytesIO(build_semantic_school_comparison_excel(result, {"режим": "характеристики"})), read_only=True)

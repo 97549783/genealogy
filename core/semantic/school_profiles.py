@@ -35,11 +35,12 @@ def aggregate_query_scores_by_school(
     for root in sorted(school_codes):
         members = {str(code) for code in school_codes[root]}
         total = int(school_stats.get(root, {}).get("n_members", len(members)))
+        filtered = int(school_stats.get(root, {}).get("filtered_members", total))
         school = scores[scores["Code"].isin(members)].sort_values(
             ["semantic_score", "Code"], ascending=[False, True], kind="stable"
         )
         n = len(school)
-        if total < config.minimum_school_size or n < config.minimum_covered_dissertations:
+        if total < config.minimum_school_size or filtered <= 0 or n < config.minimum_covered_dissertations:
             continue
         values = school["semantic_score"].to_numpy(dtype=float)
         k = max(1, ceil(0.20 * n))
@@ -52,8 +53,8 @@ def aggregate_query_scores_by_school(
             raise ValueError("Неизвестная цель семантического ранжирования.")
         ranking = (effective_n * base + strength * global_mean) / (effective_n + strength) if effective_n + strength else base
         rows.append({
-            "root": root, "total_members": total, "covered_dissertations": n,
-            "coverage_ratio": n / total if total else 0.0,
+            "root": root, "total_members": total, "filtered_members": filtered,
+            "covered_dissertations": n, "coverage_ratio": n / filtered,
             "mean_similarity": float(values.mean()), "median_similarity": float(np.median(values)),
             "upper_quartile_similarity": float(np.percentile(values, 75)),
             "top_20_percent_mean": top_mean,

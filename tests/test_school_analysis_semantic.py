@@ -81,3 +81,18 @@ def test_optional_semantic_excel_sheets_preserve_existing_report() -> None:
     )
     sheets = load_workbook(BytesIO(payload), read_only=True).sheetnames
     assert sheets == ["Метрики", "Семантическая сводка", "Семантика ветвей"]
+
+
+def test_zero_eligible_dissertations_returns_stable_schema() -> None:
+    selection = build_section_selection("selected", ["research_goal"], min_coverage=1)
+    dataset = build_school_semantic_dataset(
+        root="Пустая школа", member_codes={"1"}, section_index=pd.DataFrame({
+            "Code": [], "section_key": [], "matrix_row": [],
+        }), matrix=np.array([[1, 0]], dtype=np.float32), selection=selection,
+        normalized=True, dissertation_metadata=pd.DataFrame({"Code": ["1"]}),
+    )
+    result = compute_school_heterogeneity(dataset, {}, selection)
+    assert result.medoid_code is None
+    assert result.dissertation_distances.columns.tolist()[-1] == "Code"
+    assert result.dissertation_distances.empty
+    assert "Нет диссертаций" in result.diagnostics[0]

@@ -28,7 +28,7 @@ def _normalize(vector: np.ndarray) -> np.ndarray | None:
 def validate_matrix_and_index(
     matrix: np.ndarray, section_index: pd.DataFrame, expected_dimensions: int | None = None
 ) -> pd.DataFrame:
-    """Возвращает индекс только с допустимыми ссылками на конечные векторы."""
+    """Проверяет структуру индекса без чтения строк матрицы."""
     required = {"Code", "section_key", "matrix_row"}
     if matrix is None or getattr(matrix, "ndim", 0) != 2:
         raise ValueError("Матрица векторов недоступна или имеет неверный формат.")
@@ -42,12 +42,7 @@ def validate_matrix_and_index(
     result = result.loc[integral].copy()
     result["matrix_row"] = numeric.loc[integral].astype(int)
     result = result[(result["matrix_row"] >= 0) & (result["matrix_row"] < matrix.shape[0])]
-    valid_rows: list[int] = []
-    for idx, row in result.iterrows():
-        vector = np.asarray(matrix[int(row["matrix_row"])], dtype=np.float32)
-        if vector.ndim == 1 and vector.shape[0] == matrix.shape[1] and np.all(np.isfinite(vector)) and np.linalg.norm(vector) > 0:
-            valid_rows.append(idx)
-    return result.loc[valid_rows].reset_index(drop=True)
+    return result.reset_index(drop=True)
 
 
 def aggregate_duplicate_section_vectors(
@@ -56,14 +51,15 @@ def aggregate_duplicate_section_vectors(
     """Усредняет дубликаты разделов и нормализует каждый итоговый центр."""
     valid = validate_matrix_and_index(matrix, section_index)
     buckets: dict[tuple[str, str], list[np.ndarray]] = {}
-    for row in valid.itertuples(index=False):
-        vector = np.asarray(matrix[int(row.matrix_row)], dtype=np.float32).copy()
-        if not normalized:
-            vector = _normalize(vector)
-        else:
-            vector = _normalize(vector)
-        if vector is not None:
-            buckets.setdefault((str(row.Code), str(row.section_key)), []).append(vector)
+    for start in range(0, len(valid), 512):
+        part = valid.iloc[start:start + 512]
+        values = np.asarray(matrix[part["matrix_row"].to_numpy(dtype=int)], dtype=np.float32).copy()
+        norms = np.linalg.norm(values, axis=1)
+        usable = np.all(np.isfinite(values), axis=1) & np.isfinite(norms) & (norms > 0)
+        values[usable] /= norms[usable, None]
+        for position, row in enumerate(part.itertuples(index=False)):
+            if usable[position]:
+                buckets.setdefault((str(row.Code), str(row.section_key)), []).append(values[position])
     result: dict[str, dict[str, np.ndarray]] = {}
     for (code, key), vectors in buckets.items():
         centroid = _normalize(np.mean(vectors, axis=0, dtype=np.float32))
@@ -113,16 +109,21 @@ def score_dissertations_against_query(
     if valid.empty:
         return pd.DataFrame(columns=SCORE_COLUMNS)
     best: dict[tuple[str, str], tuple[float, object]] = {}
+    invalid_vector_row_count = 0
     size = max(1, int(batch_size))
     for start in range(0, len(valid), size):
         part = valid.iloc[start:start + size]
         rows = part["matrix_row"].to_numpy(dtype=int)
         vectors = np.asarray(matrix[rows], dtype=np.float32).copy()
+        norms = np.linalg.norm(vectors, axis=1)
+        usable = np.all(np.isfinite(vectors), axis=1) & np.isfinite(norms) & (norms > 0)
+        invalid_vector_row_count += int((~usable).sum())
         if not normalized:
-            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-            vectors /= np.where(norms > 0, norms, 1.0)
+            vectors[usable] /= norms[usable, None]
         scores = np.clip(vectors @ query, -1.0, 1.0)
         for pos, (_, row) in enumerate(part.iterrows()):
+            if not usable[pos]:
+                continue
             key = (str(row["Code"]), str(row["section_key"]))
             candidate = (float(scores[pos]), row.get("text_id"))
             previous = best.get(key)
@@ -145,7 +146,9 @@ def score_dissertations_against_query(
             "best_section_similarity": section_scores[best_key], "best_text_id": best[(code, best_key)][1],
             "section_scores": section_scores,
         })
-    return pd.DataFrame(output, columns=SCORE_COLUMNS)
+    result = pd.DataFrame(output, columns=SCORE_COLUMNS)
+    result.attrs["invalid_vector_row_count"] = invalid_vector_row_count
+    return result
 
 
 def composite_similarity(
@@ -176,20 +179,37 @@ def composite_distance_matrix(
 ) -> tuple[np.ndarray | None, PairwiseDistanceDiagnostics]:
     """Строит полную матрицу расстояний или возвращает диагностику неопределённости."""
     count = len(items)
-    diagnostics = PairwiseDistanceDiagnostics(count, 0, len(selection.section_keys), selection.min_coverage)
-    if count > _maximum_pairwise_items():
+    maximum = _maximum_pairwise_items()
+    diagnostics = PairwiseDistanceDiagnostics(count, 0, len(selection.section_keys), selection.min_coverage, "ok", maximum)
+    if count > maximum:
+        diagnostics = PairwiseDistanceDiagnostics(count, 0, len(selection.section_keys), selection.min_coverage, "item_limit", maximum)
         return None, diagnostics
-    distances = np.zeros((count, count), dtype=np.float32)
-    undefined = 0
+    numerator = np.zeros((count, count), dtype=np.float32)
+    denominator = np.zeros((count, count), dtype=np.float32)
     size = max(1, int(batch_size))
-    for block in range(0, count, size):
-        for i in range(block, min(block + size, count)):
-            for j in range(i + 1, count):
-                similarity = composite_similarity(items[i], items[j], selection)
-                if similarity is None:
-                    undefined += 1
-                else:
-                    value = float(np.clip(1.0 - similarity, 0.0, 2.0))
-                    distances[i, j] = distances[j, i] = value
-    diagnostics = PairwiseDistanceDiagnostics(count, undefined, len(selection.section_keys), selection.min_coverage)
+    dimensions = next((np.asarray(vector).size for item in items for vector in item.values()), 0)
+    for section_key, weight in selection.weights:
+        presence = np.zeros(count, dtype=bool)
+        aligned = np.zeros((count, dimensions), dtype=np.float32)
+        for index, item in enumerate(items):
+            vector = _normalize(item[section_key]) if section_key in item else None
+            if vector is not None and vector.size == dimensions:
+                presence[index] = True
+                aligned[index] = vector
+        for row_start in range(0, count, size):
+            row_stop = min(count, row_start + size)
+            for col_start in range(0, count, size):
+                col_stop = min(count, col_start + size)
+                common = presence[row_start:row_stop, None] & presence[None, col_start:col_stop]
+                similarities = aligned[row_start:row_stop] @ aligned[col_start:col_stop].T
+                numerator[row_start:row_stop, col_start:col_stop] += np.where(common, weight * similarities, 0.0)
+                denominator[row_start:row_stop, col_start:col_stop] += common.astype(np.float32) * weight
+    upper = np.triu(np.ones((count, count), dtype=bool), 1)
+    undefined = int(np.count_nonzero((denominator == 0) & upper))
+    distances = np.zeros((count, count), dtype=np.float32)
+    defined = denominator > 0
+    distances[defined] = np.clip(1.0 - numerator[defined] / denominator[defined], 0.0, 2.0)
+    np.fill_diagonal(distances, 0.0)
+    reason = "undefined_pairs" if undefined else "ok"
+    diagnostics = PairwiseDistanceDiagnostics(count, undefined, len(selection.section_keys), selection.min_coverage, reason, maximum)
     return (None if undefined else distances), diagnostics
