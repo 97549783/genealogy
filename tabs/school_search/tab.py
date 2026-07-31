@@ -53,6 +53,9 @@ from core.ui.filters import (
 from core.db import (
     get_score_columns_for_classifier_node,
 )
+from core.lineage.membership import get_cached_roots
+from core.semantic.models import QueryRankingConfig, build_section_selection
+from tabs.dissertation_characteristics.labels import SEARCHABLE_SECTION_KEYS, SECTION_LABELS_RU
 
 
 # ==============================================================================
@@ -86,6 +89,8 @@ SEARCH_MODES: Dict[str, str] = {
     "org_leading":        "🏦 4.3 По ведущей организации",
     # Группа 5 — тематика
     "classifier_score":   "🔬 5.1 Средний балл по узлу классификатора",
+    "semantic_query":     "🔎 5.2 Нейросетевой поиск научных школ",
+    "semantic_similar":   "🧭 5.3 Поиск похожих научных школ",
 }
 
 # Режимы, для которых параметр scope не применяется
@@ -411,6 +416,54 @@ def render_school_search_tab(
         if classifier_node_q:
             st.session_state["school_search_classifier_node_query"] = classifier_node_q
 
+        for number in range(1, 4):
+            value = str(st.query_params.get(f"semantic_query_{number}", "")).strip()
+            if value:
+                st.session_state[f"school_search_semantic_query_{number}"] = value
+        semantic_source = str(st.query_params.get("semantic_source_root", "")).strip()
+        if semantic_source:
+            st.session_state["school_search_semantic_source_root_query"] = semantic_source
+        ranking_q = str(st.query_params.get("semantic_ranking_mode", "")).strip()
+        if ranking_q in {"broad", "focused"}:
+            st.session_state["school_search_semantic_ranking_mode"] = ranking_q
+        sections_mode_q = str(st.query_params.get("semantic_sections_mode", "")).strip()
+        if sections_mode_q in {"all", "selected"}:
+            target = "school_search_semantic_sections_mode" if mode_q == "semantic_query" else "school_search_similar_sections_mode"
+            st.session_state[target] = sections_mode_q
+        section_values = st.query_params.get_all("semantic_section")
+        valid_sections = [key for key in section_values if key in SEARCHABLE_SECTION_KEYS]
+        if valid_sections:
+            target = "school_search_semantic_sections" if mode_q == "semantic_query" else "school_search_similar_sections"
+            st.session_state[target] = valid_sections
+        numeric_semantic_params = {
+            "semantic_min_school_size": ("school_search_semantic_min_school" if mode_q == "semantic_query" else "school_search_similar_min_school", int),
+            "semantic_min_profiled": ("school_search_semantic_min_profiled" if mode_q == "semantic_query" else "school_search_similar_min_profiled", int),
+            "semantic_relevance_threshold": ("school_search_semantic_threshold", float),
+            "semantic_year_from": ("school_search_semantic_year_from", int),
+            "semantic_year_to": ("school_search_semantic_year_to", int),
+            "semantic_duplicate_jaccard": ("school_search_similar_jaccard", float),
+        }
+        for query_name, (state_name, converter) in numeric_semantic_params.items():
+            raw = str(st.query_params.get(query_name, "")).strip()
+            try:
+                if raw:
+                    st.session_state[state_name] = converter(raw)
+            except ValueError:
+                pass
+        coverage_q = str(st.query_params.get("semantic_min_coverage", "")).strip()
+        try:
+            if coverage_q:
+                target = "school_search_semantic_min_coverage" if mode_q == "semantic_query" else "school_search_similar_coverage"
+                st.session_state[target] = round(float(coverage_q) * 100)
+        except ValueError:
+            pass
+        degrees_q = st.query_params.get_all("semantic_degree")
+        if degrees_q:
+            st.session_state["school_search_semantic_degrees"] = degrees_q
+        hide_q = str(st.query_params.get("semantic_hide_duplicates", "")).casefold()
+        if hide_q in {"1", "true", "yes", "да", "0", "false", "no", "нет"}:
+            st.session_state["school_search_similar_hide_duplicates"] = hide_q in {"1", "true", "yes", "да"}
+
         if mode_q:
             st.session_state["school_search_run_state"] = True
         st.session_state["school_search_query_hydrated"] = True
@@ -634,6 +687,80 @@ def render_school_search_tab(
         else:
             extra_params = {"person_query": person_query}
 
+    elif search_mode == "semantic_query":
+        st.markdown("### 🔎 Смысловой запрос")
+        queries = [st.text_input(
+            f"Запрос {number}", key=f"school_search_semantic_query_{number}",
+            placeholder="Опишите тематику или направление исследования",
+        ) for number in range(1, 4)]
+        ranking_mode = st.radio(
+            "Цель ранжирования", options=["broad", "focused"],
+            format_func=lambda value: "Широкая специализация школы" if value == "broad" else "Сильное направление внутри школы",
+            key="school_search_semantic_ranking_mode",
+        )
+        sections_mode = st.radio(
+            "Разделы характеристик", options=["all", "selected"],
+            format_func=lambda value: "Все доступные характеристики" if value == "all" else "Выбранные характеристики",
+            key="school_search_semantic_sections_mode",
+        )
+        selected_sections = SEARCHABLE_SECTION_KEYS
+        if sections_mode == "selected":
+            selected_sections = st.multiselect(
+                "Выберите разделы", SEARCHABLE_SECTION_KEYS,
+                format_func=lambda key: SECTION_LABELS_RU[key],
+                default=["research_goal", "research_methods", "scientific_novelty"],
+                key="school_search_semantic_sections",
+            )
+        min_coverage = st.slider("Минимальное покрытие разделов, %", 0, 100, 60, 5, key="school_search_semantic_min_coverage") / 100
+        col_a, col_b = st.columns(2)
+        with col_a:
+            min_school = st.number_input("Минимальный размер школы", 1, 1000, 3, key="school_search_semantic_min_school")
+            year_from = st.number_input("Год от (0 — без ограничения)", 0, 2100, 0, key="school_search_semantic_year_from")
+        with col_b:
+            min_profiled = st.number_input("Минимум диссертаций с векторами", 1, 1000, 3, key="school_search_semantic_min_profiled")
+            year_to = st.number_input("Год до (0 — без ограничения)", 0, 2100, 0, key="school_search_semantic_year_to")
+        degree_column = next((name for name in ("degree.degree_level", "degree_level") if name in working_df.columns), None)
+        degree_options = sorted(working_df[degree_column].dropna().astype(str).unique()) if degree_column else []
+        degree_levels = st.multiselect("Уровни учёной степени", degree_options, key="school_search_semantic_degrees")
+        threshold = st.slider("Порог релевантности", -1.0, 1.0, 0.50, 0.05, key="school_search_semantic_threshold")
+        extra_params = {
+            "queries": queries, "ranking_mode": ranking_mode, "sections_mode": sections_mode,
+            "section_keys": tuple(selected_sections), "min_coverage": min_coverage,
+            "minimum_school_size": int(min_school), "minimum_profiled": int(min_profiled),
+            "year_from": int(year_from) or None, "year_to": int(year_to) or None,
+            "degree_levels": tuple(degree_levels), "relevance_threshold": threshold,
+        }
+
+    elif search_mode == "semantic_similar":
+        st.markdown("### 🧭 Исходная научная школа")
+        roots = get_cached_roots(working_df, db_signature, context_key=lineage_context_key)
+        source_query = st.session_state.pop("school_search_semantic_source_root_query", None)
+        if source_query in roots and "school_search_semantic_source_root" not in st.session_state:
+            st.session_state["school_search_semantic_source_root"] = source_query
+        source_root = st.selectbox("Научный руководитель", roots, key="school_search_semantic_source_root") if roots else ""
+        sections_mode = st.radio(
+            "Разделы характеристик", ["all", "selected"],
+            format_func=lambda value: "Все доступные характеристики" if value == "all" else "Выбранные характеристики",
+            key="school_search_similar_sections_mode",
+        )
+        selected_sections = SEARCHABLE_SECTION_KEYS
+        if sections_mode == "selected":
+            selected_sections = st.multiselect(
+                "Выберите разделы", SEARCHABLE_SECTION_KEYS, format_func=lambda key: SECTION_LABELS_RU[key],
+                default=["research_goal", "research_methods", "scientific_novelty"], key="school_search_similar_sections",
+            )
+        min_coverage = st.slider("Минимальное покрытие разделов, %", 0, 100, 60, 5, key="school_search_similar_coverage") / 100
+        min_school = st.number_input("Минимальный размер школы", 1, 1000, 3, key="school_search_similar_min_school")
+        min_profiled = st.number_input("Минимум диссертаций с векторами", 1, 1000, 3, key="school_search_similar_min_profiled")
+        hide_duplicates = st.checkbox("Скрывать почти совпадающие по составу школы", True, key="school_search_similar_hide_duplicates")
+        duplicate_jaccard = st.slider("Порог пересечения Жаккара", 0.0, 1.0, 0.80, 0.05, key="school_search_similar_jaccard")
+        extra_params = {
+            "source_root": source_root, "sections_mode": sections_mode,
+            "section_keys": tuple(selected_sections), "min_coverage": min_coverage,
+            "minimum_school_size": int(min_school), "minimum_profiled": int(min_profiled),
+            "hide_near_duplicates": hide_duplicates, "near_duplicate_jaccard": duplicate_jaccard,
+        }
+
     # ==========================================================================
     # 2. Кнопка «Найти»
     # ==========================================================================
@@ -654,6 +781,12 @@ def render_school_search_tab(
         if not query_val:
             st.warning("Пожалуйста, заполните поле поиска.")
             return
+    if search_mode == "semantic_query" and not any(str(value).strip() for value in extra_params["queries"]):
+        st.warning("Введите хотя бы один непустой запрос.")
+        return
+    if search_mode.startswith("semantic_") and not extra_params.get("section_keys"):
+        st.warning("Выберите хотя бы один раздел характеристики.")
+        return
 
     # ==========================================================================
     # 3. Запуск поиска
@@ -674,6 +807,34 @@ def render_school_search_tab(
         **extra_params,
         **science_fields_to_query_params(science_field_ids),
     }
+    if search_mode == "semantic_query":
+        share_params = {
+            "tab": "school_search", "mode": search_mode, "scope": scope, "top_n": top_n,
+            **{f"semantic_query_{number}": value for number, value in enumerate(extra_params["queries"], 1) if str(value).strip()},
+            "semantic_ranking_mode": extra_params["ranking_mode"],
+            "semantic_sections_mode": extra_params["sections_mode"],
+            "semantic_section": list(extra_params["section_keys"]),
+            "semantic_min_coverage": extra_params["min_coverage"],
+            "semantic_min_school_size": extra_params["minimum_school_size"],
+            "semantic_min_profiled": extra_params["minimum_profiled"],
+            "semantic_relevance_threshold": extra_params["relevance_threshold"],
+            "semantic_year_from": extra_params["year_from"], "semantic_year_to": extra_params["year_to"],
+            "semantic_degree": list(extra_params["degree_levels"]),
+            **science_fields_to_query_params(science_field_ids),
+        }
+    elif search_mode == "semantic_similar":
+        share_params = {
+            "tab": "school_search", "mode": search_mode, "scope": scope, "top_n": top_n,
+            "semantic_source_root": extra_params["source_root"],
+            "semantic_sections_mode": extra_params["sections_mode"],
+            "semantic_section": list(extra_params["section_keys"]),
+            "semantic_min_coverage": extra_params["min_coverage"],
+            "semantic_min_school_size": extra_params["minimum_school_size"],
+            "semantic_min_profiled": extra_params["minimum_profiled"],
+            "semantic_hide_duplicates": extra_params["hide_near_duplicates"],
+            "semantic_duplicate_jaccard": extra_params["near_duplicate_jaccard"],
+            **science_fields_to_query_params(science_field_ids),
+        }
 
     current_signature = {
         "mode": search_mode,
@@ -694,6 +855,92 @@ def render_school_search_tab(
         return
 
     if not st.session_state.get("school_search_run_state", False):
+        return
+
+    if search_mode in {"semantic_query", "semantic_similar"}:
+        from .exports import build_semantic_query_search_excel, build_similar_school_search_excel
+        from .semantic import search_schools_by_semantic_query, search_similar_scientific_schools
+
+        selection = build_section_selection(
+            extra_params["sections_mode"], extra_params["section_keys"],
+            min_coverage=extra_params["min_coverage"],
+        )
+        with st.spinner("Выполняется семантический анализ научных школ…"):
+            if search_mode == "semantic_query":
+                config = QueryRankingConfig(
+                    extra_params["ranking_mode"], extra_params["relevance_threshold"], 5.0,
+                    extra_params["minimum_school_size"], extra_params["minimum_profiled"],
+                )
+                result = search_schools_by_semantic_query(
+                    queries=extra_params["queries"], df=working_df, idx=working_idx,
+                    lineage_context_key=lineage_context_key, scope=scope, selection=selection,
+                    ranking_config=config, top_n=top_n, year_from=extra_params["year_from"],
+                    year_to=extra_params["year_to"], degree_levels=extra_params["degree_levels"],
+                )
+                display = result.summary.rename(columns={
+                    "rank": "Ранг", "root": "Научный руководитель", "ranking_score": "Оценка ранжирования",
+                    "covered_dissertations": "Диссертаций с векторами", "coverage_ratio": "Полнота данных",
+                    "share_above_threshold": "Доля выше порога", "total_members": "Всего членов школы",
+                })
+                if "Полнота данных" in display:
+                    display["Полнота данных"] = display["Полнота данных"] * 100.0
+                excel = build_semantic_query_search_excel(result)
+                file_name = "семантический_поиск_научных_школ.xlsx"
+            else:
+                result = search_similar_scientific_schools(
+                    source_root=extra_params["source_root"], df=working_df, idx=working_idx,
+                    lineage_context_key=lineage_context_key, scope=scope, selection=selection,
+                    minimum_school_size=extra_params["minimum_school_size"],
+                    minimum_profiled_dissertations=extra_params["minimum_profiled"], top_n=top_n,
+                    hide_near_duplicates=extra_params["hide_near_duplicates"],
+                    near_duplicate_jaccard=extra_params["near_duplicate_jaccard"],
+                )
+                display = result.summary.rename(columns={
+                    "rank": "Ранг", "root": "Научный руководитель", "semantic_similarity": "Семантическое сходство",
+                    "common_section_count": "Общих разделов характеристик", "profiled_dissertations": "Диссертаций с векторами",
+                    "coverage_ratio": "Полнота данных, %", "jaccard_overlap": "Пересечение состава по Жаккару",
+                    "total_members": "Всего членов школы", "year_range": "Период активности",
+                })
+                if "Полнота данных, %" in display:
+                    display["Полнота данных, %"] = display["Полнота данных, %"] * 100.0
+                excel = build_similar_school_search_excel(result)
+                file_name = "поиск_похожих_научных_школ.xlsx"
+        for diagnostic in result.diagnostics:
+            st.warning(diagnostic)
+        if not display.empty:
+            metric = "Оценка ранжирования" if search_mode == "semantic_query" else "Семантическое сходство"
+            st.pyplot(_bar_chart(display, "Научный руководитель", metric, mode_label))
+            st.dataframe(display, use_container_width=True, hide_index=True)
+            for root, details in result.dissertation_details.items():
+                with st.expander(f"Лучшие диссертации: {root}"):
+                    shown = details.drop(columns=["section_scores"], errors="ignore")
+                    st.dataframe(shown, use_container_width=True, hide_index=True)
+                    contribution_rows = []
+                    for record in details.to_dict("records"):
+                        for section_key, score in (record.get("section_scores") or {}).items():
+                            contribution_rows.append({
+                                "Code": record.get("Code"),
+                                "Раздел характеристики": SECTION_LABELS_RU.get(section_key, section_key),
+                                "Сходство": score,
+                            })
+                    if contribution_rows:
+                        st.markdown("##### Вклад разделов характеристик")
+                        st.dataframe(pd.DataFrame(contribution_rows), use_container_width=True, hide_index=True)
+                    detail_codes = set(details.get("Code", pd.Series(dtype=str)).astype(str))
+                    detail_subset = working_df[working_df.get("Code", pd.Series(index=working_df.index, dtype=str)).astype(str).isin(detail_codes)]
+                    if not detail_subset.empty:
+                        render_dissertations_widget(
+                            subset=detail_subset, key=f"school_search_semantic_details_{slug(root)}",
+                            title="Чтение и скачивание авторефератов", expanded=False,
+                            file_name_prefix=f"семантический_поиск_{slug(root)}",
+                            result_signature=build_dissertation_result_signature(
+                                detail_subset, context_parts=(current_signature, root),
+                            ),
+                        )
+            st.download_button("Скачать результаты в Excel", excel, file_name=file_name,
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               key=f"school_search_semantic_download_{search_mode}")
+            share_params_button(share_params, key=f"school_search_share_{search_mode}")
         return
     if (
         st.session_state.get("school_search_last_signature") == current_signature

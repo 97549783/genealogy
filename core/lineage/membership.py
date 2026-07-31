@@ -113,6 +113,125 @@ def get_all_school_member_codes(
     return _all_school_member_codes_cached(context_key, scope, df, idx)
 
 
+def get_all_school_memberships_by_code(
+    df: pd.DataFrame,
+    idx: dict,
+    scope: str,
+    db_signature: DbSignature,
+    *,
+    context_key: LineageContextKey,
+) -> dict[str, tuple[str, ...]]:
+    """Инвертирует кэшированный состав школ, сохраняя пересечения."""
+    _assert_context_signature(context_key, db_signature)
+    return _all_school_memberships_by_code_cached(context_key, scope, df, idx)
+
+
+@st.cache_data(show_spinner=False)
+def _all_school_memberships_by_code_cached(
+    context_key: LineageContextKey, scope: str, _df: pd.DataFrame, _idx: dict
+) -> dict[str, tuple[str, ...]]:
+    """Кэширует соответствие Code → все научные школы."""
+    by_root = _all_school_member_codes_cached(context_key, scope, _df, _idx)
+    inverse: dict[str, list[str]] = {}
+    for root in sorted(by_root):
+        for code in sorted({str(value) for value in by_root[root]}):
+            inverse.setdefault(code, []).append(root)
+    return {code: tuple(roots) for code, roots in inverse.items()}
+
+
+def _direct_rows_for_author(df: pd.DataFrame, idx: dict, author: str) -> pd.DataFrame:
+    """Возвращает уникальные диссертации непосредственных учеников автора."""
+    rows = rows_for(df, idx, author)
+    if "Code" not in rows.columns:
+        return rows.iloc[0:0]
+    work = rows.copy()
+    work["Code"] = work["Code"].astype(str).str.strip()
+    return work[work["Code"] != ""].drop_duplicates("Code", keep="first")
+
+
+@st.cache_data(show_spinner=False)
+def _school_generation_codes_cached(
+    context_key: LineageContextKey, root: str, _df: pd.DataFrame, _idx: dict
+) -> dict[int, set[str]]:
+    """Строит поколения школы обходом в ширину с защитой от циклов."""
+    generations: dict[int, set[str]] = {}
+    frontier = {str(root)}
+    expanded_authors: set[str] = set()
+    seen_codes: set[str] = set()
+    generation = 1
+    while frontier:
+        next_authors: set[str] = set()
+        current_codes: set[str] = set()
+        for author in sorted(frontier):
+            author_key = _norm_initials(author)
+            if author_key in expanded_authors:
+                continue
+            expanded_authors.add(author_key)
+            for row in _direct_rows_for_author(_df, _idx, author).to_dict("records"):
+                code = str(row.get("Code", "")).strip()
+                candidate = str(row.get("candidate_name", "")).strip()
+                if code and code not in seen_codes:
+                    current_codes.add(code)
+                if candidate and _norm_initials(candidate) not in expanded_authors:
+                    next_authors.add(candidate)
+        if current_codes:
+            generations[generation] = current_codes
+            seen_codes.update(current_codes)
+        frontier = next_authors
+        generation += 1
+    return generations
+
+
+def get_school_generation_codes(
+    df: pd.DataFrame, idx: dict, root: str, db_signature: DbSignature, *,
+    context_key: LineageContextKey,
+) -> dict[int, set[str]]:
+    """Возвращает множества Code по поколениям выбранной школы."""
+    _assert_context_signature(context_key, db_signature)
+    return _school_generation_codes_cached(context_key, str(root), df, idx)
+
+
+@st.cache_data(show_spinner=False)
+def _school_branch_codes_cached(
+    context_key: LineageContextKey, root: str, _df: pd.DataFrame, _idx: dict
+) -> dict[str, set[str]]:
+    """Строит естественные ветви, сохраняя объекты с несколькими путями."""
+    branches: dict[str, set[str]] = {}
+    for first in _direct_rows_for_author(_df, _idx, root).to_dict("records"):
+        first_code = str(first.get("Code", "")).strip()
+        child = str(first.get("candidate_name", "")).strip()
+        if not first_code:
+            continue
+        branch_key = child or first_code
+        codes = {first_code}
+        frontier = {child} if child else set()
+        expanded = {_norm_initials(root)}
+        while frontier:
+            author = frontier.pop()
+            author_key = _norm_initials(author)
+            if author_key in expanded:
+                continue
+            expanded.add(author_key)
+            for row in _direct_rows_for_author(_df, _idx, author).to_dict("records"):
+                code = str(row.get("Code", "")).strip()
+                candidate = str(row.get("candidate_name", "")).strip()
+                if code:
+                    codes.add(code)
+                if candidate and _norm_initials(candidate) not in expanded:
+                    frontier.add(candidate)
+        branches[branch_key] = codes
+    return branches
+
+
+def get_school_branch_codes(
+    df: pd.DataFrame, idx: dict, root: str, db_signature: DbSignature, *,
+    context_key: LineageContextKey,
+) -> dict[str, set[str]]:
+    """Возвращает Code естественных ветвей выбранной школы."""
+    _assert_context_signature(context_key, db_signature)
+    return _school_branch_codes_cached(context_key, str(root), df, idx)
+
+
 @st.cache_data(show_spinner=False)
 def _all_school_member_codes_cached(context_key: LineageContextKey, scope: str, _df: pd.DataFrame, _idx: dict) -> dict[str, set[str]]:
     """Возвращает кэшированные множества Code для всех школ."""
