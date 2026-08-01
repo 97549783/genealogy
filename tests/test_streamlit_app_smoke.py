@@ -19,7 +19,7 @@ def _create_minimal_db(path):
     conn.close()
 
 
-def test_streamlit_app_imports_and_builds_tabs(monkeypatch, tmp_path) -> None:
+def test_streamlit_app_imports_and_builds_navigation(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "genealogy.db"
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
@@ -27,10 +27,11 @@ def test_streamlit_app_imports_and_builds_tabs(monkeypatch, tmp_path) -> None:
     app = AppTest.from_file("streamlit_app.py")
     app.run(timeout=30)
     assert not app.exception
-    assert any(tab.label == "Анализ статей (демо)" for tab in app.tabs)
+    assert len(app.tabs) == 0
+    assert any("main-navigation" in item.value and "Анализ статей (демо)" in item.value for item in app.markdown)
 
 
-def test_streamlit_app_has_clean_dissertation_search_top_tab(monkeypatch, tmp_path) -> None:
+def test_streamlit_app_has_registry_labels_in_navigation(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "genealogy.db"
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
@@ -39,9 +40,10 @@ def test_streamlit_app_has_clean_dissertation_search_top_tab(monkeypatch, tmp_pa
     app.run(timeout=30)
 
     assert not app.exception
-    assert any(tab.label == "Поиск диссертаций" for tab in app.tabs)
-    assert not any(tab.label == "Поиск информации о диссертациях" for tab in app.tabs)
-    assert not any(tab.label == "Поиск по тематическим профилям" for tab in app.tabs)
+    navigation = next(item.value for item in app.markdown if "main-navigation" in item.value)
+    assert "Поиск диссертаций" in navigation
+    assert "Поиск информации о диссертациях" not in navigation
+    assert "Поиск по тематическим профилям" not in navigation
 
 
 def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> None:
@@ -55,6 +57,7 @@ def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> Non
     assert not app.exception
     assert len(app.tabs) == 0
     assert any("Обратная связь" in t.value for t in app.title)
+    assert not any("main-navigation" in item.value for item in app.markdown)
 
 
 def _visible_text(app: AppTest) -> str:
@@ -83,7 +86,8 @@ def test_streamlit_app_lazy_renders_only_default_tab(monkeypatch, tmp_path) -> N
     app.run(timeout=30)
 
     assert not app.exception
-    assert any(tab.label == "Построение деревьев" for tab in app.tabs)
+    assert len(app.tabs) == 0
+    assert any("aria-current=\"page\"" in item.value for item in app.markdown)
 
     all_text = _visible_text(app)
 
