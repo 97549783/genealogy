@@ -9,7 +9,7 @@ import tabs.school_search.semantic as semantic
 
 def _patch_resources(monkeypatch, index: pd.DataFrame, matrix: np.ndarray) -> None:
     metadata = VectorMetadata("модель", True, matrix.shape[1], ("матрица.npy", 1.0, 1))
-    monkeypatch.setattr(semantic, "load_typed_vector_metadata", lambda: metadata)
+    monkeypatch.setattr(semantic, "load_typed_vector_metadata_with_diagnostic", lambda: (metadata, "ok"))
     monkeypatch.setattr(semantic, "get_dissertation_sections_db_signature", lambda: ("разделы", 1.0, 1))
     monkeypatch.setattr(semantic, "load_dissertation_embedding_matrix", lambda signature: matrix)
     monkeypatch.setattr(semantic, "load_dissertation_section_index_for_selection", lambda **kwargs: index[index["Code"].isin(kwargs["allowed_codes"])].copy())
@@ -64,3 +64,28 @@ def test_similar_search_returns_section_and_dissertation_explanations(monkeypatc
     assert result.summary["root"].tolist() == ["Кандидат"]
     assert result.section_similarities["Кандидат"]["Раздел характеристики"].tolist() == ["Цель исследования"]
     assert result.dissertation_details["Кандидат"]["representative"].sum() == 1
+
+
+def test_unavailable_section_database_has_specific_diagnostic(monkeypatch) -> None:
+    monkeypatch.setattr(semantic, "load_typed_vector_metadata_with_diagnostic", lambda: (None, "section_database_unavailable"))
+    result = semantic.search_schools_by_semantic_query(
+        queries=["запрос"], df=pd.DataFrame(), idx={}, lineage_context_key=(("основа", 1.0, 1), (), ()),
+        scope="all", selection=build_section_selection("selected", ["research_goal"]),
+        ranking_config=QueryRankingConfig("broad", .5, 5, 1, 1), top_n=5,
+        year_from=None, year_to=None, degree_levels=set(),
+    )
+    assert result.diagnostics == ("База разделов диссертаций недоступна.",)
+
+
+def test_missing_similar_source_returns_result_diagnostic(monkeypatch) -> None:
+    matrix = np.array([[1, 0]], dtype=np.float32)
+    index = pd.DataFrame({"Code": ["1"], "section_key": ["research_goal"], "matrix_row": [0]})
+    _patch_resources(monkeypatch, index, matrix)
+    monkeypatch.setattr(semantic, "get_all_school_member_codes", lambda *args, **kwargs: {})
+    result = semantic.search_similar_scientific_schools(
+        source_root="", df=pd.DataFrame(), idx={}, lineage_context_key=(("основа", 1.0, 1), (), ()),
+        scope="all", selection=build_section_selection("selected", ["research_goal"]),
+        minimum_school_size=1, minimum_profiled_dissertations=1, top_n=5,
+        hide_near_duplicates=False, near_duplicate_jaccard=.8,
+    )
+    assert result.diagnostics == ("Выбранная исходная научная школа не найдена.",)

@@ -13,7 +13,7 @@ from core.semantic.models import PairwiseDistanceDiagnostics, SectionSelection
 SCORE_COLUMNS = [
     "Code", "semantic_score", "coverage", "available_section_count",
     "selected_section_count", "best_section_key", "best_section_similarity",
-    "best_text_id", "section_scores",
+    "best_section_contribution", "best_text_id", "section_scores",
 ]
 
 
@@ -97,6 +97,18 @@ def build_dissertation_section_vectors(
     selection: SectionSelection, normalized: bool,
 ) -> tuple[dict[str, dict[str, np.ndarray]], pd.DataFrame]:
     """Строит векторы разделов и таблицу взвешенного покрытия диссертаций."""
+    all_vectors, eligible_vectors, coverage = build_dissertation_section_vector_sets(
+        codes, section_index, matrix, selection, normalized,
+    )
+    _ = all_vectors
+    return eligible_vectors, coverage
+
+
+def build_dissertation_section_vector_sets(
+    codes: Collection[str], section_index: pd.DataFrame, matrix: np.ndarray,
+    selection: SectionSelection, normalized: bool,
+) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, dict[str, np.ndarray]], pd.DataFrame]:
+    """Одним проходом строит все валидные и прошедшие покрытие векторы."""
     wanted = {str(code) for code in codes}
     subset = section_index[
         section_index["Code"].astype(str).isin(wanted)
@@ -119,7 +131,8 @@ def build_dissertation_section_vectors(
     coverage_df = pd.DataFrame(rows, columns=["Code", "coverage", "available_section_count", "selected_section_count", "eligible", "invalid_vector_row_count"])
     coverage_df.attrs["invalid_vector_row_count"] = sum(invalid_by_code.values())
     eligible = set(coverage_df.loc[coverage_df["eligible"], "Code"])
-    return {code: value for code, value in vectors.items() if code in eligible}, coverage_df
+    eligible_vectors = {code: value for code, value in vectors.items() if code in eligible}
+    return vectors, eligible_vectors, coverage_df
 
 
 def score_dissertations_against_query(
@@ -166,12 +179,14 @@ def score_dissertations_against_query(
         if coverage < selection.min_coverage:
             continue
         semantic_score = sum(weights[key] * value for key, value in section_scores.items()) / sum(weights[key] for key in section_scores)
-        best_key = max(section_scores, key=lambda key: (section_scores[key], -selection.section_keys.index(key)))
+        contributions = {key: weights[key] * value for key, value in section_scores.items()}
+        best_key = max(contributions, key=lambda key: (contributions[key], -selection.section_keys.index(key)))
         output.append({
             "Code": code, "semantic_score": float(np.clip(semantic_score, -1.0, 1.0)),
             "coverage": coverage, "available_section_count": len(section_scores),
             "selected_section_count": len(selection.section_keys), "best_section_key": best_key,
             "best_section_similarity": section_scores[best_key], "best_text_id": best[(code, best_key)][1],
+            "best_section_contribution": contributions[best_key],
             "section_scores": section_scores,
         })
     result = pd.DataFrame(output, columns=SCORE_COLUMNS)

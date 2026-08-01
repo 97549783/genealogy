@@ -11,7 +11,7 @@ import pandas as pd
 from core.semantic.distances import compute_precomputed_silhouette
 from core.semantic.models import PairwiseDistanceDiagnostics, SectionSelection, build_section_selection
 from core.semantic.section_vectors import (
-    aggregate_duplicate_section_vectors, build_dissertation_section_vectors, composite_distance_matrix,
+    build_dissertation_section_vector_sets, composite_distance_matrix,
 )
 from tabs.dissertation_characteristics.labels import SECTION_LABELS_RU
 from core.perf import perf_timer
@@ -33,6 +33,7 @@ class SemanticSchoolDataset:
     coverage: pd.DataFrame
     excluded: pd.DataFrame
     total_member_count: int
+    invalid_vector_row_count: int = 0
 
     @property
     def dissertation_vectors(self) -> dict[str, dict[str, np.ndarray]]:
@@ -61,14 +62,9 @@ def gather_semantic_school_dataset(
 ) -> SemanticSchoolDataset:
     """Собирает покрытые векторные представления одной школы."""
     members = {str(code).strip() for code in member_codes if str(code).strip()}
-    vectors, coverage = build_dissertation_section_vectors(
+    all_vectors, vectors, coverage = build_dissertation_section_vector_sets(
         members, section_index, matrix, selection, normalized,
     )
-    subset_index = section_index[
-        section_index["Code"].astype(str).isin(members)
-        & section_index["section_key"].isin(selection.section_keys)
-    ]
-    all_vectors = aggregate_duplicate_section_vectors(matrix, subset_index, normalized)
     source_metadata = metadata_df.copy()
     if "Code" not in source_metadata.columns:
         source_metadata = pd.DataFrame(columns=["Code"])
@@ -88,7 +84,8 @@ def gather_semantic_school_dataset(
         "Недостаточное покрытие выбранных разделов",
     )
     return SemanticSchoolDataset(root, all_vectors, vectors, included.reset_index(drop=True), coverage,
-                                 excluded.reset_index(drop=True), len(members))
+                                 excluded.reset_index(drop=True), len(members),
+                                 int(coverage.attrs.get("invalid_vector_row_count", 0)))
 
 
 def _empty_diagnostics(datasets: Mapping[str, SemanticSchoolDataset], selection: SectionSelection) -> PairwiseDistanceDiagnostics:
@@ -132,12 +129,15 @@ def compute_semantic_school_comparison(
             metadata_rows.append(row)
     diagnostics = _empty_diagnostics(datasets, selection)
     excluded = pd.concat([value.excluded for value in datasets.values()], ignore_index=True) if datasets else pd.DataFrame()
+    invalid_count = sum(value.invalid_vector_row_count for value in datasets.values())
+    invalid_diagnostic = ((f"Пропущено недопустимых строк векторной матрицы: {invalid_count}.",)
+                          if invalid_count else ())
     counts = _school_count_summary(datasets)
     per_section = compute_per_section_silhouette(datasets=datasets, selection=selection)
     if len({label for label in labels}) < 2 or any(labels.count(label) < 2 for label in set(labels)):
         return SemanticSchoolComparisonResult(
             None, pd.DataFrame(), counts, per_section,
-            excluded, ("Для расчёта силуэта нужны минимум две школы и две диссертации в каждой.",), diagnostics, None,
+            excluded, ("Для расчёта силуэта нужны минимум две школы и две диссертации в каждой.", *invalid_diagnostic), diagnostics, None,
         )
     with perf_timer("semantic.comparison.build_distance_matrix"):
         distance_matrix, diagnostics = composite_distance_matrix(items, selection, distance_batch_size)
@@ -147,7 +147,7 @@ def compute_semantic_school_comparison(
                    else "Для части пар не определено расстояние: у диссертаций нет общих выбранных разделов.")
         return SemanticSchoolComparisonResult(
             None, pd.DataFrame(), counts, per_section,
-            excluded, (message,), diagnostics, None,
+            excluded, (message, *invalid_diagnostic), diagnostics, None,
         )
     overall, samples = compute_precomputed_silhouette(distance_matrix, labels)
     dissertation_table = pd.DataFrame(metadata_rows)
@@ -165,7 +165,7 @@ def compute_semantic_school_comparison(
         })
     return SemanticSchoolComparisonResult(
         overall, dissertation_table.reset_index(drop=True), pd.DataFrame(summaries),
-        per_section, excluded, (), diagnostics, distance_matrix,
+        per_section, excluded, invalid_diagnostic, diagnostics, distance_matrix,
     )
 
 
@@ -199,7 +199,8 @@ def compute_per_section_silhouette(
             score = None
         else:
             score, _ = compute_precomputed_silhouette(matrix, labels)
-            status = "Рассчитано"
+            skipped = sum(dataset.invalid_vector_row_count for dataset in eligible.values())
+            status = (f"Рассчитано; пропущено недопустимых строк: {skipped}" if skipped else "Рассчитано")
         rows.append({
             "Раздел характеристики": SECTION_LABELS_RU[section_key],
             "Коэффициент силуэта": score, "Число школ": len(eligible),

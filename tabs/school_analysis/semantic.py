@@ -194,6 +194,9 @@ def compute_school_heterogeneity(
     medoid_code = None
     medoid_mean = None
     diagnostics = []
+    invalid_count = int(dataset.coverage.attrs.get("invalid_vector_row_count", 0))
+    if invalid_count:
+        diagnostics.append(f"Пропущено недопустимых строк векторной матрицы: {invalid_count}.")
     if not codes:
         diagnostics.append("Нет диссертаций с достаточным покрытием выбранных разделов.")
     if matrix is not None and codes:
@@ -321,21 +324,30 @@ def compute_branch_semantics(
     membership_count: dict[str, int] = {}
     for branch, codes in branch_codes.items():
         profiles[branch], eligible_by_branch[branch] = _subset_profile(dataset, codes, selection)
-        for code in eligible_by_branch[branch]:
+        for code in {str(value) for value in codes}:
             membership_count[code] = membership_count.get(code, 0) + 1
     ambiguous_codes = {code for code, count in membership_count.items() if count > 1}
     ambiguous_rows = []
     for code in sorted(ambiguous_codes):
         metadata = _display_metadata(dataset, code)
         memberships = [branch for branch, codes in eligible_by_branch.items() if code in codes]
+        if not memberships:
+            memberships = [branch for branch, codes in branch_codes.items() if code in {str(value) for value in codes}]
+        coverage_row = dataset.coverage[dataset.coverage["Code"] == code]
+        coverage_value = float(coverage_row.iloc[0]["coverage"] * 100) if not coverage_row.empty else 0.0
+        eligible_semantically = code in dataset.dissertation_vectors
+        reason = "Неоднозначное членство: исключено только из силуэта ветвей"
+        if not eligible_semantically:
+            reason += "; недостаточное покрытие выбранных разделов"
         ambiguous_rows.append({
             "Автор": metadata["Автор"], "Название": metadata["Название"], "Год": metadata["Год"],
             "Ветви": "; ".join(memberships),
-            "Причина исключения": "Диссертация относится к нескольким естественным ветвям",
+            "Покрытие характеристик, %": coverage_value,
+            "Причина исключения": reason,
             "Code": code,
         })
     ambiguous = pd.DataFrame(
-        ambiguous_rows, columns=["Автор", "Название", "Год", "Ветви", "Причина исключения", "Code"],
+        ambiguous_rows, columns=["Автор", "Название", "Год", "Ветви", "Покрытие характеристик, %", "Причина исключения", "Code"],
     )
     rows = []
     details: dict[str, pd.DataFrame] = {}
@@ -391,9 +403,8 @@ def compute_branch_semantics(
         for right in branches:
             similarity.loc[left, right] = composite_similarity(profiles[left], profiles[right], selection)
     similarity.index.name = "Ветвь"
-    unique_by_branch = {
-        branch: eligible_by_branch[branch] - ambiguous_codes for branch in branches
-    }
+    silhouette_ambiguous_codes = ambiguous_codes & set(dataset.dissertation_vectors)
+    unique_by_branch = {branch: eligible_by_branch[branch] - silhouette_ambiguous_codes for branch in branches}
     included = {branch: codes for branch, codes in unique_by_branch.items() if len(codes) >= 3}
     silhouette_overall = None
     silhouette_rows, sample_rows = [], []

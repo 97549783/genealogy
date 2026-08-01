@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.semantic.models import build_section_selection
+from core.semantic.models import QueryRankingConfig, build_section_selection
 from tabs.dissertation_characteristics.labels import SEARCHABLE_SECTION_KEYS
 
 
@@ -25,3 +25,12 @@ def test_all_selection_has_default_weights() -> None:
 def test_invalid_weight_is_rejected(weight: float) -> None:
     with pytest.raises(ValueError, match="Веса"):
         build_section_selection("selected", ["research_goal"], {"research_goal": weight})
+
+
+@pytest.mark.parametrize("args", [
+    ("ошибка", 0.5, 5.0, 1, 1), ("broad", 2.0, 5.0, 1, 1),
+    ("focused", 0.5, -1.0, 1, 1), ("broad", 0.5, 5.0, 0, 1),
+])
+def test_invalid_query_ranking_config_is_rejected(args) -> None:
+    with pytest.raises(ValueError):
+        QueryRankingConfig(*args)

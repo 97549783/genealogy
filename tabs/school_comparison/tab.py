@@ -204,15 +204,21 @@ def _render_semantic_comparison_mode(df, idx, db_signature) -> None:
     if run_clicked and selection is not None:
         from core.db.dissertation_sections import (
             get_dissertation_sections_db_signature, load_dissertation_section_index_for_selection,
-            load_typed_vector_metadata,
+            load_typed_vector_metadata_with_diagnostic,
         )
         from core.semantic.distances import get_semantic_analysis_limits
         from tabs.dissertation_characteristics.search import load_dissertation_embedding_matrix
         from .semantic import gather_semantic_school_dataset, compute_semantic_school_comparison
 
-        metadata = load_typed_vector_metadata()
+        metadata, metadata_reason = load_typed_vector_metadata_with_diagnostic()
         if metadata is None:
-            st.error("Матрица векторов характеристик недоступна или имеет неверный формат.")
+            messages = {
+                "section_database_unavailable": "База разделов диссертаций недоступна.",
+                "vector_metadata_invalid": "Метаданные векторной матрицы отсутствуют или имеют неверный формат.",
+                "matrix_unavailable": "Файл матрицы векторов недоступен.",
+                "matrix_invalid": "Матрица векторов имеет неверный формат или размерность.",
+            }
+            st.error(messages.get(metadata_reason, "Семантические данные недоступны."))
             return
         complete_signature = {
             **signature, "section_database_signature": get_dissertation_sections_db_signature(),

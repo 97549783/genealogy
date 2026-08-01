@@ -91,36 +91,48 @@ def load_vector_metadata() -> dict[str, str]:
     return _load_vector_metadata_cached(get_dissertation_sections_db_signature())
 
 
-def load_typed_vector_metadata() -> VectorMetadata | None:
-    """Возвращает типизированные метаданные текущей матрицы векторов."""
-    metadata = load_vector_metadata()
-    signature = get_dissertation_matrix_signature()
-    if not metadata or signature is None:
-        return None
+def load_typed_vector_metadata_with_diagnostic() -> tuple[VectorMetadata | None, str]:
+    """Возвращает метаданные и устойчивую причину их недоступности."""
+    if get_dissertation_sections_db_signature() is None:
+        return None, "section_database_unavailable"
+    try:
+        metadata = load_vector_metadata()
+    except (OSError, sqlite3.Error, pd.errors.DatabaseError):
+        return None, "section_database_unavailable"
+    if not metadata:
+        return None, "vector_metadata_invalid"
     try:
         dimensions = int(metadata.get("dimensions", "0"))
     except ValueError:
-        return None
+        return None, "vector_metadata_invalid"
     model_name = str(metadata.get("model_name", "")).strip()
     if dimensions <= 0 or not model_name:
-        return None
+        return None, "vector_metadata_invalid"
     normalized_value = str(metadata.get("normalized", "")).strip().casefold()
     if normalized_value in {"1", "true", "yes", "да"}:
         normalized = True
     elif normalized_value in {"0", "false", "no", "нет"}:
         normalized = False
     else:
-        return None
+        return None, "vector_metadata_invalid"
+    signature = get_dissertation_matrix_signature()
+    if signature is None:
+        return None, "matrix_unavailable"
     try:
         matrix = np.load(signature[0], mmap_mode="r")
         if matrix.ndim != 2 or int(matrix.shape[1]) != dimensions:
-            return None
+            return None, "matrix_invalid"
     except (OSError, ValueError):
-        return None
+        return None, "matrix_invalid"
     return VectorMetadata(
         model_name=model_name, normalized=normalized,
         dimensions=dimensions, matrix_signature=signature,
-    )
+    ), "ok"
+
+
+def load_typed_vector_metadata() -> VectorMetadata | None:
+    """Возвращает типизированные метаданные текущей матрицы векторов."""
+    return load_typed_vector_metadata_with_diagnostic()[0]
 
 
 def resolve_matrix_path_from_metadata(metadata: dict[str, str] | None = None) -> Path | None:
@@ -341,7 +353,7 @@ def _load_dissertation_section_index_for_selection_cached(
                         f"SELECT {select_clause} FROM dissertation_section_texts WHERE {code_clause} AND {section_clause}",
                         conn, params=[*code_batch, *section_keys],
                     ))
-    except (OSError, sqlite3.Error):
+    except (OSError, sqlite3.Error, pd.errors.DatabaseError):
         result = _empty_index(include_text)
         result.attrs["diagnostic_reason"] = "section_database_unavailable"
         return result

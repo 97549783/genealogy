@@ -123,3 +123,20 @@ def test_semantic_export_does_not_multiply_existing_percentage_twice() -> None:
     sheet = load_workbook(BytesIO(payload), data_only=True)["Диссертации поколений"]
     assert sheet.cell(2, 2).value == 60.0
     assert "Code" not in [cell.value for cell in sheet[1]]
+
+
+def test_semantically_excluded_ambiguous_member_remains_visible() -> None:
+    selection = build_section_selection("selected", ["research_goal", "research_methods"], min_coverage=1)
+    dataset = build_school_semantic_dataset(
+        root="Школа", member_codes={"1", "2", "3", "4", "5", "6", "X"},
+        section_index=pd.DataFrame({
+            "Code": list("123456"), "section_key": ["research_goal"] * 6,
+            "matrix_row": range(6),
+        }), matrix=np.eye(6, dtype=np.float32), selection=selection, normalized=True,
+        dissertation_metadata=pd.DataFrame({"Code": [*list("123456"), "X"], "candidate_name": [*list("АБВГДЕ"), "Ж"]}),
+    )
+    result = compute_branch_semantics(dataset, {"А": {"1", "2", "3", "X"}, "Б": {"4", "5", "6", "X"}}, selection)
+    ambiguous = result.ambiguous_dissertations.set_index("Code")
+    assert "X" in ambiguous.index
+    assert ambiguous.loc["X", "Ветви"] == "А; Б"
+    assert "недостаточное покрытие" in ambiguous.loc["X", "Причина исключения"]

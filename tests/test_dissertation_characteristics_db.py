@@ -8,6 +8,7 @@ import pandas as pd
 from core.db.dissertation_sections import (
     load_dissertation_section_index, load_dissertation_section_index_for_selection,
     load_dissertation_section_texts_by_ids, load_typed_vector_metadata,
+    load_typed_vector_metadata_with_diagnostic,
     resolve_dissertation_sections_db_path,
 )
 from tabs.dissertation_characteristics.labels import DISPLAY_SECTION_KEYS, SEARCHABLE_SECTION_KEYS
@@ -98,3 +99,19 @@ def test_typed_metadata_validates_boolean_model_and_dimensions(monkeypatch, tmp_
         conn.execute("UPDATE dissertation_vector_meta SET value='true' WHERE key='normalized'")
         conn.execute("UPDATE dissertation_vector_meta SET value='3' WHERE key='dimensions'")
     assert load_typed_vector_metadata() is None
+
+
+def test_missing_database_and_table_have_diagnostic_reasons(monkeypatch, tmp_path):
+    missing = tmp_path / "missing.db"
+    monkeypatch.setenv("DISSERTATION_SECTIONS_DB_PATH", str(missing))
+    assert load_typed_vector_metadata_with_diagnostic() == (None, "section_database_unavailable")
+
+    malformed = tmp_path / "malformed.db"
+    with sqlite3.connect(malformed) as conn:
+        conn.execute("CREATE TABLE dissertation_vector_meta (key TEXT, value TEXT)")
+    monkeypatch.setenv("DISSERTATION_SECTIONS_DB_PATH", str(malformed))
+    result = load_dissertation_section_index_for_selection(
+        allowed_codes={"A"}, section_keys={"research_goal"}, include_text=False,
+    )
+    assert result.empty
+    assert result.attrs["diagnostic_reason"] == "section_database_unavailable"

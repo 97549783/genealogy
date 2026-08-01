@@ -145,7 +145,7 @@ def _render_school_semantics(
     if run and selection is not None:
         from core.db.dissertation_sections import (
             get_dissertation_sections_db_signature, load_dissertation_section_index_for_selection,
-            load_typed_vector_metadata,
+            load_typed_vector_metadata_with_diagnostic,
         )
         from tabs.dissertation_characteristics.search import load_dissertation_embedding_matrix
         from .semantic import (
@@ -154,9 +154,15 @@ def _render_school_semantics(
             compute_school_semantic_center,
         )
 
-        metadata = load_typed_vector_metadata()
+        metadata, metadata_reason = load_typed_vector_metadata_with_diagnostic()
         if metadata is None:
-            st.error("Матрица векторов характеристик недоступна или имеет неверный формат.")
+            messages = {
+                "section_database_unavailable": "База разделов диссертаций недоступна.",
+                "vector_metadata_invalid": "Метаданные векторной матрицы отсутствуют или имеют неверный формат.",
+                "matrix_unavailable": "Файл матрицы векторов недоступен.",
+                "matrix_invalid": "Матрица векторов имеет неверный формат или размерность.",
+            }
+            st.error(messages.get(metadata_reason, "Семантические данные недоступны."))
             return {}
         try:
             member_codes = {str(code).strip() for code in subset["Code"] if str(code).strip()}

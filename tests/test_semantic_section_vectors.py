@@ -92,3 +92,17 @@ def test_all_invalid_query_rows_keep_diagnostic_count() -> None:
     result = score_dissertations_against_query([1, 0], index, matrix, selection, True, 10)
     assert result.empty
     assert result.attrs["invalid_vector_row_count"] == 1
+
+
+def test_best_section_uses_weighted_contribution() -> None:
+    matrix = np.array([[.8, .6], [1, 0]], dtype=np.float32)
+    index = pd.DataFrame({"Code": ["A", "A"],
+                          "section_key": ["research_goal", "research_methods"],
+                          "matrix_row": [0, 1], "text_id": ["цель", "методы"]})
+    selection = build_section_selection(
+        "selected", ["research_goal", "research_methods"],
+        {"research_goal": 2.0, "research_methods": 1.0}, min_coverage=1,
+    )
+    result = score_dissertations_against_query([1, 0], index, matrix, selection, True, 10)
+    assert result.iloc[0]["best_section_key"] == "research_goal"
+    assert np.isclose(result.iloc[0]["best_section_contribution"], 1.6)

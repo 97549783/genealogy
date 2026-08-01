@@ -787,6 +787,9 @@ def render_school_search_tab(
     if search_mode.startswith("semantic_") and not extra_params.get("section_keys"):
         st.warning("Выберите хотя бы один раздел характеристики.")
         return
+    if search_mode == "semantic_similar" and not extra_params.get("source_root"):
+        st.warning("Выберите исходную научную школу.")
+        return
 
     # ==========================================================================
     # 3. Запуск поиска

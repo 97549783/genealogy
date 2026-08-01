@@ -13,7 +13,7 @@ from core.app.context import LineageContextKey
 from core.db.dissertation_sections import (
     get_dissertation_sections_db_signature,
     load_dissertation_section_index_for_selection,
-    load_typed_vector_metadata,
+    load_typed_vector_metadata_with_diagnostic,
 )
 from core.lineage.membership import get_all_school_member_codes, get_school_basic_stats
 from core.semantic.distances import get_semantic_analysis_limits
@@ -32,6 +32,9 @@ from tabs.dissertation_characteristics.search import load_dissertation_embedding
 INDEX_DIAGNOSTICS_RU = {
     "section_database_unavailable": "База разделов диссертаций недоступна.",
     "no_selected_vectors": "Для выбранных разделов не найдены индексированные векторы.",
+    "vector_metadata_invalid": "Метаданные векторной матрицы отсутствуют или имеют неверный формат.",
+    "matrix_unavailable": "Файл матрицы векторов недоступен.",
+    "matrix_invalid": "Матрица векторов имеет неверный формат или размерность.",
 }
 
 
@@ -114,7 +117,7 @@ def search_schools_by_semantic_query(
     if not prepared:
         raise ValueError("Введите хотя бы один непустой запрос.")
     db_signature = get_dissertation_sections_db_signature()
-    metadata = load_typed_vector_metadata()
+    metadata, metadata_reason = load_typed_vector_metadata_with_diagnostic()
     base_values = {
         "queries": tuple(prepared), "scope": scope, "ranking_mode": ranking_config.ranking_mode,
         "relevance_threshold": ranking_config.relevance_threshold,
@@ -128,7 +131,7 @@ def search_schools_by_semantic_query(
     parameters = _parameters(selection=selection, metadata=metadata, db_signature=db_signature,
                              main_db_signature=main_signature, lineage_context_key=lineage_context_key, values=base_values)
     if metadata is None:
-        return SemanticSchoolQueryResult(pd.DataFrame(), {}, ("Матрица векторов недоступна или имеет неверный формат.",), selection, None, parameters)
+        return SemanticSchoolQueryResult(pd.DataFrame(), {}, (INDEX_DIAGNOSTICS_RU[metadata_reason],), selection, None, parameters)
     allowed = _filtered_codes(df, year_from, year_to, degree_levels)
     if not allowed:
         return SemanticSchoolQueryResult(pd.DataFrame(), {}, ("После применения фильтров не осталось диссертаций.",), selection, metadata, parameters)
@@ -186,7 +189,7 @@ def search_similar_scientific_schools(
 ) -> SimilarSchoolResult:
     """Ищет школы по сходству отдельных центров характеристик."""
     db_signature = get_dissertation_sections_db_signature()
-    metadata = load_typed_vector_metadata()
+    metadata, metadata_reason = load_typed_vector_metadata_with_diagnostic()
     values = {
         "source_root": source_root, "scope": scope, "minimum_school_size": minimum_school_size,
         "minimum_profiled_dissertations": minimum_profiled_dissertations, "top_n": top_n,
@@ -196,10 +199,13 @@ def search_similar_scientific_schools(
     parameters = _parameters(selection=selection, metadata=metadata, db_signature=db_signature,
                              main_db_signature=main_signature, lineage_context_key=lineage_context_key, values=values)
     if metadata is None:
-        return SimilarSchoolResult(pd.DataFrame(), {}, ("Матрица векторов недоступна или имеет неверный формат.",), selection, None, parameters)
+        return SimilarSchoolResult(pd.DataFrame(), {}, (INDEX_DIAGNOSTICS_RU[metadata_reason],), selection, None, parameters)
     codes_by_root = get_all_school_member_codes(df, idx, scope, lineage_context_key[0], context_key=lineage_context_key)
     if source_root not in codes_by_root:
-        raise ValueError("Выбранная исходная научная школа не найдена.")
+        return SimilarSchoolResult(
+            pd.DataFrame(), {}, ("Выбранная исходная научная школа не найдена.",),
+            selection, metadata, parameters,
+        )
     eligible_roots = [root for root, codes in codes_by_root.items()
                       if root != source_root and len(codes) >= minimum_school_size]
     try:
