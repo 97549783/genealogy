@@ -83,6 +83,7 @@ def build_semantic_query_search_excel(result: SemanticSchoolQueryResult) -> byte
     """Экспортирует ранжирование школ и объясняющие диссертации."""
     schools = _select_columns(result.summary, QUERY_SCHOOL_COLUMNS, ("Полнота данных, %", "Доля выше порога, %"))
     detail_rows, contribution_rows = [], []
+    section_weights = dict(result.selection.weights)
     for root, details in result.dissertation_details.items():
         for record in details.to_dict("records"):
             detail_rows.append({
@@ -95,16 +96,24 @@ def build_semantic_query_search_excel(result: SemanticSchoolQueryResult) -> byte
                 "Сходство лучшего раздела": record.get("best_section_similarity"),
             })
             for key, score in (record.get("section_scores") or {}).items():
+                available_weight = sum(
+                    section_weights.get(section_key, 0.0) for section_key in (record.get("section_scores") or {})
+                )
+                contribution = (record.get("section_contributions") or {}).get(key)
+                if contribution is None and available_weight > 0:
+                    contribution = section_weights.get(key, 0.0) * score / available_weight
                 contribution_rows.append({"Научный руководитель": root, "Автор": record.get("candidate_name"),
                                           "Название": record.get("title"), "Год": record.get("year"),
-                                          "Раздел характеристики": SECTION_LABELS_RU.get(key, key), "Сходство": score})
+                                          "Раздел характеристики": SECTION_LABELS_RU.get(key, key),
+                                          "Вес раздела": section_weights.get(key), "Сходство": score,
+                                          "Взвешенный вклад": contribution})
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        _parameters_frame(result.parameters).to_excel(writer, "Параметры поиска", index=False)
-        schools.to_excel(writer, "Научные школы", index=False)
-        pd.DataFrame(detail_rows).to_excel(writer, "Лучшие диссертации", index=False)
-        pd.DataFrame(contribution_rows).to_excel(writer, "Вклады разделов", index=False)
-        pd.DataFrame({"Диагностика": result.diagnostics}).to_excel(writer, "Диагностика", index=False)
+        _parameters_frame(result.parameters).to_excel(writer, sheet_name="Параметры поиска", index=False)
+        schools.to_excel(writer, sheet_name="Научные школы", index=False)
+        pd.DataFrame(detail_rows).to_excel(writer, sheet_name="Лучшие диссертации", index=False)
+        pd.DataFrame(contribution_rows).to_excel(writer, sheet_name="Вклады разделов", index=False)
+        pd.DataFrame({"Диагностика": result.diagnostics}).to_excel(writer, sheet_name="Диагностика", index=False)
     return output.getvalue()
 
 
@@ -126,10 +135,10 @@ def build_similar_school_search_excel(result: SimilarSchoolResult) -> bytes:
                 representative_rows.append(row)
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        _parameters_frame(result.parameters).to_excel(writer, "Параметры поиска", index=False)
-        schools.to_excel(writer, "Научные школы", index=False)
-        sections.to_excel(writer, "Сходство по разделам", index=False)
-        pd.DataFrame(representative_rows).to_excel(writer, "Репрезентативные работы", index=False)
-        pd.DataFrame(nearest_rows).to_excel(writer, "Ближайшие диссертации", index=False)
-        pd.DataFrame({"Диагностика": result.diagnostics}).to_excel(writer, "Диагностика", index=False)
+        _parameters_frame(result.parameters).to_excel(writer, sheet_name="Параметры поиска", index=False)
+        schools.to_excel(writer, sheet_name="Научные школы", index=False)
+        sections.to_excel(writer, sheet_name="Сходство по разделам", index=False)
+        pd.DataFrame(representative_rows).to_excel(writer, sheet_name="Репрезентативные работы", index=False)
+        pd.DataFrame(nearest_rows).to_excel(writer, sheet_name="Ближайшие диссертации", index=False)
+        pd.DataFrame({"Диагностика": result.diagnostics}).to_excel(writer, sheet_name="Диагностика", index=False)
     return output.getvalue()

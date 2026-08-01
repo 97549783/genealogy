@@ -976,13 +976,21 @@ def render_school_search_tab(
                         shown["Лучший раздел"] = shown["Лучший раздел"].map(SECTION_LABELS_RU)
                     st.dataframe(shown, use_container_width=True, hide_index=True)
                     contribution_rows = []
+                    section_weights = dict(result.selection.weights)
                     for record in details.to_dict("records"):
                         for section_key, score in (record.get("section_scores") or {}).items():
+                            available_weight = sum(
+                                section_weights.get(key, 0.0) for key in (record.get("section_scores") or {})
+                            )
+                            contribution = (record.get("section_contributions") or {}).get(section_key)
+                            if contribution is None and available_weight > 0:
+                                contribution = section_weights.get(section_key, 0.0) * score / available_weight
                             contribution_rows.append({
                                 "Автор": record.get("candidate_name"),
                                 "Название": record.get("title"), "Год": record.get("year"),
                                 "Раздел характеристики": SECTION_LABELS_RU.get(section_key, section_key),
-                                "Сходство": score,
+                                "Вес раздела": section_weights.get(section_key),
+                                "Сходство": score, "Взвешенный вклад": contribution,
                             })
                     if contribution_rows:
                         st.markdown("##### Вклад разделов характеристик")

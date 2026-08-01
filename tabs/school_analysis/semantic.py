@@ -336,9 +336,15 @@ def compute_branch_semantics(
         coverage_row = dataset.coverage[dataset.coverage["Code"] == code]
         coverage_value = float(coverage_row.iloc[0]["coverage"] * 100) if not coverage_row.empty else 0.0
         eligible_semantically = code in dataset.dissertation_vectors
-        reason = "Неоднозначное членство: исключено только из силуэта ветвей"
-        if not eligible_semantically:
-            reason += "; недостаточное покрытие выбранных разделов"
+        if eligible_semantically:
+            reason = "Неоднозначное членство: исключено только из расчёта силуэта ветвей"
+        else:
+            excluded_row = dataset.excluded[dataset.excluded["Code"].astype(str) == code]
+            exclusion_reason = (
+                str(excluded_row.iloc[0].get("Причина исключения", "Недостаточное покрытие выбранных разделов"))
+                if not excluded_row.empty else "Недостаточное покрытие выбранных разделов"
+            )
+            reason = f"Неоднозначное членство; семантические показатели не рассчитаны: {exclusion_reason.casefold()}"
         ambiguous_rows.append({
             "Автор": metadata["Автор"], "Название": metadata["Название"], "Год": metadata["Год"],
             "Ветви": "; ".join(memberships),

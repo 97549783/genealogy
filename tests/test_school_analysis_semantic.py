@@ -140,3 +140,19 @@ def test_semantically_excluded_ambiguous_member_remains_visible() -> None:
     assert "X" in ambiguous.index
     assert ambiguous.loc["X", "Ветви"] == "А; Б"
     assert "недостаточное покрытие" in ambiguous.loc["X", "Причина исключения"]
+
+
+def test_invalid_ambiguous_member_has_actual_exclusion_reason() -> None:
+    selection = build_section_selection("selected", ["research_goal"], min_coverage=1)
+    dataset = build_school_semantic_dataset(
+        root="Школа", member_codes={"1", "2", "X"},
+        section_index=pd.DataFrame({
+            "Code": ["1", "2", "X"], "section_key": ["research_goal"] * 3,
+            "matrix_row": [0, 1, 99],
+        }), matrix=np.eye(2, dtype=np.float32), selection=selection, normalized=True,
+        dissertation_metadata=pd.DataFrame({"Code": ["1", "2", "X"], "candidate_name": ["А", "Б", "В"]}),
+    )
+    result = compute_branch_semantics(dataset, {"А": {"1", "X"}, "Б": {"2", "X"}}, selection)
+    reason = result.ambiguous_dissertations.set_index("Code").loc["X", "Причина исключения"]
+    assert "недопустимые или нулевые строки" in reason
+    assert "исключено только" not in reason

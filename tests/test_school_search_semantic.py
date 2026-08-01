@@ -1,10 +1,14 @@
 """Проверки чистой оркестрации семантического поиска школ."""
 
+from io import BytesIO
+
 import numpy as np
 import pandas as pd
+from openpyxl import load_workbook
 
 from core.semantic.models import QueryRankingConfig, VectorMetadata, build_section_selection
 import tabs.school_search.semantic as semantic
+from tabs.school_search.exports import build_semantic_query_search_excel
 
 
 def _patch_resources(monkeypatch, index: pd.DataFrame, matrix: np.ndarray) -> None:
@@ -89,3 +93,23 @@ def test_missing_similar_source_returns_result_diagnostic(monkeypatch) -> None:
         hide_near_duplicates=False, near_duplicate_jaccard=.8,
     )
     assert result.diagnostics == ("Выбранная исходная научная школа не найдена.",)
+
+
+def test_query_export_contains_normalized_weighted_contributions() -> None:
+    selection = build_section_selection(
+        "selected", ["research_goal", "research_methods"],
+        {"research_goal": 2.0, "research_methods": 1.0}, min_coverage=1,
+    )
+    details = pd.DataFrame([{
+        "candidate_name": "Автор", "title": "Название", "year": 2020,
+        "coverage": 1.0, "section_scores": {"research_goal": .8, "research_methods": 1.0},
+        "section_contributions": {"research_goal": 1.6 / 3, "research_methods": 1 / 3},
+    }])
+    result = semantic.SemanticSchoolQueryResult(
+        pd.DataFrame(), {"Школа": details}, (), selection, None, {},
+    )
+    workbook = load_workbook(BytesIO(build_semantic_query_search_excel(result)), data_only=True)
+    rows = list(workbook["Вклады разделов"].values)
+    assert rows[0][-3:] == ("Вес раздела", "Сходство", "Взвешенный вклад")
+    assert np.isclose(rows[1][-1], 1.6 / 3)
+    assert np.isclose(rows[2][-1], 1 / 3)

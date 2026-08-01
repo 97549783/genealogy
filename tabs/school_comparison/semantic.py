@@ -199,7 +199,10 @@ def compute_per_section_silhouette(
             score = None
         else:
             score, _ = compute_precomputed_silhouette(matrix, labels)
-            skipped = sum(dataset.invalid_vector_row_count for dataset in eligible.values())
+            skipped = sum(
+                int(dataset.coverage.attrs.get("invalid_vector_row_count_by_section", {}).get(section_key, 0))
+                for dataset in eligible.values()
+            )
             status = (f"Рассчитано; пропущено недопустимых строк: {skipped}" if skipped else "Рассчитано")
         rows.append({
             "Раздел характеристики": SECTION_LABELS_RU[section_key],

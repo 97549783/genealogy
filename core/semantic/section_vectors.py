@@ -13,7 +13,7 @@ from core.semantic.models import PairwiseDistanceDiagnostics, SectionSelection
 SCORE_COLUMNS = [
     "Code", "semantic_score", "coverage", "available_section_count",
     "selected_section_count", "best_section_key", "best_section_similarity",
-    "best_section_contribution", "best_text_id", "section_scores",
+    "best_section_contribution", "best_text_id", "section_scores", "section_contributions",
 ]
 
 
@@ -58,17 +58,18 @@ def aggregate_duplicate_section_vectors(
     matrix: np.ndarray, section_index: pd.DataFrame, normalized: bool
 ) -> dict[str, dict[str, np.ndarray]]:
     """Усредняет дубликаты разделов и нормализует каждый итоговый центр."""
-    result, _ = _aggregate_duplicate_section_vectors_with_diagnostics(matrix, section_index, normalized)
+    result, _, _ = _aggregate_duplicate_section_vectors_with_diagnostics(matrix, section_index, normalized)
     return result
 
 
 def _aggregate_duplicate_section_vectors_with_diagnostics(
     matrix: np.ndarray, section_index: pd.DataFrame, normalized: bool,
-) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, int]]:
+) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, int], dict[str, int]]:
     """Агрегирует векторы и считает недопустимые строки по диссертациям."""
     valid = validate_matrix_and_index(matrix, section_index)
     buckets: dict[tuple[str, str], list[np.ndarray]] = {}
     invalid_by_code: dict[str, int] = {}
+    invalid_by_section: dict[str, int] = {}
     structural_by_code = _structural_invalid_counts(matrix, section_index)
     for start in range(0, len(valid), 512):
         part = valid.iloc[start:start + 512]
@@ -82,6 +83,8 @@ def _aggregate_duplicate_section_vectors_with_diagnostics(
             else:
                 code = str(row.Code)
                 invalid_by_code[code] = invalid_by_code.get(code, 0) + 1
+                section_key = str(row.section_key)
+                invalid_by_section[section_key] = invalid_by_section.get(section_key, 0) + 1
     result: dict[str, dict[str, np.ndarray]] = {}
     for (code, key), vectors in buckets.items():
         centroid = _normalize(np.mean(vectors, axis=0, dtype=np.float32))
@@ -89,7 +92,13 @@ def _aggregate_duplicate_section_vectors_with_diagnostics(
             result.setdefault(code, {})[key] = centroid.astype(np.float32, copy=False)
     for code, count in structural_by_code.items():
         invalid_by_code[code] = invalid_by_code.get(code, 0) + count
-    return result, invalid_by_code
+    numeric = pd.to_numeric(section_index["matrix_row"], errors="coerce")
+    valid_mask = numeric.notna() & np.isfinite(numeric) & (numeric == np.floor(numeric))
+    valid_mask &= (numeric >= 0) & (numeric < matrix.shape[0])
+    structural_rows = section_index.loc[~valid_mask]
+    for section_key, count in structural_rows["section_key"].astype(str).value_counts().items():
+        invalid_by_section[section_key] = invalid_by_section.get(section_key, 0) + int(count)
+    return result, invalid_by_code, invalid_by_section
 
 
 def build_dissertation_section_vectors(
@@ -114,7 +123,9 @@ def build_dissertation_section_vector_sets(
         section_index["Code"].astype(str).isin(wanted)
         & section_index["section_key"].isin(selection.section_keys)
     ]
-    vectors, invalid_by_code = _aggregate_duplicate_section_vectors_with_diagnostics(matrix, subset, normalized)
+    vectors, invalid_by_code, invalid_by_section = _aggregate_duplicate_section_vectors_with_diagnostics(
+        matrix, subset, normalized,
+    )
     weights = dict(selection.weights)
     total = sum(weights.values())
     rows = []
@@ -130,6 +141,7 @@ def build_dissertation_section_vector_sets(
         })
     coverage_df = pd.DataFrame(rows, columns=["Code", "coverage", "available_section_count", "selected_section_count", "eligible", "invalid_vector_row_count"])
     coverage_df.attrs["invalid_vector_row_count"] = sum(invalid_by_code.values())
+    coverage_df.attrs["invalid_vector_row_count_by_section"] = invalid_by_section
     eligible = set(coverage_df.loc[coverage_df["eligible"], "Code"])
     eligible_vectors = {code: value for code, value in vectors.items() if code in eligible}
     return vectors, eligible_vectors, coverage_df
@@ -180,6 +192,10 @@ def score_dissertations_against_query(
             continue
         semantic_score = sum(weights[key] * value for key, value in section_scores.items()) / sum(weights[key] for key in section_scores)
         contributions = {key: weights[key] * value for key, value in section_scores.items()}
+        available_weight = sum(weights[key] for key in section_scores)
+        normalized_contributions = {
+            key: contribution / available_weight for key, contribution in contributions.items()
+        }
         best_key = max(contributions, key=lambda key: (contributions[key], -selection.section_keys.index(key)))
         output.append({
             "Code": code, "semantic_score": float(np.clip(semantic_score, -1.0, 1.0)),
@@ -188,6 +204,7 @@ def score_dissertations_against_query(
             "best_section_similarity": section_scores[best_key], "best_text_id": best[(code, best_key)][1],
             "best_section_contribution": contributions[best_key],
             "section_scores": section_scores,
+            "section_contributions": normalized_contributions,
         })
     result = pd.DataFrame(output, columns=SCORE_COLUMNS)
     result.attrs["invalid_vector_row_count"] = invalid_vector_row_count

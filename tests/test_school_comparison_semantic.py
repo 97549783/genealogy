@@ -80,3 +80,24 @@ def test_partial_export_does_not_claim_pairwise_success() -> None:
     workbook = load_workbook(BytesIO(build_semantic_school_comparison_excel(result, {})), read_only=True)
     diagnostics = " ".join(str(row) for row in workbook["Диагностика"].values)
     assert "Недостаточно данных для попарного расчёта" in diagnostics
+
+
+def test_per_section_invalid_diagnostic_is_section_specific() -> None:
+    matrix = np.array([[1, 0], [.9, .1], [0, 1], [.1, .9]], dtype=np.float32)
+    selection = build_section_selection(
+        "selected", ["research_goal", "research_methods"], min_coverage=.5,
+    )
+    datasets = {}
+    for root, codes, rows in (("А", ["1", "2"], [0, 1]), ("Б", ["3", "4"], [2, 3])):
+        index = pd.DataFrame({
+            "Code": [*codes, codes[0]],
+            "section_key": ["research_goal", "research_goal", "research_methods"],
+            "matrix_row": [*rows, 99],
+        })
+        datasets[root] = gather_semantic_school_dataset(
+            root=root, member_codes=codes, section_index=index, matrix=matrix,
+            selection=selection, normalized=True, metadata_df=pd.DataFrame({"Code": codes}),
+        )
+    result = compute_per_section_silhouette(datasets=datasets, selection=selection)
+    goal_status = result.loc[result["Раздел характеристики"] == "Цель исследования", "Статус"].iloc[0]
+    assert goal_status == "Рассчитано"

@@ -106,3 +106,7 @@ def test_best_section_uses_weighted_contribution() -> None:
     result = score_dissertations_against_query([1, 0], index, matrix, selection, True, 10)
     assert result.iloc[0]["best_section_key"] == "research_goal"
     assert np.isclose(result.iloc[0]["best_section_contribution"], 1.6)
+    contributions = result.iloc[0]["section_contributions"]
+    assert np.isclose(contributions["research_goal"], 1.6 / 3.0)
+    assert np.isclose(contributions["research_methods"], 1.0 / 3.0)
+    assert np.isclose(sum(contributions.values()), result.iloc[0]["semantic_score"])
