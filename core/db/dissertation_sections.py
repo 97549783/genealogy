@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from tabs.dissertation_characteristics.labels import SEARCHABLE_SECTION_KEYS, SECTION_LABELS_RU
+from core.semantic.models import VectorMetadata
 
 REQUIRED_TEXT_COLUMNS = {"text_id", "Code", "section_key", "section_order", "text", "text_hash", "matrix_row"}
 REQUIRED_TABLES = {"dissertation_section_texts", "dissertation_vector_meta"}
@@ -87,6 +89,50 @@ def _load_vector_metadata_cached(db_signature: tuple[str, float, int] | None) ->
 def load_vector_metadata() -> dict[str, str]:
     """Загружает метаданные матрицы векторов."""
     return _load_vector_metadata_cached(get_dissertation_sections_db_signature())
+
+
+def load_typed_vector_metadata_with_diagnostic() -> tuple[VectorMetadata | None, str]:
+    """Возвращает метаданные и устойчивую причину их недоступности."""
+    if get_dissertation_sections_db_signature() is None:
+        return None, "section_database_unavailable"
+    try:
+        metadata = load_vector_metadata()
+    except (OSError, sqlite3.Error, pd.errors.DatabaseError):
+        return None, "section_database_unavailable"
+    if not metadata:
+        return None, "vector_metadata_invalid"
+    try:
+        dimensions = int(metadata.get("dimensions", "0"))
+    except ValueError:
+        return None, "vector_metadata_invalid"
+    model_name = str(metadata.get("model_name", "")).strip()
+    if dimensions <= 0 or not model_name:
+        return None, "vector_metadata_invalid"
+    normalized_value = str(metadata.get("normalized", "")).strip().casefold()
+    if normalized_value in {"1", "true", "yes", "да"}:
+        normalized = True
+    elif normalized_value in {"0", "false", "no", "нет"}:
+        normalized = False
+    else:
+        return None, "vector_metadata_invalid"
+    signature = get_dissertation_matrix_signature()
+    if signature is None:
+        return None, "matrix_unavailable"
+    try:
+        matrix = np.load(signature[0], mmap_mode="r")
+        if matrix.ndim != 2 or int(matrix.shape[1]) != dimensions:
+            return None, "matrix_invalid"
+    except (OSError, ValueError):
+        return None, "matrix_invalid"
+    return VectorMetadata(
+        model_name=model_name, normalized=normalized,
+        dimensions=dimensions, matrix_signature=signature,
+    ), "ok"
+
+
+def load_typed_vector_metadata() -> VectorMetadata | None:
+    """Возвращает типизированные метаданные текущей матрицы векторов."""
+    return load_typed_vector_metadata_with_diagnostic()[0]
 
 
 def resolve_matrix_path_from_metadata(metadata: dict[str, str] | None = None) -> Path | None:
@@ -270,6 +316,72 @@ def load_dissertation_section_index(
         normalized_codes,
         bool(searchable_only),
         bool(include_text),
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _load_dissertation_section_index_for_selection_cached(
+    db_signature: tuple[str, float, int] | None,
+    allowed_codes: tuple[str, ...] | None,
+    section_keys: tuple[str, ...],
+    include_text: bool,
+) -> pd.DataFrame:
+    """Загружает выбранные разделы, применяя оба фильтра в SQLite."""
+    if db_signature is None:
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "section_database_unavailable"
+        return result
+    if not section_keys or (allowed_codes is not None and not allowed_codes):
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "empty_filter"
+        return result
+    columns = TEXT_COLUMNS if include_text else INDEX_COLUMNS
+    select_clause = ", ".join(columns)
+    section_clause = "section_key IN (" + ",".join("?" for _ in section_keys) + ")"
+    frames: list[pd.DataFrame] = []
+    try:
+        with get_dissertation_sections_connection() as conn:
+            if allowed_codes is None:
+                frames.append(pd.read_sql_query(
+                    f"SELECT {select_clause} FROM dissertation_section_texts WHERE {section_clause}",
+                    conn, params=list(section_keys),
+                ))
+            else:
+                for code_batch in _batched(allowed_codes):
+                    code_clause = "Code IN (" + ",".join("?" for _ in code_batch) + ")"
+                    frames.append(pd.read_sql_query(
+                        f"SELECT {select_clause} FROM dissertation_section_texts WHERE {code_clause} AND {section_clause}",
+                        conn, params=[*code_batch, *section_keys],
+                    ))
+    except (OSError, sqlite3.Error, pd.errors.DatabaseError):
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "section_database_unavailable"
+        return result
+    if not frames:
+        result = _empty_index(include_text)
+        result.attrs["diagnostic_reason"] = "no_selected_vectors"
+        return result
+    result = _with_section_label(pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0])
+    if result.empty:
+        result.attrs["diagnostic_reason"] = "no_selected_vectors"
+    return result
+
+
+def load_dissertation_section_index_for_selection(
+    *, allowed_codes: Collection[str] | None, section_keys: Collection[str],
+    include_text: bool = False,
+) -> pd.DataFrame:
+    """Возвращает канонический лёгкий индекс для явно выбранных разделов."""
+    requested = {str(key).strip() for key in section_keys if str(key).strip()}
+    unknown = requested - set(SEARCHABLE_SECTION_KEYS)
+    if unknown:
+        raise ValueError("Выбраны неизвестные разделы характеристик.")
+    ordered_keys = tuple(key for key in SEARCHABLE_SECTION_KEYS if key in requested)
+    normalized_codes = None
+    if allowed_codes is not None:
+        normalized_codes = tuple(sorted({str(code).strip() for code in allowed_codes if str(code).strip()}))
+    return _load_dissertation_section_index_for_selection_cached(
+        get_dissertation_sections_db_signature(), normalized_codes, ordered_keys, bool(include_text)
     )
 
 

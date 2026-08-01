@@ -137,3 +137,27 @@ def test_filter_columns_by_nodes_selects_expected_branch() -> None:
         "1.1.1",
         "1.1.2",
     ]
+
+
+def test_characteristics_mode_hides_classifier_controls_and_does_not_load_matrix() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import tabs.school_comparison.tab as comp_tab
+
+def forbidden(*args, **kwargs):
+    raise AssertionError("Матрица или классификатор не должны загружаться до запуска")
+
+comp_tab.load_scores_from_db = forbidden
+sample_df = pd.DataFrame([
+    {"Code": "1", "candidate_name": "А", "supervisors_1.name": "Иванов И.И."},
+    {"Code": "2", "candidate_name": "Б", "supervisors_1.name": "Петров П.П."},
+])
+comp_tab.render_school_comparison_tab(sample_df, idx={}, db_signature=("semantic-ui", 1.0, 1))
+"""
+    )
+    app.query_params["school_comp_representation"] = "characteristics"
+    app.run()
+    assert app.session_state["school_comp_representation"] == "characteristics"
+    assert not any(widget.label == "Метрика расстояния" for widget in app.selectbox)
+    assert any(widget.label == "Минимальное покрытие разделов, %" for widget in app.slider)

@@ -15,6 +15,19 @@ def _safe_sheet_name(prefix: str, label: str) -> str:
     return name[:31]
 
 
+def _localized_semantic_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Удаляет технические поля и приводит покрытие к процентам."""
+    coverage_was_fraction = "coverage" in frame.columns and "Покрытие, %" not in frame.columns
+    result = frame.drop(columns=["Code", "eligible", "invalid_vector_row_count"], errors="ignore").rename(columns={
+        "candidate_name": "Автор", "title": "Название", "year": "Год",
+        "coverage": "Покрытие, %", "available_section_count": "Доступно разделов",
+        "selected_section_count": "Выбрано разделов",
+    }).copy()
+    if coverage_was_fraction and "Покрытие, %" in result:
+        result["Покрытие, %"] = pd.to_numeric(result["Покрытие, %"], errors="coerce") * 100.0
+    return result
+
+
 def build_excel_report(
     metrics_df: pd.DataFrame,
     generations_df: pd.DataFrame,
@@ -24,6 +37,17 @@ def build_excel_report(
     opponents_df: pd.DataFrame,
     continuity_df: pd.DataFrame,
     thematic_groups: Optional[Dict[str, pd.DataFrame]] = None,
+    semantic_summary: pd.DataFrame | None = None,
+    semantic_dissertations: pd.DataFrame | None = None,
+    semantic_generations: pd.DataFrame | None = None,
+    semantic_generation_dissertations: pd.DataFrame | None = None,
+    semantic_branches: pd.DataFrame | None = None,
+    semantic_branch_dissertations: pd.DataFrame | None = None,
+    semantic_branch_similarity: pd.DataFrame | None = None,
+    semantic_branch_silhouette: pd.DataFrame | None = None,
+    semantic_excluded: pd.DataFrame | None = None,
+    semantic_ambiguous: pd.DataFrame | None = None,
+    semantic_diagnostics: pd.DataFrame | None = None,
 ) -> bytes:
     """
     Формирует Excel-файл со всеми листами анализа.
@@ -82,5 +106,22 @@ def build_excel_report(
             continuity_df.to_excel(
                 writer, index=False, sheet_name="Ученики-руководители"
             )
+
+        semantic_sheets = (
+            (semantic_summary, "Семантическая сводка"),
+            (semantic_dissertations, "Семантика диссертаций"),
+            (semantic_generations, "Семантика поколений"),
+            (semantic_generation_dissertations, "Диссертации поколений"),
+            (semantic_branches, "Семантика ветвей"),
+            (semantic_branch_dissertations, "Диссертации ветвей"),
+            (semantic_branch_similarity, "Сходство ветвей"),
+            (semantic_branch_silhouette, "Силуэт ветвей"),
+            (semantic_ambiguous, "Неоднозначные диссертации"),
+            (semantic_excluded, "Исключённые диссертации"),
+            (semantic_diagnostics, "Диагностика семантики"),
+        )
+        for semantic_df, sheet_name in semantic_sheets:
+            if semantic_df is not None and not semantic_df.empty:
+                _localized_semantic_frame(semantic_df).to_excel(writer, index=False, sheet_name=sheet_name[:31])
 
     return buf.getvalue()

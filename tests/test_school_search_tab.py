@@ -198,3 +198,30 @@ def test_reverse_lineage_rows_keep_non_empty_second_supervisor() -> None:
 
     assert "Научный руководитель 2" in result.columns
     assert "Сидоров Сидор Сидорович" in result["Научный руководитель 2"].values
+
+
+def test_semantic_query_mode_does_not_load_resources_before_run() -> None:
+    app = AppTest.from_string(
+        """
+import pandas as pd
+import streamlit as st
+import tabs.school_search.tab as school_search_tab
+import tabs.school_search.semantic as semantic
+
+def forbidden(*args, **kwargs):
+    raise AssertionError("Семантические ресурсы не должны загружаться до запуска")
+
+semantic.search_schools_by_semantic_query = forbidden
+semantic.search_similar_scientific_schools = forbidden
+st.session_state["school_search_query_hydrated"] = True
+st.session_state["school_search_mode"] = "semantic_query"
+sample_df = pd.DataFrame([
+    {"Code": "1", "candidate_name": "А", "supervisors_1.name": "Иванов И.И.", "year": 2020}
+])
+school_search_tab.render_school_search_tab(sample_df, idx={}, db_signature=("semantic", 1.0, 1))
+import importlib
+importlib.reload(semantic)
+"""
+    )
+    app.run()
+    assert any(element.value == "Введите хотя бы один непустой запрос." for element in app.warning)

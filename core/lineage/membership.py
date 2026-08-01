@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import streamlit as st
 import pandas as pd
 import networkx as nx
@@ -17,6 +18,14 @@ from core.perf import perf_timer
 from core.app.context import DbSignature, LineageContextKey
 
 
+@dataclass(frozen=True)
+class LineageTraversalResult:
+    """Хранит группы обхода и устойчивые диагностические сообщения."""
+
+    groups: dict
+    diagnostics: tuple[str, ...]
+
+
 def _norm_initials(s: str) -> str:
     s = str(s).lower().replace("ё", "е")
     s = " ".join(s.split())
@@ -25,6 +34,15 @@ def _norm_initials(s: str) -> str:
         prev = s
         s = __import__("re").sub(r"([а-яеa-z])\. ([а-яеa-z]\.)", r"\1.\2", s)
     return s
+
+
+def _child_identity(name: str) -> str:
+    """Сводит полное имя и форму с инициалами к устойчивой личности."""
+    normalized = _norm_initials(name)
+    parts = normalized.replace(".", " ").split()
+    if len(parts) >= 3:
+        return f"{parts[0]} {parts[1][0]}.{parts[2][0]}."
+    return normalized
 
 
 @st.cache_data(show_spinner=False)
@@ -111,6 +129,180 @@ def get_all_school_member_codes(
     """Возвращает словарь root → множество Code для всех школ."""
     _assert_context_signature(context_key, db_signature)
     return _all_school_member_codes_cached(context_key, scope, df, idx)
+
+
+def get_all_school_memberships_by_code(
+    df: pd.DataFrame,
+    idx: dict,
+    scope: str,
+    db_signature: DbSignature,
+    *,
+    context_key: LineageContextKey,
+) -> dict[str, tuple[str, ...]]:
+    """Инвертирует кэшированный состав школ, сохраняя пересечения."""
+    _assert_context_signature(context_key, db_signature)
+    return _all_school_memberships_by_code_cached(context_key, scope, df, idx)
+
+
+@st.cache_data(show_spinner=False)
+def _all_school_memberships_by_code_cached(
+    context_key: LineageContextKey, scope: str, _df: pd.DataFrame, _idx: dict
+) -> dict[str, tuple[str, ...]]:
+    """Кэширует соответствие Code → все научные школы."""
+    by_root = _all_school_member_codes_cached(context_key, scope, _df, _idx)
+    inverse: dict[str, list[str]] = {}
+    for root in sorted(by_root):
+        for code in sorted({str(value) for value in by_root[root]}):
+            inverse.setdefault(code, []).append(root)
+    return {code: tuple(roots) for code, roots in inverse.items()}
+
+
+def _direct_rows_for_author(df: pd.DataFrame, idx: dict, author: str) -> pd.DataFrame:
+    """Возвращает уникальные диссертации непосредственных учеников автора."""
+    rows = rows_for(df, idx, author)
+    if "Code" not in rows.columns:
+        return rows.iloc[0:0]
+    work = rows.copy()
+    work["Code"] = work["Code"].astype(str).str.strip()
+    return work[work["Code"] != ""].drop_duplicates("Code", keep="first")
+
+
+@st.cache_data(show_spinner=False)
+def _school_generation_codes_cached(
+    context_key: LineageContextKey, root: str, _df: pd.DataFrame, _idx: dict
+) -> dict[int, set[str]]:
+    """Строит поколения школы обходом в ширину с защитой от циклов."""
+    return _school_generation_traversal_cached(context_key, root, _df, _idx).groups
+
+
+@st.cache_data(show_spinner=False)
+def _school_generation_traversal_cached(
+    context_key: LineageContextKey, root: str, _df: pd.DataFrame, _idx: dict
+) -> LineageTraversalResult:
+    """Строит поколения и фиксирует обнаруженные циклические пути."""
+    generations: dict[int, set[str]] = {}
+    root_key = _norm_initials(root)
+    frontier = [(str(root), (root_key,))]
+    expanded_authors: set[str] = set()
+    seen_codes: set[str] = set()
+    cycle_detected = False
+    generation = 1
+    while frontier:
+        next_authors: list[tuple[str, tuple[str, ...]]] = []
+        current_codes: set[str] = set()
+        for author, path in sorted(frontier, key=lambda item: item[0]):
+            author_key = _norm_initials(author)
+            if author_key in expanded_authors:
+                continue
+            expanded_authors.add(author_key)
+            for row in _direct_rows_for_author(_df, _idx, author).to_dict("records"):
+                code = str(row.get("Code", "")).strip()
+                candidate = str(row.get("candidate_name", "")).strip()
+                if code and code not in seen_codes:
+                    current_codes.add(code)
+                candidate_key = _norm_initials(candidate)
+                if candidate and candidate_key in path:
+                    cycle_detected = True
+                elif candidate and candidate_key not in expanded_authors:
+                    next_authors.append((candidate, (*path, candidate_key)))
+        if current_codes:
+            generations[generation] = current_codes
+            seen_codes.update(current_codes)
+        frontier = next_authors
+        generation += 1
+    diagnostics = (f"При построении поколений школы «{root}» обнаружен цикл; сохранены все достижимые диссертации.",) if cycle_detected else ()
+    return LineageTraversalResult(generations, diagnostics)
+
+
+def get_school_generation_codes(
+    df: pd.DataFrame, idx: dict, root: str, db_signature: DbSignature, *,
+    context_key: LineageContextKey,
+) -> dict[int, set[str]]:
+    """Возвращает множества Code по поколениям выбранной школы."""
+    _assert_context_signature(context_key, db_signature)
+    return _school_generation_codes_cached(context_key, str(root), df, idx)
+
+
+def get_school_generation_traversal(
+    df: pd.DataFrame, idx: dict, root: str, db_signature: DbSignature, *,
+    context_key: LineageContextKey,
+) -> LineageTraversalResult:
+    """Возвращает поколения вместе с диагностикой циклов."""
+    _assert_context_signature(context_key, db_signature)
+    return _school_generation_traversal_cached(context_key, str(root), df, idx)
+
+
+@st.cache_data(show_spinner=False)
+def _school_branch_codes_cached(
+    context_key: LineageContextKey, root: str, _df: pd.DataFrame, _idx: dict
+) -> dict[str, set[str]]:
+    """Строит естественные ветви, сохраняя объекты с несколькими путями."""
+    return _school_branch_traversal_cached(context_key, root, _df, _idx).groups
+
+
+@st.cache_data(show_spinner=False)
+def _school_branch_traversal_cached(
+    context_key: LineageContextKey, root: str, _df: pd.DataFrame, _idx: dict
+) -> LineageTraversalResult:
+    """Объединяет прямые диссертации по личности ребёнка и диагностирует циклы."""
+    branches: dict[str, set[str]] = {}
+    children: dict[str, dict[str, object]] = {}
+    for first in _direct_rows_for_author(_df, _idx, root).to_dict("records"):
+        code = str(first.get("Code", "")).strip()
+        child = str(first.get("candidate_name", "")).strip()
+        identity = _child_identity(child) if child else f"code:{code}"
+        entry = children.setdefault(identity, {"names": set(), "codes": set()})
+        if child:
+            entry["names"].add(child)
+        if code:
+            entry["codes"].add(code)
+    cycle_detected = False
+    for identity in sorted(children):
+        entry = children[identity]
+        names = sorted(entry["names"], key=lambda value: (-len(value), value))
+        child = names[0] if names else ""
+        branch_key = child or sorted(entry["codes"])[0]
+        codes = set(entry["codes"])
+        root_key = _norm_initials(root)
+        frontier = [(child, (root_key, identity))] if child else []
+        expanded: set[str] = set()
+        while frontier:
+            author, path = frontier.pop()
+            author_key = _norm_initials(author)
+            if author_key in expanded:
+                continue
+            expanded.add(author_key)
+            for row in _direct_rows_for_author(_df, _idx, author).to_dict("records"):
+                code = str(row.get("Code", "")).strip()
+                candidate = str(row.get("candidate_name", "")).strip()
+                if code:
+                    codes.add(code)
+                candidate_key = _norm_initials(candidate)
+                if candidate and candidate_key in path:
+                    cycle_detected = True
+                elif candidate and candidate_key not in expanded:
+                    frontier.append((candidate, (*path, candidate_key)))
+        branches[branch_key] = codes
+    diagnostics = (f"При построении ветвей школы «{root}» обнаружен цикл; сохранены все достижимые диссертации.",) if cycle_detected else ()
+    return LineageTraversalResult(branches, diagnostics)
+
+
+def get_school_branch_codes(
+    df: pd.DataFrame, idx: dict, root: str, db_signature: DbSignature, *,
+    context_key: LineageContextKey,
+) -> dict[str, set[str]]:
+    """Возвращает Code естественных ветвей выбранной школы."""
+    _assert_context_signature(context_key, db_signature)
+    return _school_branch_codes_cached(context_key, str(root), df, idx)
+
+
+def get_school_branch_traversal(
+    df: pd.DataFrame, idx: dict, root: str, db_signature: DbSignature, *,
+    context_key: LineageContextKey,
+) -> LineageTraversalResult:
+    """Возвращает естественные ветви вместе с диагностикой циклов."""
+    _assert_context_signature(context_key, db_signature)
+    return _school_branch_traversal_cached(context_key, str(root), df, idx)
 
 
 @st.cache_data(show_spinner=False)
