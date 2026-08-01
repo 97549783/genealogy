@@ -9,18 +9,19 @@ from core.app import (
     maybe_render_admin_page_and_stop,
     render_app_header,
 )
+from core.ui.main_navigation import (
+    render_main_navigation,
+    resolve_main_section_id,
+)
 from tabs.articles.tab import render_articles_analysis_tab
 from tabs.dissertation_search.tab import render_dissertation_search_tab
 from tabs.dissertation_characteristics.tab import render_dissertation_characteristics_tab
 from tabs.intersection.tab import render_opponents_intersection_tab
 from tabs.lineages.tab import render_school_trees_tab
-from tabs.registry import DEFAULT_TAB_ID, TAB_ID_TO_LABEL, TAB_SPECS
+from tabs.registry import DEFAULT_TAB_ID
 from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
 from tabs.school_search.tab import render_school_search_tab
-
-
-MAIN_TAB_STATE_KEY = "main_tab"
 
 
 st.set_page_config(page_title="Академическая генеалогия", layout="wide")
@@ -39,34 +40,13 @@ maybe_render_admin_page_and_stop()
 ctx = build_app_context()
 render_app_header()
 
-tab_q = str(st.query_params.get("tab", DEFAULT_TAB_ID)).strip()
-requested_tab_id = tab_q if tab_q in TAB_ID_TO_LABEL else DEFAULT_TAB_ID
-requested_tab_label = TAB_ID_TO_LABEL[requested_tab_id]
-
-tab_labels = [label for _, label in TAB_SPECS]
-tab_objects = st.tabs(
-    tab_labels,
-    default=requested_tab_label,
-    key=MAIN_TAB_STATE_KEY,
-    on_change="rerun",
-)
-tab_by_id = {tab_id: tab for (tab_id, _), tab in zip(TAB_SPECS, tab_objects)}
+requested_tab_id = resolve_main_section_id(st.query_params.get("tab", DEFAULT_TAB_ID))
+render_main_navigation(requested_tab_id, st.query_params)
 
 
-def _should_render_tab(tab_id: str) -> bool:
-    tab = tab_by_id[tab_id]
-    open_state = getattr(tab, "open", None)
-
-    if open_state is not None:
-        return bool(open_state)
-
-    # Запасной путь для тестов или старого поведения Streamlit.
-    active_label = st.session_state.get(MAIN_TAB_STATE_KEY, requested_tab_label)
-    return TAB_ID_TO_LABEL[tab_id] == active_label
-
-
-if _should_render_tab("lineages"):
-    with tab_by_id["lineages"]:
+def render_selected_section(section_id: str) -> None:
+    """Запускает только обработчик выбранного основного раздела."""
+    if section_id == "lineages":
         render_school_trees_tab(
             df=ctx.df,
             idx=ctx.idx,
@@ -74,47 +54,20 @@ if _should_render_tab("lineages"):
             shared_roots=ctx.valid_shared_roots,
             db_signature=ctx.db_signature,
         )
-
-if _should_render_tab("dissertation_search"):
-    with tab_by_id["dissertation_search"]:
-        render_dissertation_search_tab(
-            df=ctx.df,
-            idx=ctx.idx,
-            db_signature=ctx.db_signature,
-        )
-
-if _should_render_tab("dissertation_characteristics"):
-    with tab_by_id["dissertation_characteristics"]:
+    elif section_id == "dissertation_search":
+        render_dissertation_search_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
+    elif section_id == "dissertation_characteristics":
         render_dissertation_characteristics_tab(df=ctx.df)
-
-if _should_render_tab("school_search"):
-    with tab_by_id["school_search"]:
-        render_school_search_tab(
-            df=ctx.df,
-            idx=ctx.idx,
-            db_signature=ctx.db_signature,
-        )
-
-if _should_render_tab("intersection"):
-    with tab_by_id["intersection"]:
+    elif section_id == "school_search":
+        render_school_search_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
+    elif section_id == "intersection":
         render_opponents_intersection_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
-
-if _should_render_tab("school_analysis"):
-    with tab_by_id["school_analysis"]:
-        render_school_analysis_tab(
-            df=ctx.df,
-            idx=ctx.idx,
-            db_signature=ctx.db_signature,
-        )
-
-if _should_render_tab("school_comparison"):
-    with tab_by_id["school_comparison"]:
-        render_school_comparison_tab(
-            df=ctx.df,
-            idx=ctx.idx,
-            db_signature=ctx.db_signature,
-        )
-
-if _should_render_tab("articles_comparison"):
-    with tab_by_id["articles_comparison"]:
+    elif section_id == "school_analysis":
+        render_school_analysis_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
+    elif section_id == "school_comparison":
+        render_school_comparison_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
+    elif section_id == "articles_comparison":
         render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
+
+
+render_selected_section(requested_tab_id)
