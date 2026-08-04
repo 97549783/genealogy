@@ -53,6 +53,14 @@ def test_navigation_contains_ordered_real_links_and_one_active_item():
     assert "onclick" not in html
 
 
+def test_source_schools_follows_articles_comparison():
+    ids = [tab_id for tab_id, _ in TAB_SPECS]
+    labels = dict(TAB_SPECS)
+    assert "source_schools" in ids
+    assert labels["source_schools"] == "Школы по источникам (демо)"
+    assert ids.index("source_schools") == ids.index("articles_comparison") + 1
+
+
 def test_navigation_escapes_registry_labels(monkeypatch):
     monkeypatch.setattr("core.ui.main_navigation.TAB_SPECS", [("lineages", '<Тест & "проверка">')])
     html = build_main_navigation_html("lineages", {})
