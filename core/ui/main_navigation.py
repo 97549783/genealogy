@@ -31,6 +31,7 @@ def build_main_navigation_html(
         attributes = [
             'class="main-navigation__link' + (" main-navigation__link--active" if active else "") + '"',
             f'href="{escape(href, quote=True)}"',
+            'target="_self"',
         ]
         if active:
             attributes.append('aria-current="page"')
