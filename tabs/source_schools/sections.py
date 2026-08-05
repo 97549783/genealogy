@@ -57,7 +57,10 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     _write_named_list("Каноническое название", school.get("каноническое_название"))
     with st.expander("Альтернативные названия", expanded=False):
         for alternative in school.get("альтернативные_названия", []):
-            st.write(f"{as_display_text(alternative.get('название'))} — {as_display_text(alternative.get('примечание'))}")
+            st.write(
+                f"{as_display_text(alternative.get('название'))} — "
+                f"{as_display_text(get_first_field(alternative, 'примечание', 'примечание_об_источнике_названия'))}"
+            )
     _write_named_list("Тип школы", school.get("тип_школы"))
     st.caption(as_display_text(school.get("примечание_к_типу")))
     disciplines = school.get("дисциплинарная_принадлежность", {})
@@ -70,7 +73,19 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     _write_named_list("Гипотеза", get_first_field(main_idea, "центральная_гипотеза", default=school.get("гипотеза")))
     _write_named_list("Теория", get_first_field(main_idea, "центральная_теория", default=school.get("теория")))
     _write_named_list("Метод", get_first_field(main_idea, "центральный_метод", default=school.get("метод")))
-    _write_named_list("Хронология", get_first_field(chronology, "кратко", "общий_период", "описание"))
+    _write_named_list(
+        "Хронология",
+        get_first_field(
+            chronology,
+            "кратко",
+            "общий_период",
+            "описание",
+            "дата_или_период_возникновения",
+            "период_активности",
+            "период_расцвета",
+            "примечание_о_неопределенности_хронологии",
+        ),
+    )
     _write_named_list("География", school.get("география"))
     _write_named_list("Организации", school.get("организации"))
 
@@ -192,18 +207,17 @@ def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: M
 def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает идеи и направления."""
     school = document["школа"]
-    ideas = school.get("идеи_и_направления", school)
-    _write_named_list("Основная идея", school.get("основная_идея"))
-    for key, label in (
-        (("теоретические_основания",), "Теоретические основания"),
-        (("ключевые_понятия", "основные_понятия"), "Ключевые понятия"),
-        (("теории", "центральная_теория"), "Теории"),
-        (("методы", "центральный_метод"), "Методы"),
-        (("интеллектуальные_источники", "источники_идей"), "Интеллектуальные источники"),
-        (("основные_результаты",), "Основные результаты"),
-        (("связанные_школы", "связи_с_другими_школами"), "Связанные школы"),
-    ):
-        _write_named_list(label, get_first_field(ideas, *key))
+    ideas = school.get("идеи_и_направления", {})
+    theoretical = get_first_field(school, "теоретические_основания", default=ideas.get("теоретические_основания", {}))
+    main_idea = school.get("основная_идея")
+    _write_named_list("Основная идея", main_idea)
+    _write_named_list("Теоретические основания", theoretical)
+    _write_named_list("Ключевые понятия", get_first_field(theoretical, "понятия", "ключевые_понятия", "основные_понятия", default=ideas.get("ключевые_понятия")))
+    _write_named_list("Теории", get_first_field(theoretical, "теории", default=ideas.get("теории")))
+    _write_named_list("Методы", get_first_field(theoretical, "методы", default=ideas.get("методы")))
+    _write_named_list("Интеллектуальные источники", get_first_field(theoretical, "интеллектуальные_источники", "источники_идей", default=ideas.get("интеллектуальные_источники")))
+    _write_named_list("Основные результаты", get_first_field(school, "основные_результаты", default=ideas.get("основные_результаты")))
+    _write_named_list("Связанные школы", get_first_field(school, "связи_с_другими_школами", "связанные_школы", default=ideas.get("связанные_школы")))
     for direction in school["внутренняя_структура"].get("направления", []):
         with st.expander(as_display_text(get_first_field(direction, "название", "название_направления", default="Направление"))):
             _write_named_list("Описание", direction.get("описание"))
@@ -272,12 +286,19 @@ def render_disagreements_and_quality_section(document: Mapping[str, Any], indexe
                 st.write(f"**Источникозависимая интерпретация:** {get_first_field(position, 'формулировка', 'позиция')}")
                 st.write("**Источники:** " + "; ".join(source_names))
     st.subheader("Качество данных")
-    checks = quality.get("проверки", {})
+    labels = {
+        "использовано_несколько_источников": "Использовано несколько источников",
+        "расхождения_источников_сохранены": "Расхождения между источниками сохранены",
+        "прямые_и_косвенные_связи_разделены": "Прямые и косвенные связи разделены",
+        "ссылки_разрешены": "Ссылки разрешены",
+        "сводка_согласована": "Сводка согласована",
+    }
+    checks = dict(quality.get("проверки", {}))
     for key in ("использовано_несколько_источников", "расхождения_источников_сохранены", "прямые_и_косвенные_связи_разделены"):
         if key in quality:
             checks[key] = quality[key]
     for key, value in checks.items():
-        message = f"{key}: {'да' if value else 'требует проверки'}"
+        message = f"{labels.get(key, as_display_text(key))}: {'да' if value else 'требует проверки'}"
         if value:
             st.success(message)
         else:
@@ -285,8 +306,12 @@ def render_disagreements_and_quality_section(document: Mapping[str, Any], indexe
     _write_named_list("Недостаточно сведений", get_first_field(quality, "недостаточно_сведений", "поля_с_недостаточной_информацией"))
     _write_named_list("Интерпретативные выводы", get_first_field(quality, "интерпретативные_выводы", "потенциально_интерпретативные_выводы"))
     _write_named_list("Примечания", get_first_field(quality, "примечания", "замечания"))
-    for key, value in get_first_field(quality, "метаданные_извлечения", default={}).items():
-        _write_named_list(str(key), value)
+    metadata = get_first_field(quality, "метаданные_извлечения", default={})
+    school_metadata = get_first_field(school, "метаданные_извлечения", default={})
+    if school_metadata:
+        metadata = {**metadata, **school_metadata}
+    for key, value in metadata.items():
+        _write_named_list(as_display_text(str(key)), value)
     with st.expander("Кандидаты для дальнейшего расширения данных"):
         st.caption("Эти персоны или группы пока не входят в проверенный основной список.")
         st.write(as_display_text(school.get("кандидаты_на_расширение")))

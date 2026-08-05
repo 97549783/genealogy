@@ -266,6 +266,9 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
                 )
             _check_confidence(attribution.get("уверенность"), f"атрибуции.{person_id}")
 
+    chronology = school.get("хронология", {})
+    if chronology is not None and not isinstance(chronology, Mapping):
+        raise SourceSchoolDataError("Поле школа.хронология должно быть объектом.")
     structure = school["внутренняя_структура"]
     for group in structure.get("исследовательские_группы", []):
         _check_person_ids(group.get("участники", []), persons, f"группа {group.get('id')}")
@@ -278,7 +281,7 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
         _check_person_ids(_as_list(_field(item, "представители", "участники")), persons, "направления")
     for item in _require_mapping_items(structure.get("поколения", []), "поколения"):
         _check_person_ids(_as_list(_field(item, "представители", "участники")), persons, "поколения")
-    for period in _require_mapping_items(school.get("хронология", {}).get("периоды_развития", []), "периоды развития"):
+    for period in _require_mapping_items(chronology.get("периоды_развития", []), "периоды развития"):
         _check_person_ids(_as_list(_field(period, "персоны", "основные_представители")), persons, "хронология")
     for disagreement in _require_mapping_items(school.get("историографические_расхождения", []), "историографические расхождения"):
         for position in _require_mapping_items(disagreement.get("позиции", []), "историографические позиции"):

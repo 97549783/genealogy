@@ -39,7 +39,7 @@ def as_display_text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
-        return "" if looks_technical_id(value) else value
+        return "" if looks_technical_id(value) else value.replace("_", " ")
     if isinstance(value, bool):
         return "да" if value else "нет"
     if isinstance(value, (int, float)):
@@ -52,6 +52,7 @@ def as_display_text(value: Any) -> str:
             "название",
             "название_направления",
             "название_периода",
+            "краткая_формулировка",
             "значение",
             "описание",
             "формулировка",
