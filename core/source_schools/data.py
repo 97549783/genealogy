@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -24,6 +25,50 @@ SUMMARY_ALIASES = {
     "число_подтверждений": ("число_подтверждений", "количество_подтверждений"),
     "персоны_по_категориям": ("персоны_по_категориям", "по_категориям"),
 }
+
+_PLACEHOLDER_NAME_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^\s*представитель\s*\d+\s*$",
+        r"^\s*участник\s*\d+\s*$",
+        r"^\s*person\s*\d+\s*$",
+        r"^\s*representative\s*\d+\s*$",
+        r"^\s*неизвестн(ый|ая|ое)?\s*\d*\s*$",
+    )
+)
+_PLACEHOLDER_CONTRIBUTION_PATTERN = re.compile(r"^\s*вклад участника .+ в развитие .+\s*$", re.IGNORECASE)
+_PLACEHOLDER_SOURCE_PATTERN = re.compile(r"^\s*источник\s*\d+\s*$", re.IGNORECASE)
+
+
+def _is_placeholder_name(person_id: Any, value: Any) -> bool:
+    text = str(value or "")
+    stripped = text.strip()
+    return (
+        not stripped
+        or len(stripped) < 3
+        or stripped == str(person_id or "").strip()
+        or stripped.isdigit()
+        or any(pattern.match(text) for pattern in _PLACEHOLDER_NAME_PATTERNS)
+    )
+
+
+def _check_person_content(person: Mapping[str, Any]) -> None:
+    person_id = person.get("id")
+    name = _field(person, "полное_имя", "имя")
+    if _is_placeholder_name(person_id, name):
+        raise SourceSchoolDataError(f"Персона {person_id} содержит placeholder-имя: {name}.")
+    contribution = _field(person, "основной_вклад", "основные_идеи_или_вклад", "вклад")
+    if isinstance(contribution, str) and _PLACEHOLDER_CONTRIBUTION_PATTERN.match(contribution):
+        raise SourceSchoolDataError(f"Персона {person_id} содержит демонстрационное описание вклада.")
+
+
+def _check_source_content(source: Mapping[str, Any]) -> None:
+    source_id = source.get("id")
+    description = source.get("библиографическое_описание")
+    if not isinstance(description, str) or not description.strip():
+        raise SourceSchoolDataError(f"Источник {source_id} не содержит библиографическое описание.")
+    if _PLACEHOLDER_SOURCE_PATTERN.match(description):
+        raise SourceSchoolDataError(f"Источник {source_id} содержит демонстрационное библиографическое описание.")
 
 
 class SourceSchoolDataError(ValueError):
@@ -227,6 +272,7 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
     _check_aggregate_representatives(school, persons)
 
     for source in sources.values():
+        _check_source_content(source)
         url = source.get("url")
         if url is not None and not isinstance(url, str):
             raise SourceSchoolDataError(f"Некорректный URL источника: {source.get('id')}.")
@@ -242,6 +288,7 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
         _check_confidence(evidence_record.get("уверенность"), f"подтверждения.{evidence_record.get('id')}")
 
     for person in persons.values():
+        _check_person_content(person)
         person_id = person.get("id")
         for evidence_id in person.get("подтверждения", []):
             if evidence_id not in evidence:
@@ -279,8 +326,14 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
                 )
     for item in _require_mapping_items(structure.get("направления", []), "направления"):
         _check_person_ids(_as_list(_field(item, "представители", "участники")), persons, "направления")
+    seen_generation_persons: set[str] = set()
     for item in _require_mapping_items(structure.get("поколения", []), "поколения"):
-        _check_person_ids(_as_list(_field(item, "представители", "участники")), persons, "поколения")
+        generation_persons = [str(person_id) for person_id in _as_list(_field(item, "представители", "участники"))]
+        _check_person_ids(generation_persons, persons, "поколения")
+        for generation_person in generation_persons:
+            if generation_person in seen_generation_persons:
+                raise SourceSchoolDataError(f"Персона {generation_person} включена в несколько поколений.")
+            seen_generation_persons.add(generation_person)
     for period in _require_mapping_items(chronology.get("периоды_развития", []), "периоды развития"):
         _check_person_ids(_as_list(_field(period, "персоны", "основные_представители")), persons, "хронология")
     for disagreement in _require_mapping_items(school.get("историографические_расхождения", []), "историографические расхождения"):

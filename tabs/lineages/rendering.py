@@ -25,7 +25,8 @@ import networkx as nx
 
 from pyvis.network import Network
 
-from core.lineage.graph import multiline, slug
+from core.lineage.graph import slug
+from core.ui.tree_renderers import draw_hierarchical_tree
 
 
 # ---------------------------------------------------------------------------
@@ -61,38 +62,8 @@ def _hierarchy_pos(G: nx.DiGraph, root: str) -> Dict[str, tuple]:
 # ---------------------------------------------------------------------------
 
 def draw_matplotlib(G: nx.DiGraph, root: str) -> plt.Figure:
-    """
-    Рисует PNG-граф через matplotlib + networkx.
-
-    Если graphviz установлен — использует `dot`-раскладку,
-    иначе откатывается на ручную иерархическую.
-    """
-    if G.number_of_nodes() == 0:
-        fig = plt.figure(figsize=(6, 3.5))
-        plt.axis("off")
-        plt.text(0.5, 0.5, "Потомки не найдены", ha="center", va="center")
-        return fig
-
-    try:
-        import networkx.drawing.nx_pydot as nx_pydot  # type: ignore
-        pos = nx_pydot.graphviz_layout(G, prog="dot")
-    except Exception:
-        pos = _hierarchy_pos(G, root)
-
-    fig = plt.figure(figsize=(max(6, len(G) * 0.45), 6))
-    nx.draw(
-        G,
-        pos,
-        with_labels=True,
-        labels={n: multiline(n) for n in G.nodes},
-        node_color="#ADD8E6",
-        node_size=2000,
-        font_size=7,
-        arrows=True,
-    )
-    plt.title(f"Академическая родословная – {root}", fontsize=10)
-    plt.tight_layout()
-    return fig
+    """Рисует PNG-граф через общий иерархический отрисовщик."""
+    return draw_hierarchical_tree(G, root, title=f"Академическая родословная – {root}")
 
 
 # ---------------------------------------------------------------------------

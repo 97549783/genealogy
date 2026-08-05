@@ -4,6 +4,17 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 _TECHNICAL_PREFIXES = ("ev_", "src_", "p_")
+DISPLAY_VALUE_LABELS = {
+    "ядро": "Ядро школы",
+    "прямой_ученик": "Прямой ученик",
+    "прямой_сотрудник": "Прямой сотрудник",
+    "связанная_группа": "Участник связанной группы",
+    "периферийный_участник": "Периферийный участник",
+    "парадигмальная_школа": "Парадигмальная школа",
+    "исследовательская_группа": "Исследовательская группа",
+    "место_возникновения": "Место возникновения",
+    "центр_школы": "Центр школы",
+}
 _TECHNICAL_KEYS = {
     "id",
     "подтверждение",
@@ -39,6 +50,8 @@ def as_display_text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
+        if value in DISPLAY_VALUE_LABELS:
+            return DISPLAY_VALUE_LABELS[value]
         return "" if looks_technical_id(value) else value.replace("_", " ")
     if isinstance(value, bool):
         return "да" if value else "нет"
