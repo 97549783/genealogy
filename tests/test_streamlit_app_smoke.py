@@ -122,5 +122,5 @@ def test_streamlit_app_renders_source_schools_tab(monkeypatch, tmp_path) -> None
     assert not app.exception
     all_text = _visible_text(app)
     assert "Школы по источникам (демо)" in all_text
-    assert "Научная школа" in all_text or app.selectbox
-    assert "Лев Семёнович Выготский" in all_text or (app.selectbox and "Лев Семёнович Выготский" in app.selectbox[0].options)
+    assert app.selectbox[0].label == "Научная школа"
+    assert "Лев Семёнович Выготский" in app.selectbox[0].options

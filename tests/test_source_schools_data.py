@@ -2,7 +2,7 @@ from __future__ import annotations
 import copy, json
 from pathlib import Path
 import pytest
-from tabs.source_schools.data import SOURCE_SCHOOLS_DATA_DIR, SourceSchoolDataError, build_source_school_index, load_source_school_catalog, load_source_school_file, validate_source_school_document
+from core.source_schools.data import SOURCE_SCHOOLS_DATA_DIR, SourceSchoolDataError, build_source_school_index, load_source_school_catalog, load_source_school_file, validate_source_school_document
 
 PATH=SOURCE_SCHOOLS_DATA_DIR/'vygotsky_school_sources_demo.v1.json'
 
@@ -51,3 +51,45 @@ def test_malformed_json_raises(tmp_path):
 
 def test_missing_directory_returns_empty_catalog(tmp_path):
     assert load_source_school_catalog(tmp_path/'нет') == []
+
+
+def test_summary_aliases_from_supplied_contract_are_supported():
+    d = copy.deepcopy(doc())
+    summary = d['демо_представление']['сводные_показатели']
+    summary['количество_персон'] = summary.pop('число_персон')
+    summary['количество_источников'] = summary.pop('число_источников')
+    summary['количество_подтверждений'] = summary.pop('число_подтверждений')
+    summary['по_категориям'] = summary.pop('персоны_по_категориям')
+    d['контроль_качества'].pop('персоны_по_категориям')
+    validate_source_school_document(d)
+
+
+def test_person_field_aliases_are_normalized():
+    d = copy.deepcopy(doc())
+    person = d['школа']['персоны'][0]
+    person['имя'] = person.pop('полное_имя')
+    person['даты'] = person.pop('годы_жизни')
+    person['основные_идеи_или_вклад'] = person.pop('основной_вклад')
+    loaded_path = SOURCE_SCHOOLS_DATA_DIR / 'vygotsky_school_sources_demo.v1.json'
+    normalized = load_source_school_file(loaded_path)
+    assert normalized['школа']['персоны'][0]['полное_имя'] == 'Лев Семёнович Выготский'
+    validate_source_school_document(d)
+
+
+def test_attribution_source_must_match_evidence_source():
+    d = copy.deepcopy(doc())
+    d['школа']['персоны'][0]['источниковые_атрибуции'][0]['подтверждение'] = 'e2'
+    with pytest.raises(SourceSchoolDataError, match='подтверждением другого источника'):
+        validate_source_school_document(d)
+
+
+def test_missing_file_has_domain_error(tmp_path):
+    with pytest.raises(SourceSchoolDataError, match='Файл школы не найден'):
+        load_source_school_file(tmp_path / 'нет.json')
+
+
+def test_wrong_list_item_type_has_domain_error():
+    d = copy.deepcopy(doc())
+    d['школа']['персоны'].append('не объект')
+    with pytest.raises(SourceSchoolDataError, match='должен быть объектом'):
+        validate_source_school_document(d)

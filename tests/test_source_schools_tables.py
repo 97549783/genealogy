@@ -1,7 +1,7 @@
 from __future__ import annotations
 import copy
-from tabs.source_schools.data import SOURCE_SCHOOLS_DATA_DIR, load_source_school_file
-from tabs.source_schools.tables import build_evidence_dataframe, build_people_dataframe, filter_people_dataframe
+from core.source_schools.data import SOURCE_SCHOOLS_DATA_DIR, load_source_school_file
+from core.source_schools.tables import build_evidence_dataframe, build_people_dataframe, filter_people_dataframe
 
 def doc(): return load_source_school_file(SOURCE_SCHOOLS_DATA_DIR/'vygotsky_school_sources_demo.v1.json')
 

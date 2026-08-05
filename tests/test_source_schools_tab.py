@@ -40,3 +40,19 @@ with patch.object(tab, "load_source_school_catalog", lambda: []):
     tab.render_source_schools_tab()
 ''').run(timeout=30)
     assert 'В каталоге пока нет доступных школ.' in text(app)
+
+
+def test_groups_ideas_and_quality_modes_are_rendered_without_raw_ids():
+    for mode, expected in [
+        ('Группы и хронология', 'Исследовательские группы'),
+        ('Идеи и направления', 'Основная идея'),
+        ('Расхождения и качество данных', 'Качество данных'),
+    ]:
+        app=AppTest.from_string(APP).run(timeout=30)
+        app.radio[0].set_value(mode)
+        app.run(timeout=30)
+        t=text(app)
+        assert not app.exception
+        assert expected in t
+        assert 'ev_' not in t
+        assert "{'" not in t
