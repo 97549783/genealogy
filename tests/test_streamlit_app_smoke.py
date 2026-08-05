@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
@@ -24,11 +25,11 @@ def test_streamlit_app_imports_and_builds_navigation(monkeypatch, tmp_path) -> N
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
-    app = AppTest.from_file("streamlit_app.py")
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.run(timeout=30)
     assert not app.exception
     assert len(app.tabs) == 0
-    assert any("main-navigation" in item.value and "Анализ статей (демо)" in item.value for item in app.markdown)
+    assert any("main-navigation" in item.value and "Анализ статей (демо)" in item.value and "Школы по источникам (демо)" in item.value for item in app.markdown)
 
 
 def test_streamlit_app_has_registry_labels_in_navigation(monkeypatch, tmp_path) -> None:
@@ -36,7 +37,7 @@ def test_streamlit_app_has_registry_labels_in_navigation(monkeypatch, tmp_path) 
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
-    app = AppTest.from_file("streamlit_app.py")
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.run(timeout=30)
 
     assert not app.exception
@@ -44,6 +45,7 @@ def test_streamlit_app_has_registry_labels_in_navigation(monkeypatch, tmp_path) 
     assert "Поиск диссертаций" in navigation
     assert "Поиск информации о диссертациях" not in navigation
     assert "Поиск по тематическим профилям" not in navigation
+    assert "Школы по источникам (демо)" in navigation
 
 
 def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> None:
@@ -51,7 +53,7 @@ def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> Non
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
-    app = AppTest.from_file("streamlit_app.py")
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.query_params["secret"] = "nb39fdv94beraaagv2evdc9ewr3fokv"
     app.run(timeout=30)
     assert not app.exception
@@ -82,7 +84,7 @@ def test_streamlit_app_lazy_renders_only_default_tab(monkeypatch, tmp_path) -> N
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
-    app = AppTest.from_file("streamlit_app.py")
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.run(timeout=30)
 
     assert not app.exception
@@ -100,10 +102,26 @@ def test_streamlit_app_renders_new_dissertation_search_tab(monkeypatch, tmp_path
     _create_minimal_db(db_path)
     monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
 
-    app = AppTest.from_file("streamlit_app.py")
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.query_params["tab"] = "dissertation_search"
     app.run(timeout=30)
 
     assert not app.exception
     all_text = _visible_text(app)
     assert "Поиск диссертаций" in all_text
+
+
+def test_streamlit_app_renders_source_schools_tab(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "genealogy.db"
+    _create_minimal_db(db_path)
+    monkeypatch.setenv("SQLITE_DB_PATH", str(db_path))
+
+    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
+    app.query_params["tab"] = "source_schools"
+    app.run(timeout=30)
+
+    assert not app.exception
+    all_text = _visible_text(app)
+    assert "Школы по источникам (демо)" in all_text
+    assert app.selectbox[0].label == "Научная школа"
+    assert "Лев Семёнович Выготский" in app.selectbox[0].options

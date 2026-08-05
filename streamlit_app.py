@@ -21,6 +21,7 @@ from tabs.lineages.tab import render_school_trees_tab
 from tabs.registry import DEFAULT_TAB_ID
 from tabs.school_analysis.tab import render_school_analysis_tab
 from tabs.school_comparison.tab import render_school_comparison_tab
+from tabs.source_schools.tab import render_source_schools_tab
 from tabs.school_search.tab import render_school_search_tab
 
 
@@ -68,6 +69,8 @@ def render_selected_section(section_id: str) -> None:
         render_school_comparison_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
     elif section_id == "articles_comparison":
         render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
+    elif section_id == "source_schools":
+        render_source_schools_tab()
 
 
 render_selected_section(requested_tab_id)
