@@ -1,12 +1,18 @@
 """Отрисовка внутренних режимов демо-раздела школ по источникам."""
 from __future__ import annotations
 
+import io
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
 import streamlit as st
+import streamlit.components.v1 as components
 
+from core.source_schools.bibliography import build_numbered_bibliography, build_source_number_index
+from core.source_schools.export import build_filtered_people_csv, build_filtered_people_xlsx
 from core.source_schools.presentation import as_display_text, as_list, get_first_field
+from core.source_schools.tree import build_source_school_overview_tree
+from core.ui.tree_renderers import build_markmap_html, draw_hierarchical_tree
 from core.source_schools.tables import (
     build_evidence_dataframe,
     build_people_dataframe,
@@ -88,6 +94,24 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     )
     _write_named_list("География", school.get("география"))
     _write_named_list("Организации", school.get("организации"))
+    st.subheader("Структура школы")
+    st.caption("Дерево показывает источниковую систематизацию школы по поколениям и категориям, а не линии научного руководства.")
+    mode = st.radio(
+        "Режим ветвления",
+        ["Одностороннее ветвление", "Двустороннее ветвление"],
+        horizontal=True,
+        key="source_schools_tree_branching",
+    )
+    tree = build_source_school_overview_tree(document)
+    html, height = build_markmap_html(tree.graph, tree.root_id, branching_mode=("bidirectional" if mode == "Двустороннее ветвление" else "unidirectional"))
+    components.html(html, height=height, scrolling=False)
+    st.caption("Клик на узел — свернуть или развернуть ветвь. Колёсико мыши — масштаб; перетаскивание — панорама.")
+    st.warning("Дерево отражает группировку представителей по поколениям и источниковым категориям. Оно не является деревом научного руководства.")
+    figure = draw_hierarchical_tree(tree.graph, tree.root_id, title="Структура школы")
+    png_buffer = io.BytesIO()
+    figure.savefig(png_buffer, format="png", dpi=180, bbox_inches="tight")
+    st.download_button("Скачать дерево в PNG", png_buffer.getvalue(), file_name="vygotsky_cultural_historical_school.дерево.png", mime="image/png", key="source_schools_tree_png")
+    st.download_button("Скачать интерактивное дерево в HTML", html.encode("utf-8"), file_name="vygotsky_cultural_historical_school.интерактивное_дерево.html", mime="text/html", key="source_schools_tree_html")
 
 
 def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
@@ -138,10 +162,26 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
     if filtered.empty:
         st.info("По заданным условиям представители не найдены.")
         return
+    export_view = filtered.drop(columns=["ID", "Идентификаторы источников"])
+    col_csv, col_xlsx = st.columns(2)
+    col_csv.download_button("Скачать выбранных представителей в CSV", build_filtered_people_csv(export_view), file_name="vygotsky_cultural_historical_school.представители_выборка.csv", mime="text/csv", key="source_schools_people_export_csv")
+    col_xlsx.download_button("Скачать выбранных представителей в Excel", build_filtered_people_xlsx(export_view), file_name="vygotsky_cultural_historical_school.представители_выборка.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="source_schools_people_export_xlsx")
     st.dataframe(
-        filtered.drop(columns=["ID", "Идентификаторы источников"]),
+        export_view,
         hide_index=True,
         use_container_width=True,
+        height=600,
+        column_config={
+            "Представитель": st.column_config.TextColumn(width="medium"),
+            "Категория": st.column_config.TextColumn(width="small"),
+            "Роли": st.column_config.TextColumn(width="medium"),
+            "Связь с Выготским": st.column_config.TextColumn(width="medium"),
+            "Период взаимодействия": st.column_config.TextColumn(width="small"),
+            "Группы и контексты": st.column_config.TextColumn(width="medium"),
+            "Основной вклад": st.column_config.TextColumn(width="large"),
+            "Уверенность": st.column_config.NumberColumn(format="%.2f"),
+            "Число источников": st.column_config.NumberColumn(width="small", format="%d"),
+        },
     )
     labels = dict(zip(filtered["ID"], filtered["Представитель"], strict=False))
     person_id = st.selectbox(
@@ -162,10 +202,11 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
     _write_named_list("Уверенность", person.get("уверенность"))
     st.markdown("#### Источниковые атрибуции")
     for attribution in person.get("источниковые_атрибуции", []):
+        source_number = build_source_number_index(document).get(attribution["идентификатор_источника"], "?")
         source = indexes["sources"][attribution["идентификатор_источника"]]
         evidence = indexes["evidence"][attribution["подтверждение"]]
         st.write(
-            f"**{_source_label(source)}:** {attribution.get('формулировка_роли')} / "
+            f"**[{source_number}] {_source_label(source)}:** {attribution.get('формулировка_роли')} / "
             f"систематизация: {attribution.get('нормализованная_роль')} — "
             f"{_evidence_status(attribution.get('явное_утверждение'))}. "
             f"Подтверждение: {evidence.get('содержание_свидетельства')} ({evidence.get('локатор')})."
@@ -229,14 +270,14 @@ def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Ma
 
 def render_sources_and_evidence_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает источники и подтверждения."""
-    st.dataframe(build_sources_dataframe(document).drop(columns=["ID"]), hide_index=True, use_container_width=True)
-    for source in document["школа"]["источники"]:
-        with st.expander(_source_label(source)):
-            st.write(source.get("библиографическое_описание", ""))
-            if _safe_url(source.get("url")):
-                st.link_button("Открыть источник", source["url"])
-            if source.get("дата_обращения"):
-                st.caption(f"Дата обращения: {source['дата_обращения']}")
+    st.subheader("Список использованных источников")
+    st.caption("Библиографические описания приведены в формате, близком к ГОСТ; автоматическая сертифицированная проверка ГОСТ не выполняется.")
+    for row in build_numbered_bibliography(document):
+        st.markdown(f"{row['№']}. {row['описание']}")
+        if _safe_url(row.get("url")):
+            st.link_button("Открыть источник", row["url"], key=f"source_schools_open_source_{row['№']}")
+    with st.expander("Таблица источников", expanded=False):
+        st.dataframe(build_sources_dataframe(document).drop(columns=["ID"]), hide_index=True, use_container_width=True)
     evidence_dataframe = build_evidence_dataframe(document)
     source_filter = st.multiselect(
         "Источник подтверждения",
@@ -263,7 +304,7 @@ def render_sources_and_evidence_section(document: Mapping[str, Any], indexes: Ma
     st.dataframe(filtered.drop(columns=["ID"]), hide_index=True, use_container_width=True)
     for _, row in filtered.iterrows():
         with st.expander(str(row["Содержание свидетельства"])[:80]):
-            st.write(f"**Источник:** {row['Источник']}")
+            st.write(f"**{row['Источник']}:**")
             st.write(f"**Содержание свидетельства:** {row['Содержание свидетельства']}")
             st.write(f"**Локатор:** {row['Локатор']}")
             st.write(f"**Тип утверждения:** {row['Тип утверждения']}")

@@ -20,8 +20,10 @@ utils/tree_renderers.py — вспомогательные функции для
 from __future__ import annotations
 
 import json
+import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+import matplotlib.pyplot as plt
 import networkx as nx
 
 _BRANCH_PALETTE: List[str] = [
@@ -44,12 +46,13 @@ def _build_tree_data(
     depth: int = 0,
     initial_depth: int = 2,
 ) -> Dict[str, Any]:
+    label = str(G.nodes[node].get("label", node))
     successors = list(G.successors(node))
     is_leaf = len(successors) == 0
 
     if is_leaf:
         result: Dict[str, Any] = {
-            "name": node,
+            "name": label,
             "symbol": "circle",
             "symbolSize": 5,
             "itemStyle": {"color": branch_color, "borderColor": branch_color},
@@ -64,9 +67,9 @@ def _build_tree_data(
         }
     else:
         result = {
-            "name": node,
+            "name": label,
             "symbol": "roundRect",
-            "symbolSize": [max(80, min(len(node) * 7, 200)), 26],
+            "symbolSize": [max(80, min(len(label) * 7, 200)), 26],
             "itemStyle": {"color": branch_color, "borderColor": branch_color},
             "label": {
                 "show": True,
@@ -75,7 +78,7 @@ def _build_tree_data(
                 "fontFamily": "'Segoe UI', 'Noto Sans', Arial, sans-serif",
                 "fontWeight": "500",
                 "overflow": "break",
-                "width": max(76, min(len(node) * 7, 196)),
+                "width": max(76, min(len(label) * 7, 196)),
             },
         }
         if depth >= initial_depth:
@@ -351,7 +354,7 @@ def _build_markmap_node(
     max_depth: int,
 ) -> Dict[str, Any]:
     if node in visited:
-        return {"content": node, "children": []}
+        return {"content": str(G.nodes[node].get("label", node)), "children": []}
     visited.add(node)
 
     children_nodes = list(G.successors(node))
@@ -361,7 +364,7 @@ def _build_markmap_node(
     ]
 
     result: Dict[str, Any] = {
-        "content": node,
+        "content": str(G.nodes[node].get("label", node)),
         "children": children_data,
     }
     if max_depth > 0 and depth >= max_depth and children_data:
@@ -399,7 +402,7 @@ def build_markmap_html_bidirectional(
     right_children = all_children[half:]
 
     palette_js = json.dumps(_BRANCH_PALETTE)
-    root_json = json.dumps(root)
+    root_json = json.dumps(str(G.nodes[root].get("label", root)))
 
     def _make_subtree_json(children: List[str], palette_offset: int) -> str:
         child_nodes = []
@@ -696,9 +699,48 @@ def build_markmap_markdown(G: nx.DiGraph, root: str, initial_expand_level: int =
         if node in visited:
             return
         visited.add(node)
-        lines.append("#" * max(1, depth) + " " + node)
+        lines.append("#" * max(1, depth) + " " + str(G.nodes[node].get("label", node)))
         for child in G.successors(node):
             _walk(child, depth + 1)
 
     _walk(root, 1)
     return "\n".join(lines)
+
+
+def _hierarchy_pos_shared(graph: nx.DiGraph, root: str) -> dict[str, tuple[float, float]]:
+    """Вычисляет запасную иерархическую раскладку дерева."""
+    levels: dict[int, list[str]] = {}
+    queue: list[tuple[str, int]] = [(root, 0)]
+    seen: set[str] = set()
+    while queue:
+        node, depth = queue.pop(0)
+        if node in seen:
+            continue
+        seen.add(node)
+        levels.setdefault(depth, []).append(node)
+        queue.extend((child, depth + 1) for child in graph.successors(node))
+    positions: dict[str, tuple[float, float]] = {}
+    for depth, nodes in levels.items():
+        for index, node in enumerate(nodes):
+            positions[node] = ((index + 1) / (len(nodes) + 1), -depth)
+    return positions
+
+
+def draw_hierarchical_tree(graph: nx.DiGraph, root: str, *, title: str) -> plt.Figure:
+    """Рисует статичное иерархическое дерево с учётом label узлов."""
+    if graph.number_of_nodes() == 0:
+        figure = plt.figure(figsize=(6, 3.5))
+        plt.axis("off")
+        plt.text(0.5, 0.5, "Данных нет", ha="center", va="center")
+        return figure
+    try:
+        import networkx.drawing.nx_pydot as nx_pydot  # type: ignore
+        positions = nx_pydot.graphviz_layout(graph, prog="dot")
+    except Exception:
+        positions = _hierarchy_pos_shared(graph, root)
+    labels = {node: "\n".join(textwrap.wrap(str(graph.nodes[node].get("label", node)), width=22)) for node in graph.nodes}
+    figure = plt.figure(figsize=(max(7, graph.number_of_nodes() * 0.35), 7))
+    nx.draw(graph, positions, with_labels=True, labels=labels, node_color="#ADD8E6", node_size=2200, font_size=7, arrows=True)
+    plt.title(title, fontsize=10)
+    plt.tight_layout()
+    return figure

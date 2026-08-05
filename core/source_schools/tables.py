@@ -6,7 +6,17 @@ from typing import Any, Collection, Mapping
 import pandas as pd
 
 from .data import normalize_source_school_document
+from .bibliography import build_source_number_index
 from .presentation import as_display_text, as_list, get_first_field
+
+
+def _group_labels(document: Mapping[str, Any]) -> dict[str, str]:
+    structure = document.get("школа", {}).get("внутренняя_структура", {}) if isinstance(document.get("школа", {}), Mapping) else {}
+    return {str(group.get("id")): str(group.get("название", group.get("id"))) for group in structure.get("исследовательские_группы", []) if isinstance(group, Mapping)}
+
+
+def _join_groups(value: Any, labels: Mapping[str, str]) -> str:
+    return "; ".join(as_display_text(labels.get(str(item), item)) for item in as_list(value) if as_display_text(labels.get(str(item), item)))
 
 
 def _join_values(value: Any) -> str:
@@ -24,6 +34,7 @@ def resolve_person_names(
 def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
     """Формирует таблицу представителей школы."""
     normalized = normalize_source_school_document(document)
+    group_labels = _group_labels(normalized)
     rows: list[dict[str, Any]] = []
     for person in normalized["школа"]["персоны"]:
         source_ids = [
@@ -39,7 +50,7 @@ def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
                 "Роли": _join_values(person.get("роль_в_школе", [])),
                 "Связь с Выготским": person.get("статус_связи_с_выготским", ""),
                 "Период взаимодействия": person.get("период_взаимодействия", ""),
-                "Группы и контексты": _join_values(person.get("группы_и_контексты", [])),
+                "Группы и контексты": _join_groups(person.get("группы_и_контексты", []), group_labels),
                 "Основной вклад": get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"),
                 "Уверенность": float(person.get("уверенность", 0) or 0),
                 "Число источников": len(set(source_ids)),
@@ -93,10 +104,12 @@ def filter_people_dataframe(
 def build_sources_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
     """Формирует таблицу библиографических источников."""
     normalized = normalize_source_school_document(document)
+    numbers = build_source_number_index(normalized)
     return pd.DataFrame(
         [
             {
                 "ID": source.get("id"),
+                "№": numbers.get(str(source.get("id")), ""),
                 "Источник": source.get("краткое_название") or source.get("библиографическое_описание", ""),
                 "Год": source.get("год", ""),
                 "Тип": source.get("тип", ""),
@@ -112,8 +125,9 @@ def build_sources_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
 def build_evidence_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
     """Формирует таблицу подтверждений с названиями источников."""
     normalized = normalize_source_school_document(document)
+    numbers = build_source_number_index(normalized)
     labels = {
-        source["id"]: source.get("краткое_название") or source.get("библиографическое_описание", source["id"])
+        source["id"]: f"Источник [{numbers.get(str(source.get('id')), '?')}]"
         for source in normalized["школа"]["источники"]
     }
     return pd.DataFrame(
