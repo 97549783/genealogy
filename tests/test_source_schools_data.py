@@ -93,3 +93,57 @@ def test_wrong_list_item_type_has_domain_error():
     d['школа']['персоны'].append('не объект')
     with pytest.raises(SourceSchoolDataError, match='должен быть объектом'):
         validate_source_school_document(d)
+
+
+def test_nested_full_json_contract_is_supported():
+    d = copy.deepcopy(doc())
+    school = d['школа']
+    school['дисциплинарная_принадлежность'] = {
+        'области': school.pop('дисциплинарные_области'),
+        'ключевые_слова': school.pop('ключевые_слова'),
+    }
+    school['основная_идея'] = {
+        'краткая_формулировка': 'Развитие высших психических функций культурно опосредовано.',
+        'центральная_проблема': school.pop('проблема'),
+        'центральная_гипотеза': school.pop('гипотеза'),
+        'центральная_теория': school.pop('теория'),
+        'центральный_метод': school.pop('метод'),
+        'подтверждения': ['e1'],
+    }
+    school['хронология']['периоды_развития'][0]['название_периода'] = school['хронология']['периоды_развития'][0].pop('название')
+    school['хронология']['периоды_развития'][0]['временной_диапазон'] = school['хронология']['периоды_развития'][0].pop('период')
+    school['представители'] = {'ядро': ['p1', 'p2']}
+    school['связи_с_другими_школами'] = [{'название': 'Деятельностный подход', 'уверенность': 0.8}]
+    d['контроль_качества'] = {
+        'число_персон': len(school['персоны']),
+        'число_источников': len(school['источники']),
+        'число_подтверждений': len(school['подтверждения']),
+        'использовано_несколько_источников': True,
+        'расхождения_источников_сохранены': True,
+        'прямые_и_косвенные_связи_разделены': True,
+        'поля_с_недостаточной_информацией': ['точные границы'],
+        'потенциально_интерпретативные_выводы': ['нормализация ролей'],
+        'замечания': ['проверено'],
+    }
+    validate_source_school_document(d)
+
+
+def test_all_confidence_fields_are_validated():
+    d = copy.deepcopy(doc())
+    d['школа']['связи_с_другими_школами'] = [{'название': 'Школа', 'уверенность': 1.5}]
+    with pytest.raises(SourceSchoolDataError, match='уверенность'):
+        validate_source_school_document(d)
+
+
+def test_aggregate_representatives_are_validated():
+    d = copy.deepcopy(doc())
+    d['школа']['представители'] = {'ученики': ['неизвестно']}
+    with pytest.raises(SourceSchoolDataError, match='школа.представители'):
+        validate_source_school_document(d)
+
+
+def test_nested_items_have_domain_errors():
+    d = copy.deepcopy(doc())
+    d['школа']['внутренняя_структура']['направления'].append('не объект')
+    with pytest.raises(SourceSchoolDataError, match='должен быть объектом'):
+        validate_source_school_document(d)

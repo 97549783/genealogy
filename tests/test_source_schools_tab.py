@@ -56,3 +56,16 @@ def test_groups_ideas_and_quality_modes_are_rendered_without_raw_ids():
         assert expected in t
         assert 'ev_' not in t
         assert "{'" not in t
+
+
+def test_overview_shows_nested_contract_fields_without_technical_ids():
+    app = AppTest.from_string(APP).run(timeout=30)
+    t = text(app)
+    assert 'Дисциплинарные области' in t
+    assert 'Ключевые слова' in t
+    assert 'Проблема' in t
+    assert 'Гипотеза' in t
+    assert 'Теория' in t
+    assert 'Метод' in t
+    assert 'ev_' not in t
+    assert 'src_' not in t

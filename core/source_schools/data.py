@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 import streamlit as st
 
+from .presentation import as_display_text, as_list, get_first_field
+
 SOURCE_SCHOOLS_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "source_schools"
 SUPPORTED_SCHEMA_KEYS: tuple[str, ...] = (
     "школа",
@@ -29,33 +31,15 @@ class SourceSchoolDataError(ValueError):
 
 
 def _field(mapping: Mapping[str, Any], *names: str, default: Any = "") -> Any:
-    for name in names:
-        if name in mapping:
-            return mapping[name]
-    return default
+    return get_first_field(mapping, *names, default=default)
 
 
 def _as_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, Mapping):
-        for key in ("название", "название_направления", "значение", "описание", "текст"):
-            text = value.get(key)
-            if isinstance(text, str) and text:
-                return text
-        return "; ".join(f"{key}: {_as_text(item)}" for key, item in value.items() if item)
-    if isinstance(value, list):
-        return "; ".join(_as_text(item) for item in value if _as_text(item))
-    return str(value)
+    return as_display_text(value)
 
 
 def _as_list(value: Any) -> list[Any]:
-    if value is None or value == "":
-        return []
-    return value if isinstance(value, list) else [value]
-
+    return as_list(value)
 
 def _require_mapping(value: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     item = value.get(key)
@@ -162,6 +146,40 @@ def _check_person_ids(values: list[Any], persons: Mapping[str, Any], where: str)
             raise SourceSchoolDataError(f"Неизвестная персона в поле {where}: {ident}.")
 
 
+
+def _walk_confidence_values(value: Any, path: str = "документ") -> list[tuple[str, Any]]:
+    found: list[tuple[str, Any]] = []
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            child_path = f"{path}.{key}"
+            if "уверенность" in str(key).lower():
+                found.append((child_path, item))
+            found.extend(_walk_confidence_values(item, child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found.extend(_walk_confidence_values(item, f"{path}[{index}]"))
+    return found
+
+
+def _check_all_confidence_values(document: Mapping[str, Any]) -> None:
+    for path, value in _walk_confidence_values(document):
+        _check_confidence(value, path)
+
+
+def _check_aggregate_representatives(school: Mapping[str, Any], persons: Mapping[str, Any]) -> None:
+    representatives = school.get("представители")
+    if representatives is None:
+        return
+    if not isinstance(representatives, Mapping):
+        raise SourceSchoolDataError("Поле школа.представители должно быть объектом.")
+    for group_name, person_ids in representatives.items():
+        _check_person_ids(_as_list(person_ids), persons, f"школа.представители.{group_name}")
+
+
+def _require_mapping_items(items: list[Any], label: str) -> list[Mapping[str, Any]]:
+    return [_require_item_mapping(item, label) for item in items]
+
+
 def _summary_value(block: Mapping[str, Any], canonical_key: str) -> Any:
     for key in SUMMARY_ALIASES[canonical_key]:
         if key in block:
@@ -205,6 +223,8 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
     persons = indexes["persons"]
     sources = indexes["sources"]
     evidence = indexes["evidence"]
+    _check_all_confidence_values(normalized)
+    _check_aggregate_representatives(school, persons)
 
     for source in sources.values():
         url = source.get("url")
@@ -254,14 +274,14 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
                 raise SourceSchoolDataError(
                     f"Группа {group.get('id')} ссылается на неизвестное подтверждение: {evidence_id}."
                 )
-    for item in structure.get("направления", []):
+    for item in _require_mapping_items(structure.get("направления", []), "направления"):
         _check_person_ids(_as_list(_field(item, "представители", "участники")), persons, "направления")
-    for item in structure.get("поколения", []):
+    for item in _require_mapping_items(structure.get("поколения", []), "поколения"):
         _check_person_ids(_as_list(_field(item, "представители", "участники")), persons, "поколения")
-    for period in school.get("хронология", {}).get("периоды_развития", []):
+    for period in _require_mapping_items(school.get("хронология", {}).get("периоды_развития", []), "периоды развития"):
         _check_person_ids(_as_list(_field(period, "персоны", "основные_представители")), persons, "хронология")
-    for disagreement in school.get("историографические_расхождения", []):
-        for position in disagreement.get("позиции", []):
+    for disagreement in _require_mapping_items(school.get("историографические_расхождения", []), "историографические расхождения"):
+        for position in _require_mapping_items(disagreement.get("позиции", []), "историографические позиции"):
             for source_id in position.get("источники", []):
                 if source_id not in sources:
                     raise SourceSchoolDataError(

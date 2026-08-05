@@ -5,11 +5,12 @@ from typing import Any, Collection, Mapping
 
 import pandas as pd
 
-from .data import _as_list, _as_text, _field, normalize_source_school_document
+from .data import normalize_source_school_document
+from .presentation import as_display_text, as_list, get_first_field
 
 
 def _join_values(value: Any) -> str:
-    return "; ".join(_as_text(item) for item in _as_list(value) if _as_text(item))
+    return "; ".join(as_display_text(item) for item in as_list(value) if as_display_text(item))
 
 
 def resolve_person_names(
@@ -17,7 +18,7 @@ def resolve_person_names(
     person_index: Mapping[str, Mapping[str, Any]],
 ) -> list[str]:
     """Заменяет идентификаторы персон отображаемыми именами."""
-    return [_field(person_index[person_id], "полное_имя", "имя", default=person_id) for person_id in person_ids if person_id in person_index]
+    return [get_first_field(person_index[person_id], "полное_имя", "имя", default=person_id) for person_id in person_ids if person_id in person_index]
 
 
 def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
@@ -33,13 +34,13 @@ def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
         rows.append(
             {
                 "ID": person.get("id"),
-                "Представитель": _field(person, "полное_имя", "имя"),
+                "Представитель": get_first_field(person, "полное_имя", "имя"),
                 "Категория": person.get("категория_включения", ""),
                 "Роли": _join_values(person.get("роль_в_школе", [])),
                 "Связь с Выготским": person.get("статус_связи_с_выготским", ""),
                 "Период взаимодействия": person.get("период_взаимодействия", ""),
                 "Группы и контексты": _join_values(person.get("группы_и_контексты", [])),
-                "Основной вклад": _field(person, "основной_вклад", "основные_идеи_или_вклад"),
+                "Основной вклад": get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"),
                 "Уверенность": float(person.get("уверенность", 0) or 0),
                 "Число источников": len(set(source_ids)),
                 "Идентификаторы источников": "; ".join(dict.fromkeys(source_ids)),

@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import streamlit as st
 
-from core.source_schools.data import _as_list, _as_text, _field
+from core.source_schools.presentation import as_display_text, as_list, get_first_field
 from core.source_schools.tables import (
     build_evidence_dataframe,
     build_people_dataframe,
@@ -39,7 +39,7 @@ def _evidence_summary(evidence_id: str, indexes: Mapping[str, Mapping[str, Mappi
 
 
 def _write_named_list(title: str, value: Any) -> None:
-    text = _as_text(value)
+    text = as_display_text(value)
     if text:
         st.write(f"**{title}:** {text}")
 
@@ -57,17 +57,20 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     _write_named_list("Каноническое название", school.get("каноническое_название"))
     with st.expander("Альтернативные названия", expanded=False):
         for alternative in school.get("альтернативные_названия", []):
-            st.write(f"{_as_text(alternative.get('название'))} — {_as_text(alternative.get('примечание'))}")
+            st.write(f"{as_display_text(alternative.get('название'))} — {as_display_text(alternative.get('примечание'))}")
     _write_named_list("Тип школы", school.get("тип_школы"))
-    st.caption(_as_text(school.get("примечание_к_типу")))
-    _write_named_list("Дисциплинарные области", school.get("дисциплинарные_области"))
-    _write_named_list("Ключевые слова", school.get("ключевые_слова"))
-    _write_named_list("Основная идея", school.get("основная_идея"))
-    _write_named_list("Проблема", school.get("проблема"))
-    _write_named_list("Гипотеза", school.get("гипотеза"))
-    _write_named_list("Теория", school.get("теория"))
-    _write_named_list("Метод", school.get("метод"))
-    _write_named_list("Хронология", school.get("хронология", {}).get("кратко"))
+    st.caption(as_display_text(school.get("примечание_к_типу")))
+    disciplines = school.get("дисциплинарная_принадлежность", {})
+    main_idea = school.get("основная_идея", {})
+    chronology = school.get("хронология", {})
+    _write_named_list("Дисциплинарные области", get_first_field(disciplines, "области", default=school.get("дисциплинарные_области")))
+    _write_named_list("Ключевые слова", get_first_field(disciplines, "ключевые_слова", default=school.get("ключевые_слова")))
+    _write_named_list("Основная идея", main_idea)
+    _write_named_list("Проблема", get_first_field(main_idea, "центральная_проблема", default=school.get("проблема")))
+    _write_named_list("Гипотеза", get_first_field(main_idea, "центральная_гипотеза", default=school.get("гипотеза")))
+    _write_named_list("Теория", get_first_field(main_idea, "центральная_теория", default=school.get("теория")))
+    _write_named_list("Метод", get_first_field(main_idea, "центральный_метод", default=school.get("метод")))
+    _write_named_list("Хронология", get_first_field(chronology, "кратко", "общий_период", "описание"))
     _write_named_list("География", school.get("география"))
     _write_named_list("Организации", school.get("организации"))
 
@@ -133,14 +136,14 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
         key="source_schools_person_card",
     )
     person = indexes["persons"][person_id]
-    st.markdown(f"### {_field(person, 'полное_имя', 'имя')}")
-    _write_named_list("Годы жизни", _field(person, "годы_жизни", "даты"))
+    st.markdown(f"### {get_first_field(person, 'полное_имя', 'имя')}")
+    _write_named_list("Годы жизни", get_first_field(person, "годы_жизни", "даты"))
     _write_named_list("Категория включения как систематизация", person.get("категория_включения"))
     _write_named_list("Роли", person.get("роль_в_школе"))
     _write_named_list("Связь с Выготским", person.get("статус_связи_с_выготским"))
     _write_named_list("Период взаимодействия", person.get("период_взаимодействия"))
     _write_named_list("Группы и контексты", person.get("группы_и_контексты"))
-    _write_named_list("Основной вклад", _field(person, "основной_вклад", "основные_идеи_или_вклад"))
+    _write_named_list("Основной вклад", get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"))
     _write_named_list("Уверенность", person.get("уверенность"))
     st.markdown("#### Источниковые атрибуции")
     for attribution in person.get("источниковые_атрибуции", []):
@@ -160,28 +163,28 @@ def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: M
     structure = school["внутренняя_структура"]
     st.subheader("Исследовательские группы")
     for group in structure.get("исследовательские_группы", []):
-        with st.expander(_as_text(group.get("название", "Группа"))):
+        with st.expander(as_display_text(group.get("название", "Группа"))):
             _write_named_list("Период", group.get("период"))
             st.write("**Участники:** " + "; ".join(resolve_person_names(group.get("участники", []), indexes["persons"])))
             for evidence_id in group.get("подтверждения", []):
                 st.write(_evidence_summary(evidence_id, indexes))
     st.subheader("Направления")
     for direction in structure.get("направления", []):
-        with st.expander(_as_text(_field(direction, "название", "название_направления", default="Направление"))):
+        with st.expander(as_display_text(get_first_field(direction, "название", "название_направления", default="Направление"))):
             _write_named_list("Описание", direction.get("описание"))
-            ids = _as_list(_field(direction, "представители", "участники"))
+            ids = as_list(get_first_field(direction, "представители", "участники"))
             st.write("**Представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
             for evidence_id in direction.get("подтверждения", []):
                 st.write(_evidence_summary(evidence_id, indexes))
     st.subheader("Поколения")
     for generation in structure.get("поколения", []):
-        ids = _as_list(_field(generation, "представители", "участники"))
-        st.write(f"**{_as_text(generation.get('название'))}:** {'; '.join(resolve_person_names(ids, indexes['persons']))}")
+        ids = as_list(get_first_field(generation, "представители", "участники"))
+        st.write(f"**{as_display_text(generation.get('название'))}:** {'; '.join(resolve_person_names(ids, indexes['persons']))}")
     st.subheader("Периоды развития")
     for period in school.get("хронология", {}).get("периоды_развития", []):
-        ids = _as_list(_field(period, "персоны", "основные_представители"))
-        with st.expander(_as_text(period.get("название", "Период"))):
-            _write_named_list("Период", period.get("период"))
+        ids = as_list(get_first_field(period, "персоны", "основные_представители"))
+        with st.expander(as_display_text(get_first_field(period, "название", "название_периода", default="Период"))):
+            _write_named_list("Период", get_first_field(period, "период", "временной_диапазон"))
             _write_named_list("Описание", period.get("описание"))
             st.write("**Основные представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
 
@@ -189,22 +192,22 @@ def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: M
 def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает идеи и направления."""
     school = document["школа"]
-    ideas = school.get("идеи_и_направления", {})
+    ideas = school.get("идеи_и_направления", school)
     _write_named_list("Основная идея", school.get("основная_идея"))
     for key, label in (
-        ("теоретические_основания", "Теоретические основания"),
-        ("ключевые_понятия", "Ключевые понятия"),
-        ("теории", "Теории"),
-        ("методы", "Методы"),
-        ("интеллектуальные_источники", "Интеллектуальные источники"),
-        ("основные_результаты", "Основные результаты"),
-        ("связанные_школы", "Связанные школы"),
+        (("теоретические_основания",), "Теоретические основания"),
+        (("ключевые_понятия", "основные_понятия"), "Ключевые понятия"),
+        (("теории", "центральная_теория"), "Теории"),
+        (("методы", "центральный_метод"), "Методы"),
+        (("интеллектуальные_источники", "источники_идей"), "Интеллектуальные источники"),
+        (("основные_результаты",), "Основные результаты"),
+        (("связанные_школы", "связи_с_другими_школами"), "Связанные школы"),
     ):
-        _write_named_list(label, ideas.get(key))
+        _write_named_list(label, get_first_field(ideas, *key))
     for direction in school["внутренняя_структура"].get("направления", []):
-        with st.expander(_as_text(_field(direction, "название", "название_направления", default="Направление"))):
+        with st.expander(as_display_text(get_first_field(direction, "название", "название_направления", default="Направление"))):
             _write_named_list("Описание", direction.get("описание"))
-            ids = _as_list(_field(direction, "представители", "участники"))
+            ids = as_list(get_first_field(direction, "представители", "участники"))
             st.write("**Представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
             for evidence_id in direction.get("подтверждения", []):
                 st.write(_evidence_summary(evidence_id, indexes))
@@ -266,20 +269,24 @@ def render_disagreements_and_quality_section(document: Mapping[str, Any], indexe
                     for source_id in position.get("источники", [])
                     if source_id in indexes["sources"]
                 ]
-                st.write(f"**Источникозависимая интерпретация:** {_field(position, 'формулировка', 'позиция')}")
+                st.write(f"**Источникозависимая интерпретация:** {get_first_field(position, 'формулировка', 'позиция')}")
                 st.write("**Источники:** " + "; ".join(source_names))
     st.subheader("Качество данных")
-    for key, value in quality.get("проверки", {}).items():
+    checks = quality.get("проверки", {})
+    for key in ("использовано_несколько_источников", "расхождения_источников_сохранены", "прямые_и_косвенные_связи_разделены"):
+        if key in quality:
+            checks[key] = quality[key]
+    for key, value in checks.items():
         message = f"{key}: {'да' if value else 'требует проверки'}"
         if value:
             st.success(message)
         else:
             st.warning(message)
-    _write_named_list("Недостаточно сведений", quality.get("недостаточно_сведений"))
-    _write_named_list("Интерпретативные выводы", quality.get("интерпретативные_выводы"))
-    _write_named_list("Примечания", quality.get("примечания"))
-    for key, value in quality.get("метаданные_извлечения", {}).items():
+    _write_named_list("Недостаточно сведений", get_first_field(quality, "недостаточно_сведений", "поля_с_недостаточной_информацией"))
+    _write_named_list("Интерпретативные выводы", get_first_field(quality, "интерпретативные_выводы", "потенциально_интерпретативные_выводы"))
+    _write_named_list("Примечания", get_first_field(quality, "примечания", "замечания"))
+    for key, value in get_first_field(quality, "метаданные_извлечения", default={}).items():
         _write_named_list(str(key), value)
     with st.expander("Кандидаты для дальнейшего расширения данных"):
         st.caption("Эти персоны или группы пока не входят в проверенный основной список.")
-        st.write(_as_text(school.get("кандидаты_на_расширение")))
+        st.write(as_display_text(school.get("кандидаты_на_расширение")))
