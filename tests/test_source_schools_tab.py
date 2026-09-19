@@ -12,10 +12,26 @@ def text(app):
 def test_renderer_overview_runs():
     app=AppTest.from_string(APP).run(timeout=30); t=text(app)
     assert not app.exception; assert 'Школы по источникам (демо)' in t; assert app.selectbox[0].label=='Научная школа'; assert 'Лев Семёнович Выготский' in app.selectbox[0].options; assert app.radio[0].options==['Обзор','Состав школы','Группы и хронология','Идеи и направления','Источники и подтверждения','Расхождения и качество данных']; assert any(m.label=='Представители' and m.value=='47' for m in app.metric); assert any(m.label=='Источники' and m.value=='8' for m in app.metric); assert any(m.label=='Подтверждения' and m.value=='34' for m in app.metric)
+    assert app.selectbox[1].label == 'Основная классификация'
+    assert [item.label for item in app.multiselect[:3]] == ['Исторические группы', 'Периоды', 'Научные направления']
+    assert any(item.label == 'Логика сочетания измерений' for item in app.radio)
+    assert any(item.label == 'Режим отображения' for item in app.radio)
+    assert 'пока выбор пуст, дерево показано полностью' in t
 
 def test_people_mode_shows_filters_and_attributions():
     app=AppTest.from_string(APP).run(timeout=30); app.radio[0].set_value('Состав школы'); app.run(timeout=30); t=text(app)
-    assert not app.exception; assert app.text_input[0].label=='Поиск по представителям'; assert 'Найдено представителей: 47' in t; assert 'Источниковые атрибуции' in t
+    assert not app.exception; assert app.text_input[0].label=='Поиск по представителям'; assert app.multiselect[0].label=='Тип связи с Выготским'; assert 'Найдено представителей: 47' in t; assert 'Источниковые атрибуции' in t
+
+
+def test_overview_accepts_multiple_supplementary_dimensions():
+    app = AppTest.from_string(APP).run(timeout=30)
+    app.multiselect[0].set_value(['group:kharkov_group'])
+    app.multiselect[1].set_value(['period:2'])
+    app.run(timeout=30)
+    assert not app.exception
+    assert 'Харьковская группа' in app.multiselect[0].options
+    assert '1931–1934 — Разветвление сети' in app.multiselect[1].options
+    assert 'между активными измерениями — пересечение' in text(app)
 
 def test_sources_mode_shows_bibliography_and_evidence():
     app=AppTest.from_string(APP).run(timeout=30); app.radio[0].set_value('Источники и подтверждения'); app.run(timeout=30); t=text(app)

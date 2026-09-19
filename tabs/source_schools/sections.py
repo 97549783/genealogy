@@ -11,7 +11,12 @@ import streamlit.components.v1 as components
 from core.source_schools.bibliography import build_numbered_bibliography, build_source_number_index
 from core.source_schools.export import build_filtered_people_csv, build_filtered_people_xlsx
 from core.source_schools.presentation import as_display_text, as_list, get_first_field
-from core.source_schools.tree import build_source_school_overview_tree
+from core.source_schools.tree import (
+    build_person_primary_relation_index,
+    build_source_school_overview_tree,
+    build_supplementary_dimension_catalog,
+    combine_supplementary_selections,
+)
 from core.ui.tree_renderers import build_markmap_html, draw_hierarchical_tree
 from core.source_schools.tables import (
     build_evidence_dataframe,
@@ -95,18 +100,97 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     _write_named_list("География", school.get("география"))
     _write_named_list("Организации", school.get("организации"))
     st.subheader("Структура школы")
-    st.caption("Дерево показывает источниковую систематизацию школы по поколениям и категориям, а не линии научного руководства.")
+    relation_model = school.get("классификация_связи_с_выготским", {})
+    primary_label = str(relation_model.get("название", "Тип связи с Выготским")).strip()
+    st.selectbox(
+        "Основная классификация",
+        [primary_label],
+        disabled=True,
+        key="source_schools_primary_classification",
+    )
+    catalog = build_supplementary_dimension_catalog(document)
+    dimension_specs = (
+        ("historical_group", "Исторические группы"),
+        ("period", "Периоды"),
+        ("research_direction", "Научные направления"),
+    )
+    selections: dict[str, list[str]] = {}
+    dimension_columns = st.columns(3)
+    for column, (dimension_id, label) in zip(dimension_columns, dimension_specs, strict=True):
+        values = catalog.get(dimension_id, ())
+        value_by_id = {value.id: value for value in values}
+        with column:
+            selections[dimension_id] = st.multiselect(
+                label,
+                list(value_by_id),
+                format_func=lambda value_id, value_by_id=value_by_id: value_by_id[value_id].label,
+                key=f"source_schools_supplementary_{dimension_id}",
+            )
+    active_dimension_count = sum(bool(values) for values in selections.values())
+    composition_mode = st.radio(
+        "Логика сочетания измерений",
+        ["intersection", "union"],
+        format_func=lambda value: (
+            "Пересечение (И): персона должна соответствовать каждому выбранному измерению"
+            if value == "intersection"
+            else "Объединение (ИЛИ): достаточно соответствия любому выбранному измерению"
+        ),
+        horizontal=True,
+        disabled=active_dimension_count < 2,
+        key="source_schools_supplementary_composition",
+    )
+    display_mode = st.radio(
+        "Режим отображения",
+        ["highlight", "hide"],
+        format_func=lambda value: (
+            "Подсветить выбранное, остальное затенить"
+            if value == "highlight"
+            else "Скрыть остальное"
+        ),
+        horizontal=True,
+        key="source_schools_supplementary_display_mode",
+    )
+    highlighted_person_ids = combine_supplementary_selections(
+        catalog,
+        selections,
+        mode=composition_mode,
+    )
+    hidden_person_ids: set[str] | None = None
+    if highlighted_person_ids is not None and display_mode == "hide":
+        all_person_ids = {str(person.get("id")) for person in school.get("персоны", [])}
+        hidden_person_ids = all_person_ids - highlighted_person_ids
+    if highlighted_person_ids is None:
+        st.caption(
+            "Четыре типа связи задают положение узлов. В каждом дополнительном измерении можно выбрать несколько значений; "
+            "пока выбор пуст, дерево показано полностью."
+        )
+    else:
+        composition_label = "пересечение" if composition_mode == "intersection" and active_dimension_count > 1 else "объединение"
+        action_label = "видимыми оставлены" if display_mode == "hide" else "подсвечены оранжевым"
+        st.caption(
+            f"{action_label.capitalize()} {len(highlighted_person_ids)} персон; внутри каждого измерения действует объединение, "
+            f"между активными измерениями — {composition_label}. Структура и порядок типов связи не меняются."
+        )
+        if not highlighted_person_ids:
+            st.warning("Выбранная комбинация не содержит общих персон. Измените значения или выберите объединение (ИЛИ).")
     mode = st.radio(
         "Режим ветвления",
         ["Одностороннее ветвление", "Двустороннее ветвление"],
         horizontal=True,
         key="source_schools_tree_branching",
     )
-    tree = build_source_school_overview_tree(document)
+    tree = build_source_school_overview_tree(
+        document,
+        highlighted_person_ids=highlighted_person_ids,
+        hidden_person_ids=hidden_person_ids,
+    )
     html, height = build_markmap_html(tree.graph, tree.root_id, branching_mode=("bidirectional" if mode == "Двустороннее ветвление" else "unidirectional"))
     components.html(html, height=height, scrolling=False)
     st.caption("Клик на узел — свернуть или развернуть ветвь. Колёсико мыши — масштаб; перетаскивание — панорама.")
-    st.warning("Дерево отражает группировку представителей по поколениям и источниковым категориям. Оно не является деревом научного руководства.")
+    st.warning(
+        "Тип связи — аналитическая систематизация по характеру непосредственной связи с Выготским. "
+        "Она не создаёт неподтверждённых отношений научного руководства; источниковые формулировки сохранены в карточках персон."
+    )
     figure = draw_hierarchical_tree(tree.graph, tree.root_id, title="Структура школы")
     png_buffer = io.BytesIO()
     figure.savefig(png_buffer, format="png", dpi=180, bbox_inches="tight")
@@ -119,10 +203,10 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
     st.warning(document["демо_представление"]["методологическое_предупреждение"])
     dataframe = build_people_dataframe(document)
     query = st.text_input("Поиск по представителям", key="source_schools_people_query")
-    categories = st.multiselect(
-        "Категория включения",
-        sorted(dataframe["Категория"].dropna().unique()),
-        key="source_schools_people_categories",
+    relation_types = st.multiselect(
+        "Тип связи с Выготским",
+        sorted(value for value in dataframe["Тип связи"].dropna().unique() if value),
+        key="source_schools_people_relation_types",
     )
     roles = st.multiselect(
         "Роль в школе",
@@ -152,7 +236,7 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
     filtered = filter_people_dataframe(
         dataframe,
         query=query,
-        categories=categories,
+        relation_types=relation_types,
         roles=roles,
         groups=groups,
         source_ids=source_ids,
@@ -173,6 +257,7 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
         height=600,
         column_config={
             "Представитель": st.column_config.TextColumn(width="medium"),
+            "Тип связи": st.column_config.TextColumn(width="medium"),
             "Категория": st.column_config.TextColumn(width="small"),
             "Роли": st.column_config.TextColumn(width="medium"),
             "Связь с Выготским": st.column_config.TextColumn(width="medium"),
@@ -193,6 +278,7 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
     person = indexes["persons"][person_id]
     st.markdown(f"### {get_first_field(person, 'полное_имя', 'имя')}")
     _write_named_list("Годы жизни", get_first_field(person, "годы_жизни", "даты"))
+    _write_named_list("Тип связи с Выготским", build_person_primary_relation_index(document).get(person_id))
     _write_named_list("Категория включения как систематизация", person.get("категория_включения"))
     _write_named_list("Роли", person.get("роль_в_школе"))
     _write_named_list("Связь с Выготским", person.get("статус_связи_с_выготским"))
@@ -271,7 +357,10 @@ def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Ma
 def render_sources_and_evidence_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает источники и подтверждения."""
     st.subheader("Список использованных источников")
-    st.caption("Библиографические описания приведены в формате, близком к ГОСТ; автоматическая сертифицированная проверка ГОСТ не выполняется.")
+    st.caption(
+        "Библиографические описания приведены в формате, близком к ГОСТ; автоматическая сертифицированная "
+        "проверка ГОСТ не выполняется. Дата обращения показывается для электронных источников."
+    )
     for row in build_numbered_bibliography(document):
         st.markdown(f"{row['№']}. {row['описание']}")
         if _safe_url(row.get("url")):

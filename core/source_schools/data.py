@@ -221,6 +221,62 @@ def _check_aggregate_representatives(school: Mapping[str, Any], persons: Mapping
         _check_person_ids(_as_list(person_ids), persons, f"школа.представители.{group_name}")
 
 
+def _validate_primary_relation_classification(
+    school: Mapping[str, Any],
+    persons: Mapping[str, Any],
+) -> None:
+    """Проверяет полноту и взаимоисключаемость первичной классификации связей."""
+    model = school.get("классификация_связи_с_выготским")
+    if model is None:
+        return
+    if not isinstance(model, Mapping):
+        raise SourceSchoolDataError("Классификация связи с Выготским должна быть объектом.")
+    categories = model.get("категории")
+    if not isinstance(categories, list) or not categories:
+        raise SourceSchoolDataError("Классификация связи с Выготским не содержит категорий.")
+    seen_codes: set[str] = set()
+    assigned: dict[str, str] = {}
+    for category in _require_mapping_items(categories, "категории первичной классификации"):
+        code = str(category.get("код", "")).strip()
+        name = str(category.get("название", "")).strip()
+        if not code or not name:
+            raise SourceSchoolDataError("Каждая категория первичной классификации должна иметь код и название.")
+        if code in seen_codes:
+            raise SourceSchoolDataError(f"Повторяющийся код категории первичной классификации: {code}.")
+        seen_codes.add(code)
+        participant_ids = [str(item) for item in _as_list(_field(category, "участники", "представители"))]
+        _check_person_ids(participant_ids, persons, f"категория {code}")
+        for person_id in participant_ids:
+            if person_id in assigned:
+                raise SourceSchoolDataError(
+                    f"Персона {person_id} включена одновременно в категории {assigned[person_id]} и {code}."
+                )
+            assigned[person_id] = code
+
+    representatives = school.get("представители", {})
+    founder_ids = {
+        str(item)
+        for item in _as_list(representatives.get("основатели"))
+    } if isinstance(representatives, Mapping) else set()
+    if not founder_ids:
+        founder_ids = {
+            str(person_id)
+            for person_id, person in persons.items()
+            if "основатель" in _as_list(person.get("роль_в_школе"))
+        }
+    expected = set(persons) - founder_ids
+    missing = sorted(expected - set(assigned))
+    unexpected = sorted(set(assigned) & founder_ids)
+    if missing:
+        raise SourceSchoolDataError(
+            "Первичная классификация не охватывает персон: " + ", ".join(missing) + "."
+        )
+    if unexpected:
+        raise SourceSchoolDataError(
+            "Основатель не должен дублироваться в категориях первичной классификации: " + ", ".join(unexpected) + "."
+        )
+
+
 def _require_mapping_items(items: list[Any], label: str) -> list[Mapping[str, Any]]:
     return [_require_item_mapping(item, label) for item in items]
 
@@ -270,6 +326,7 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
     evidence = indexes["evidence"]
     _check_all_confidence_values(normalized)
     _check_aggregate_representatives(school, persons)
+    _validate_primary_relation_classification(school, persons)
 
     for source in sources.values():
         _check_source_content(source)

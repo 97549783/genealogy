@@ -7,7 +7,7 @@ def doc(): return load_source_school_file(SOURCE_SCHOOLS_DATA_DIR/'vygotsky_scho
 
 def test_people_dataframe_and_columns():
     df=build_people_dataframe(doc()); assert len(df)==47
-    for c in ['ID','Представитель','Категория','Роли','Связь с Выготским','Период взаимодействия','Группы и контексты','Основной вклад','Уверенность','Число источников','Идентификаторы источников']: assert c in df.columns
+    for c in ['ID','Представитель','Тип связи','Категория','Роли','Связь с Выготским','Период взаимодействия','Группы и контексты','Основной вклад','Уверенность','Число источников','Идентификаторы источников']: assert c in df.columns
 
 def test_source_counts_distinct():
     d = doc()
@@ -22,11 +22,13 @@ def test_filters_work():
     sample = df.iloc[1]
     query_fragment = str(sample['Представитель'])[:4].swapcase()
     category = sample['Категория']
+    relation_type = sample['Тип связи']
     role = str(sample['Роли']).split('; ')[0]
     group = str(sample['Группы и контексты']).split('; ')[0]
     source_id = str(sample['Идентификаторы источников']).split('; ')[0]
     assert sample['ID'] in set(filter_people_dataframe(df, query=query_fragment)['ID'])
     assert set(filter_people_dataframe(df, categories=[category])['Категория']) == {category}
+    assert set(filter_people_dataframe(df, relation_types=[relation_type])['Тип связи']) == {relation_type}
     assert all(role in x for x in filter_people_dataframe(df, roles=[role])['Роли'])
     assert all(group in x for x in filter_people_dataframe(df, groups=[group])['Группы и контексты'])
     assert all(source_id in x for x in filter_people_dataframe(df, source_ids=[source_id])['Идентификаторы источников'])

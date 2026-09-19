@@ -8,6 +8,7 @@ import pandas as pd
 from .data import normalize_source_school_document
 from .bibliography import build_source_number_index
 from .presentation import as_display_text, as_list, get_first_field
+from .tree import build_person_primary_relation_index
 
 
 def _group_labels(document: Mapping[str, Any]) -> dict[str, str]:
@@ -35,6 +36,7 @@ def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
     """Формирует таблицу представителей школы."""
     normalized = normalize_source_school_document(document)
     group_labels = _group_labels(normalized)
+    relation_labels = build_person_primary_relation_index(normalized)
     rows: list[dict[str, Any]] = []
     for person in normalized["школа"]["персоны"]:
         source_ids = [
@@ -46,6 +48,7 @@ def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
             {
                 "ID": person.get("id"),
                 "Представитель": get_first_field(person, "полное_имя", "имя"),
+                "Тип связи": relation_labels.get(str(person.get("id")), "Основатель" if "основатель" in as_list(person.get("роль_в_школе")) else ""),
                 "Категория": person.get("категория_включения", ""),
                 "Роли": _join_values(person.get("роль_в_школе", [])),
                 "Связь с Выготским": person.get("статус_связи_с_выготским", ""),
@@ -70,6 +73,7 @@ def filter_people_dataframe(
     *,
     query: str = "",
     categories: Collection[str] = (),
+    relation_types: Collection[str] = (),
     roles: Collection[str] = (),
     groups: Collection[str] = (),
     source_ids: Collection[str] = (),
@@ -82,6 +86,7 @@ def filter_people_dataframe(
         query_lower = query.strip().lower()
         search_columns = [
             "Представитель",
+            "Тип связи",
             "Категория",
             "Роли",
             "Связь с Выготским",
@@ -92,6 +97,8 @@ def filter_people_dataframe(
         mask &= text.str.contains(query_lower, regex=False)
     if categories:
         mask &= filtered["Категория"].isin(categories)
+    if relation_types:
+        mask &= filtered["Тип связи"].isin(relation_types)
     if roles:
         mask &= _contains_any(filtered["Роли"], roles)
     if groups:
@@ -125,9 +132,8 @@ def build_sources_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
 def build_evidence_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
     """Формирует таблицу подтверждений с названиями источников."""
     normalized = normalize_source_school_document(document)
-    numbers = build_source_number_index(normalized)
     labels = {
-        source["id"]: f"Источник [{numbers.get(str(source.get('id')), '?')}]"
+        source["id"]: source.get("краткое_название") or source.get("библиографическое_описание", "")
         for source in normalized["школа"]["источники"]
     }
     return pd.DataFrame(

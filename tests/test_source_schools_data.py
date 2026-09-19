@@ -202,6 +202,25 @@ def test_vygotsky_json_loads_and_counts():
     assert len(document["школа"]["персоны"]) == 47
     assert len(document["школа"]["источники"]) == 8
     assert len(document["школа"]["подтверждения"]) == 34
+    categories = document["школа"]["классификация_связи_с_выготским"]["категории"]
+    assert [category["код"] for category in categories] == ["A1", "A2", "A3", "A4"]
+    assigned = [person_id for category in categories for person_id in category["участники"]]
+    assert len(assigned) == len(set(assigned)) == 46
+    names = {person["id"]: person["полное_имя"] for person in document["школа"]["персоны"]}
+    assert names["m_b_eidinova"] == "Марина Борисовна Эйдинова"
+    assert names["e_i_pashkovskaya"] == "Екатерина Ильинична Пашковская"
+    assert names["k_i_veresotskaya"] == "Ксения Ивановна Вересотская"
+    assert names["a_a_shein"] == "А. А. Шеин"
+    assert names["natalia_menchinskaya"] == "Наталья Александровна Менчинская"
+    assert names["natalia_morozova"] == "Наталья Григорьевна Морозова"
+
+
+def test_primary_relation_classification_rejects_duplicate_membership():
+    document = load_demo_document()
+    categories = document["школа"]["классификация_связи_с_выготским"]["категории"]
+    categories[1]["участники"].append(categories[0]["участники"][0])
+    with pytest.raises(SourceSchoolDataError, match="включена одновременно"):
+        validate_source_school_document(document)
 
 
 def test_catalog_contains_one_school():

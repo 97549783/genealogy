@@ -367,6 +367,12 @@ def _build_markmap_node(
         "content": str(G.nodes[node].get("label", node)),
         "children": children_data,
     }
+    if G.nodes[node].get("color"):
+        result["_color"] = str(G.nodes[node]["color"])
+    if G.nodes[node].get("kind"):
+        result["_kind"] = str(G.nodes[node]["kind"])
+    if G.nodes[node].get("hidden"):
+        result["_hidden"] = True
     if max_depth > 0 and depth >= max_depth and children_data:
         result["payload"] = {"fold": 1}
 
@@ -402,7 +408,8 @@ def build_markmap_html_bidirectional(
     right_children = all_children[half:]
 
     palette_js = json.dumps(_BRANCH_PALETTE)
-    root_json = json.dumps(str(G.nodes[root].get("label", root)))
+    root_json = json.dumps(str(G.nodes[root].get("label", root)), ensure_ascii=False)
+    root_color = str(G.nodes[root].get("color", "#37474f"))
 
     def _make_subtree_json(children: List[str], palette_offset: int) -> str:
         child_nodes = []
@@ -477,7 +484,7 @@ def build_markmap_html_bidirectional(
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    background: #37474f;
+    background: {root_color};
     color: #fff;
     font: bold 18px 'Segoe UI','Noto Sans',Arial,sans-serif;
     padding: 10px 24px;
@@ -520,7 +527,8 @@ if (!hasRight) document.getElementById('mm-right-side').style.display = 'none';
 
 function assignColors(node, paletteIdx) {{
   node.state = node.state || {{}};
-  if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
+  if (node._color) node.state.color = node._color;
+  else if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
   if (node.children) {{
     node.children.forEach(child => {{
       assignColors(child, node._palette_idx !== undefined ? node._palette_idx : paletteIdx);
@@ -535,6 +543,25 @@ function colorTree(rootNode) {{
       assignColors(child, idx);
     }});
   }}
+}}
+
+function isHiddenDatum(datum) {{
+  const node = datum && datum.data ? datum.data : datum;
+  return Boolean(node && node._hidden);
+}}
+
+function applyVisibility(svg) {{
+  d3.select(svg).selectAll('g.markmap-node')
+    .style('opacity', datum => isHiddenDatum(datum) ? 0 : 1)
+    .style('pointer-events', datum => isHiddenDatum(datum) ? 'none' : null);
+  d3.select(svg).selectAll('path.markmap-link')
+    .style('opacity', datum => isHiddenDatum(datum && datum.target ? datum.target : datum) ? 0 : 1);
+}}
+
+function watchVisibility(svg) {{
+  applyVisibility(svg);
+  const observer = new MutationObserver(() => applyVisibility(svg));
+  observer.observe(svg, {{childList: true, subtree: true}});
 }}
 
 const MM_OPTS = {{
@@ -555,6 +582,7 @@ if (hasRight) {{
   colorTree(rightData);
   const svgR = document.getElementById('mm-svg-right');
   const mmR  = Markmap.create(svgR, MM_OPTS, rightData);
+  watchVisibility(svgR);
   requestAnimationFrame(() => mmR.fit());
   setTimeout(() => mmR.fit(), 300);
   setTimeout(() => mmR.fit(), 800);
@@ -565,6 +593,7 @@ if (hasLeft) {{
   colorTree(leftData);
   const svgL = document.getElementById('mm-svg-left');
   const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
+  watchVisibility(svgL);
   requestAnimationFrame(() => mmL.fit());
   setTimeout(() => mmL.fit(), 300);
   setTimeout(() => mmL.fit(), 800);
@@ -634,12 +663,26 @@ const data = {tree_json};
 
 function assignColors(node, paletteIdx) {{
   node.state = node.state || {{}};
-  if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
+  if (node._color) node.state.color = node._color;
+  else if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
   if (node.children) {{
     node.children.forEach(child => {{
       assignColors(child, node._palette_idx !== undefined ? node._palette_idx : paletteIdx);
     }});
   }}
+}}
+
+function isHiddenDatum(datum) {{
+  const node = datum && datum.data ? datum.data : datum;
+  return Boolean(node && node._hidden);
+}}
+
+function applyVisibility(svg) {{
+  d3.select(svg).selectAll('g.markmap-node')
+    .style('opacity', datum => isHiddenDatum(datum) ? 0 : 1)
+    .style('pointer-events', datum => isHiddenDatum(datum) ? 'none' : null);
+  d3.select(svg).selectAll('path.markmap-link')
+    .style('opacity', datum => isHiddenDatum(datum && datum.target ? datum.target : datum) ? 0 : 1);
 }}
 
 if (data.children) {{
@@ -661,6 +704,11 @@ const mm = Markmap.create('#mm', {{
   fitRatio: 0.92,
   color: (node) => (node.state && node.state.color) || '#37474f',
 }}, data);
+
+const svg = document.getElementById('mm');
+applyVisibility(svg);
+const visibilityObserver = new MutationObserver(() => applyVisibility(svg));
+visibilityObserver.observe(svg, {{childList: true, subtree: true}});
 
 requestAnimationFrame(() => mm.fit());
 setTimeout(() => mm.fit(), 300);
@@ -738,9 +786,16 @@ def draw_hierarchical_tree(graph: nx.DiGraph, root: str, *, title: str) -> plt.F
         positions = nx_pydot.graphviz_layout(graph, prog="dot")
     except Exception:
         positions = _hierarchy_pos_shared(graph, root)
-    labels = {node: "\n".join(textwrap.wrap(str(graph.nodes[node].get("label", node)), width=22)) for node in graph.nodes}
+    visible_nodes = [node for node in graph.nodes if not graph.nodes[node].get("hidden")]
+    visible_node_set = set(visible_nodes)
+    visible_edges = [(source, target) for source, target in graph.edges if source in visible_node_set and target in visible_node_set]
+    labels = {node: "\n".join(textwrap.wrap(str(graph.nodes[node].get("label", node)), width=22)) for node in visible_nodes}
     figure = plt.figure(figsize=(max(7, graph.number_of_nodes() * 0.35), 7))
-    nx.draw(graph, positions, with_labels=True, labels=labels, node_color="#ADD8E6", node_size=2200, font_size=7, arrows=True)
+    node_colors = [str(graph.nodes[node].get("color", "#ADD8E6")) for node in visible_nodes]
+    nx.draw_networkx_nodes(graph, positions, nodelist=visible_nodes, node_color=node_colors, node_size=2200)
+    nx.draw_networkx_edges(graph, positions, edgelist=visible_edges, arrows=True)
+    nx.draw_networkx_labels(graph, positions, labels=labels, font_size=7)
+    plt.axis("off")
     plt.title(title, fontsize=10)
     plt.tight_layout()
     return figure

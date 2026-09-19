@@ -52,7 +52,7 @@ def render_source_schools_tab() -> None:
         catalog = load_source_school_catalog()
     except SourceSchoolDataError as exc:
         st.error("Не удалось загрузить данные школ по источникам.")
-        st.warning("В данных обнаружены демонстрационные или незаполненные записи.")
+        st.warning(str(exc))
         return
     if not catalog:
         st.info("В каталоге пока нет доступных школ.")
