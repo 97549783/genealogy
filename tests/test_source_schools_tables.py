@@ -6,7 +6,7 @@ from core.source_schools.tables import build_evidence_dataframe, build_people_da
 def doc(): return load_source_school_file(SOURCE_SCHOOLS_DATA_DIR/'vygotsky_school_sources_demo.v1.json')
 
 def test_people_dataframe_and_columns():
-    df=build_people_dataframe(doc()); assert len(df)==47
+    df=build_people_dataframe(doc()); assert len(df)==51
     for c in ['ID','Представитель','Тип связи','Категория','Роли','Связь с Выготским','Период взаимодействия','Группы и контексты','Основной вклад','Уверенность','Число источников','Идентификаторы источников']: assert c in df.columns
 
 def test_source_counts_distinct():

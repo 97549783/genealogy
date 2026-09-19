@@ -389,7 +389,7 @@ def _resolve_markmap_depth(G: nx.DiGraph, root: str, initial_expand_level: int) 
 def build_markmap_html_bidirectional(
     G: nx.DiGraph,
     root: str,
-    initial_expand_level: int = -1,
+    initial_expand_level: int = 0,
 ) -> Tuple[str, int]:
     """
     Двусторонний Markmap (кастомная версия).
@@ -614,7 +614,7 @@ window.addEventListener('resize', () => {{
 def build_markmap_html_unidirectional(
     G: nx.DiGraph,
     root: str,
-    initial_expand_level: int = -1,
+    initial_expand_level: int = 0,
 ) -> Tuple[str, int]:
     """
     Односторонний Markmap (классическая схема): основатель слева,
@@ -723,7 +723,7 @@ window.addEventListener('resize', () => mm.fit());
 def build_markmap_html(
     G: nx.DiGraph,
     root: str,
-    initial_expand_level: int = -1,
+    initial_expand_level: int = 0,
     branching_mode: str = "bidirectional",
 ) -> Tuple[str, int]:
     if branching_mode == "unidirectional":

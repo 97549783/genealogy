@@ -10,7 +10,7 @@ PATH = Path("data/source_schools/vygotsky_school_sources_demo.v1.json")
 def test_источники_нумеруются_по_порядку_json():
     document = json.loads(PATH.read_text(encoding="utf-8"))
     bibliography = build_numbered_bibliography(document)
-    assert [row["№"] for row in bibliography] == list(range(1, 9))
+    assert [row["№"] for row in bibliography] == list(range(1, 14))
 
 
 def test_doi_url_и_дата_обращения_добавляются_без_дублей():
@@ -21,5 +21,5 @@ def test_doi_url_и_дата_обращения_добавляются_без_д
 
 def test_текстовый_список_содержит_номера():
     text = build_bibliography_text(json.loads(PATH.read_text(encoding="utf-8")))
-    for number in range(1, 9):
+    for number in range(1, 14):
         assert f"{number}." in text

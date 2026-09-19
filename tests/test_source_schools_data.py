@@ -199,13 +199,13 @@ def test_vygotsky_json_loads_and_counts():
     document = load_demo_document()
     assert document["школа"]["идентификатор_школы"] == "vygotsky_cultural_historical_school"
     assert document["демо_представление"]["название_в_выпадающем_списке"] == "Лев Семёнович Выготский"
-    assert len(document["школа"]["персоны"]) == 47
-    assert len(document["школа"]["источники"]) == 8
-    assert len(document["школа"]["подтверждения"]) == 34
+    assert len(document["школа"]["персоны"]) == 51
+    assert len(document["школа"]["источники"]) == 13
+    assert len(document["школа"]["подтверждения"]) == 39
     categories = document["школа"]["классификация_связи_с_выготским"]["категории"]
     assert [category["код"] for category in categories] == ["A1", "A2", "A3", "A4"]
     assigned = [person_id for category in categories for person_id in category["участники"]]
-    assert len(assigned) == len(set(assigned)) == 46
+    assert len(assigned) == len(set(assigned)) == 50
     names = {person["id"]: person["полное_имя"] for person in document["школа"]["персоны"]}
     assert names["m_b_eidinova"] == "Марина Борисовна Эйдинова"
     assert names["e_i_pashkovskaya"] == "Екатерина Ильинична Пашковская"
@@ -213,6 +213,14 @@ def test_vygotsky_json_loads_and_counts():
     assert names["a_a_shein"] == "А. А. Шеин"
     assert names["natalia_menchinskaya"] == "Наталья Александровна Менчинская"
     assert names["natalia_morozova"] == "Наталья Григорьевна Морозова"
+    assert names["filipp_bassin"] == "Филипп Вениаминович Бассин"
+    assert names["kurt_koffka"] == "Курт Коффка"
+    assert names["panteleimon_lyubimov"] == "Пантелеймон Саввич Любимов"
+    assert names["fedor_shemyakin"] == "Фёдор Николаевич Шемякин"
+    participants = {category["название"]: set(category["участники"]) for category in categories}
+    assert "panteleimon_lyubimov" in participants["Прямое сотрудничество"]
+    assert "kurt_koffka" in participants["Внешнее прямое взаимодействие"]
+    assert {"filipp_bassin", "fedor_shemyakin"}.issubset(participants["Косвенная преемственность"])
 
 
 def test_primary_relation_classification_rejects_duplicate_membership():
@@ -232,9 +240,9 @@ def test_catalog_contains_one_school():
 
 def test_cross_references_resolve():
     indexes = build_source_school_index(load_demo_document())
-    assert len(indexes["persons"]) == 47
-    assert len(indexes["sources"]) == 8
-    assert len(indexes["evidence"]) == 34
+    assert len(indexes["persons"]) == 51
+    assert len(indexes["sources"]) == 13
+    assert len(indexes["evidence"]) == 39
 
 
 def test_duplicate_person_id_raises():

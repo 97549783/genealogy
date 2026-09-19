@@ -33,8 +33,15 @@ def test_основное_дерево_использует_четыре_вза�
     ]
     assert not any(label.startswith(("A1", "A2", "A3", "A4")) for label in branch_labels)
     person_nodes = [node for node, data in tree.graph.nodes(data=True) if data.get("kind") == "person"]
-    assert len(person_nodes) == 46
+    assert len(person_nodes) == 50
     assert all(tree.graph.in_degree(node) == 1 for node in person_nodes)
+    person_labels = {tree.graph.nodes[node]["label"] for node in person_nodes}
+    assert {
+        "Филипп Вениаминович Бассин",
+        "Курт Коффка",
+        "Пантелеймон Саввич Любимов",
+        "Фёдор Николаевич Шемякин",
+    }.issubset(person_labels)
 
 
 def test_дополнительные_измерения_накладываются_без_изменения_ребер():
@@ -80,6 +87,7 @@ def test_markmap_использует_метки():
     html, height = build_markmap_html(tree.graph, tree.root_id)
     assert height > 0
     assert tree.root_label in html
+    assert '"fold": 1' not in html
 
 
 def test_markmap_сохраняет_цвета_наложенного_измерения():

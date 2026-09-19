@@ -11,16 +11,30 @@ def text(app):
 
 def test_renderer_overview_runs():
     app=AppTest.from_string(APP).run(timeout=30); t=text(app)
-    assert not app.exception; assert 'Школы по источникам (демо)' in t; assert app.selectbox[0].label=='Научная школа'; assert 'Лев Семёнович Выготский' in app.selectbox[0].options; assert app.radio[0].options==['Обзор','Состав школы','Группы и хронология','Идеи и направления','Источники и подтверждения','Расхождения и качество данных']; assert any(m.label=='Представители' and m.value=='47' for m in app.metric); assert any(m.label=='Источники' and m.value=='8' for m in app.metric); assert any(m.label=='Подтверждения' and m.value=='34' for m in app.metric)
+    assert not app.exception; assert 'Школы по источникам (демо)' in t; assert app.selectbox[0].label=='Научная школа'; assert 'Лев Семёнович Выготский' in app.selectbox[0].options; assert app.radio[0].options==['Обзор','Состав школы','Группы и хронология','Идеи и направления','Источники и подтверждения','Расхождения и качество данных']; assert any(m.label=='Представители' and m.value=='51' for m in app.metric); assert any(m.label=='Источники' and m.value=='13' for m in app.metric); assert any(m.label=='Подтверждения' and m.value=='39' for m in app.metric)
     assert app.selectbox[1].label == 'Основная классификация'
     assert [item.label for item in app.multiselect[:3]] == ['Исторические группы', 'Периоды', 'Научные направления']
     assert any(item.label == 'Логика сочетания измерений' for item in app.radio)
     assert any(item.label == 'Режим отображения' for item in app.radio)
     assert 'пока выбор пуст, дерево показано полностью' in t
+    main_elements = list(app._tree[0].children.values())
+    alternative_names_index = next(
+        index for index, element in enumerate(main_elements)
+        if getattr(element, 'label', None) == 'Альтернативные названия'
+    )
+    structure_index = next(
+        index for index, element in enumerate(main_elements)
+        if getattr(element, 'value', None) == 'Структура школы'
+    )
+    school_type_index = next(
+        index for index, element in enumerate(main_elements)
+        if str(getattr(element, 'value', '')).startswith('**Тип школы:**')
+    )
+    assert alternative_names_index < structure_index < school_type_index
 
 def test_people_mode_shows_filters_and_attributions():
     app=AppTest.from_string(APP).run(timeout=30); app.radio[0].set_value('Состав школы'); app.run(timeout=30); t=text(app)
-    assert not app.exception; assert app.text_input[0].label=='Поиск по представителям'; assert app.multiselect[0].label=='Тип связи с Выготским'; assert 'Найдено представителей: 47' in t; assert 'Источниковые атрибуции' in t
+    assert not app.exception; assert app.text_input[0].label=='Поиск по представителям'; assert app.multiselect[0].label=='Тип связи с Выготским'; assert 'Найдено представителей: 51' in t; assert 'Источниковые атрибуции' in t
 
 
 def test_overview_accepts_multiple_supplementary_dimensions():

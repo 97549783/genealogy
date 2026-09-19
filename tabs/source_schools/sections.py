@@ -55,6 +55,55 @@ def _write_named_list(title: str, value: Any) -> None:
         st.write(f"**{title}:** {text}")
 
 
+def _render_school_description(school: Mapping[str, Any]) -> None:
+    """Отрисовывает описательную часть обзора под интерактивным графом."""
+    _write_named_list("Тип школы", school.get("тип_школы"))
+    st.caption(as_display_text(school.get("примечание_к_типу")))
+    disciplines = school.get("дисциплинарная_принадлежность", {})
+    main_idea = school.get("основная_идея", {})
+    chronology = school.get("хронология", {})
+    _write_named_list(
+        "Дисциплинарные области",
+        get_first_field(disciplines, "области", default=school.get("дисциплинарные_области")),
+    )
+    _write_named_list(
+        "Ключевые слова",
+        get_first_field(disciplines, "ключевые_слова", default=school.get("ключевые_слова")),
+    )
+    _write_named_list("Основная идея", main_idea)
+    _write_named_list(
+        "Проблема",
+        get_first_field(main_idea, "центральная_проблема", default=school.get("проблема")),
+    )
+    _write_named_list(
+        "Гипотеза",
+        get_first_field(main_idea, "центральная_гипотеза", default=school.get("гипотеза")),
+    )
+    _write_named_list(
+        "Теория",
+        get_first_field(main_idea, "центральная_теория", default=school.get("теория")),
+    )
+    _write_named_list(
+        "Метод",
+        get_first_field(main_idea, "центральный_метод", default=school.get("метод")),
+    )
+    _write_named_list(
+        "Хронология",
+        get_first_field(
+            chronology,
+            "кратко",
+            "общий_период",
+            "описание",
+            "дата_или_период_возникновения",
+            "период_активности",
+            "период_расцвета",
+            "примечание_о_неопределенности_хронологии",
+        ),
+    )
+    _write_named_list("География", school.get("география"))
+    _write_named_list("Организации", school.get("организации"))
+
+
 def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает обзор школы."""
     school = document["школа"]
@@ -72,33 +121,6 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
                 f"{as_display_text(alternative.get('название'))} — "
                 f"{as_display_text(get_first_field(alternative, 'примечание', 'примечание_об_источнике_названия'))}"
             )
-    _write_named_list("Тип школы", school.get("тип_школы"))
-    st.caption(as_display_text(school.get("примечание_к_типу")))
-    disciplines = school.get("дисциплинарная_принадлежность", {})
-    main_idea = school.get("основная_идея", {})
-    chronology = school.get("хронология", {})
-    _write_named_list("Дисциплинарные области", get_first_field(disciplines, "области", default=school.get("дисциплинарные_области")))
-    _write_named_list("Ключевые слова", get_first_field(disciplines, "ключевые_слова", default=school.get("ключевые_слова")))
-    _write_named_list("Основная идея", main_idea)
-    _write_named_list("Проблема", get_first_field(main_idea, "центральная_проблема", default=school.get("проблема")))
-    _write_named_list("Гипотеза", get_first_field(main_idea, "центральная_гипотеза", default=school.get("гипотеза")))
-    _write_named_list("Теория", get_first_field(main_idea, "центральная_теория", default=school.get("теория")))
-    _write_named_list("Метод", get_first_field(main_idea, "центральный_метод", default=school.get("метод")))
-    _write_named_list(
-        "Хронология",
-        get_first_field(
-            chronology,
-            "кратко",
-            "общий_период",
-            "описание",
-            "дата_или_период_возникновения",
-            "период_активности",
-            "период_расцвета",
-            "примечание_о_неопределенности_хронологии",
-        ),
-    )
-    _write_named_list("География", school.get("география"))
-    _write_named_list("Организации", school.get("организации"))
     st.subheader("Структура школы")
     relation_model = school.get("классификация_связи_с_выготским", {})
     primary_label = str(relation_model.get("название", "Тип связи с Выготским")).strip()
@@ -184,7 +206,12 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
         highlighted_person_ids=highlighted_person_ids,
         hidden_person_ids=hidden_person_ids,
     )
-    html, height = build_markmap_html(tree.graph, tree.root_id, branching_mode=("bidirectional" if mode == "Двустороннее ветвление" else "unidirectional"))
+    html, height = build_markmap_html(
+        tree.graph,
+        tree.root_id,
+        initial_expand_level=0,
+        branching_mode=("bidirectional" if mode == "Двустороннее ветвление" else "unidirectional"),
+    )
     components.html(html, height=height, scrolling=False)
     st.caption("Клик на узел — свернуть или развернуть ветвь. Колёсико мыши — масштаб; перетаскивание — панорама.")
     st.warning(
@@ -196,6 +223,7 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     figure.savefig(png_buffer, format="png", dpi=180, bbox_inches="tight")
     st.download_button("Скачать дерево в PNG", png_buffer.getvalue(), file_name="vygotsky_cultural_historical_school.дерево.png", mime="image/png", key="source_schools_tree_png")
     st.download_button("Скачать интерактивное дерево в HTML", html.encode("utf-8"), file_name="vygotsky_cultural_historical_school.интерактивное_дерево.html", mime="text/html", key="source_schools_tree_html")
+    _render_school_description(school)
 
 
 def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
