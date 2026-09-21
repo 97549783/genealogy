@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Мухина Валерия Сергеевна — академическое дерево</title>
+<script>
+  if (window.location.pathname !== "/" || window.location.search !== "?mukina_tree") {
+    window.history.replaceState(null, "", "/?mukina_tree");
+  }
+</script>
+<style>
+  html, body {
+    margin: 0; padding: 0; background: #fff;
+    overflow: hidden;
+    width: 100%; height: 100%;
+  }
+  #mm-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100vh;
+  }
+  /*
+   * Левый контейнер зеркалится CSS scaleX(-1) — ветви растут влево.
+   * Текст узлов исправляется CSS-правилом ниже.
+   */
+  #mm-left-wrap {
+    transform: scaleX(-1);
+    transform-origin: center center;
+    width: 100%;
+    height: 100%;
+  }
+  /*
+   * Ключевое правило: зеркалим внутренний inline-block div
+   * внутри foreignObject обратно, чтобы компенсировать CSS scaleX(-1)
+   * на #mm-left-wrap. DOM-структура Markmap v0.18:
+   *   foreignObject.markmap-foreign > div > div { display: inline-block }
+   * Ветви/пути это правило не затрагивает.
+   */
+  #mm-svg-left .markmap-foreign > div > div {
+    transform: scaleX(-1) !important;
+    transform-origin: center center !important;
+  }
+  .mm-side {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .mm-side svg {
+    width: 100%;
+    height: 100vh;
+    display: block;
+  }
+#mm-root-label {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: #37474f;
+    color: #fff;
+    font: bold 18px 'Segoe UI','Noto Sans',Arial,sans-serif;
+    padding: 10px 24px;
+    border-radius: 8px;
+    white-space: nowrap;
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 10;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  }
+</style>
+</head>
+<body>
+<div id="mm-wrapper">
+  <div class="mm-side" id="mm-left-side">
+    <div id="mm-left-wrap"><svg id="mm-svg-left"></svg></div>
+  </div>
+  <div class="mm-side" id="mm-right-side">
+    <svg id="mm-svg-right"></svg>
+  </div>
+  <div id="mm-root-label">{}</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.0/dist/browser/index.js"></script>
+<script>
+const { Markmap } = window.markmap;
+
+const palette  = ["#ef5350", "#ab47bc", "#5c6bc0", "#29b6f6", "#26a69a", "#66bb6a", "#d4e157", "#ffa726", "#ff7043", "#8d6e63"];
+const rootName = "\u041c\u0443\u0445\u0438\u043d\u0430 \u0412\u0430\u043b\u0435\u0440\u0438\u044f \u0421\u0435\u0440\u0433\u0435\u0435\u0432\u043d\u0430";
+
+document.getElementById('mm-root-label').textContent = rootName;
+
+const hasLeft  = true;
+const hasRight = true;
+
+if (!hasLeft)  document.getElementById('mm-left-side').style.display  = 'none';
+if (!hasRight) document.getElementById('mm-right-side').style.display = 'none';
+
+function assignColors(node, paletteIdx) {
+  node.state = node.state || {};
+  if (paletteIdx !== undefined) node.state.color = palette[paletteIdx % palette.length];
+  if (node.children) {
+    node.children.forEach(child => {
+      assignColors(child, node._palette_idx !== undefined ? node._palette_idx : paletteIdx);
+    });
+  }
+}
+
+function colorTree(rootNode) {
+  if (rootNode.children) {
+    rootNode.children.forEach((child, i) => {
+      const idx = child._palette_idx !== undefined ? child._palette_idx : i;
+      assignColors(child, idx);
+    });
+  }
+}
+
+const MM_OPTS = {
+  autoFit: true,
+  pan: true,
+  zoom: true,
+  duration: 400,
+  maxWidth: 280,
+  nodeMinHeight: 16,
+  spacingVertical: 5,
+  spacingHorizontal: 80,
+  fitRatio: 0.92,
+  color: (node) => (node.state && node.state.color) || palette[0],
+};
+
+if (hasRight) {
+  const rightData = {"content": "", "children": [{"content": "Айгумова Заграт Идрисовна", "children": [{"content": "Мататова Полина Рувиновна", "children": []}, {"content": "Айгунов Владислав Русланович", "children": []}], "payload": {"fold": 1}, "_palette_idx": 47}, {"content": "Волосников А. В.", "children": [], "_palette_idx": 48}, {"content": "Шумунова Татьяна Владимировна", "children": [], "_palette_idx": 49}, {"content": "Носаль Анна Львовна", "children": [], "_palette_idx": 50}, {"content": "Юдина Карина Юрьевна", "children": [], "_palette_idx": 51}, {"content": "Ермоленко Галина Васильевна", "children": [], "_palette_idx": 52}, {"content": "Дугарова Татьяна Дондоковна", "children": [], "_palette_idx": 53}, {"content": "Дембицкая Ольга Юрьевна", "children": [{"content": "Царьков Виктор Владимирович", "children": []}], "payload": {"fold": 1}, "_palette_idx": 54}, {"content": "Сидоришин Федор Анатольевич", "children": [], "_palette_idx": 55}, {"content": "Самарец Григорий Анатольевич", "children": [], "_palette_idx": 56}, {"content": "Павлов Сергей Михайлович", "children": [], "_palette_idx": 57}, {"content": "Тимофеева Елена Петровна", "children": [], "_palette_idx": 58}, {"content": "Проценко Л.М.", "children": [], "_palette_idx": 59}, {"content": "Обухов Алексей Сергеевич", "children": [{"content": "Шамонина Татьяна Геннадьевна", "children": []}, {"content": "Чурилова Екатерина Евгеньевна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 60}, {"content": "Денисов Александр Анатольевич", "children": [], "_palette_idx": 61}, {"content": "Шолохов Иван Андреевич", "children": [], "_palette_idx": 62}, {"content": "Аркадьев Григорий Иванович", "children": [], "_palette_idx": 63}, {"content": "Хабаров Иосиф Петрович", "children": [], "_palette_idx": 64}, {"content": "Афонасенко Елена Викторовна", "children": [], "_palette_idx": 65}, {"content": "Калиниченко Ольга Вячеславовна", "children": [], "_palette_idx": 66}, {"content": "Сахарова Татьяна Николаевна", "children": [], "_palette_idx": 67}, {"content": "Вергазов Илья Ринатович", "children": [], "_palette_idx": 68}, {"content": "Жог Мария Валерьевна", "children": [], "_palette_idx": 69}, {"content": "Резник Маргарита Иосифовна", "children": [], "_palette_idx": 70}, {"content": "Никитин Александр Валентинович", "children": [{"content": "Иванова Екатерина Викторовна", "children": [{"content": "Гришаева Екатерина Ивановна", "children": []}, {"content": "Ефремов Иван Анатольевич", "children": []}, {"content": "Кузнецова Олеся Васильевна", "children": [{"content": "Соловьев Михаил Михайлович", "children": [{"content": "Грузер Михаил Аврамович", "children": []}], "payload": {"fold": 1}}], "payload": {"fold": 1}}], "payload": {"fold": 1}}, {"content": "Жидков Сергей Александрович", "children": []}, {"content": "Киеу Вьет Кмонг", "children": []}], "payload": {"fold": 1}, "_palette_idx": 71}, {"content": "Двойнин Алексей Михайлович", "children": [], "_palette_idx": 72}, {"content": "Ткаченко Софья Болеславовна", "children": [], "_palette_idx": 73}, {"content": "Велев Владислав Петрович", "children": [], "_palette_idx": 74}, {"content": "Гаджимурадова Жанна Темирхановна", "children": [], "_palette_idx": 75}, {"content": "Лувсандандар Уранцэцэг", "children": [], "_palette_idx": 76}, {"content": "Бурке Бельтран Мария Тереза", "children": [], "_palette_idx": 77}, {"content": "Мендес Эспиноса, Ольга", "children": [], "_palette_idx": 78}, {"content": "Маджаров Георгий Александрович", "children": [], "_palette_idx": 79}, {"content": "Усман Ахмет Ибрагим", "children": [], "_palette_idx": 80}, {"content": "Дасгупта Сангхамитра", "children": [], "_palette_idx": 81}, {"content": "Огнин Модест", "children": [], "_palette_idx": 82}, {"content": "Овчарова Раиса Викторовна", "children": [{"content": "Костылева Анна Андреевна", "children": []}, {"content": "Падурина Елена Александровна", "children": []}, {"content": "Лазарева Наталья Эдуардовна", "children": []}, {"content": "Чулкова Мария Александровна", "children": []}, {"content": "Киреева Зоя Алексеевна", "children": []}, {"content": "Сорокина Ирина Сергеевна", "children": []}, {"content": "Курманова Наталья Сагидулловна", "children": []}, {"content": "Овчинников Михаил Владимирович", "children": []}, {"content": "Трофимова Наталья Сергеевна", "children": []}, {"content": "Малюшина Юлия Алексеевна", "children": []}, {"content": "Милюкова Елена Владимировна", "children": []}, {"content": "Захарова Ирина Васильевна", "children": []}, {"content": "Первитская Алена Михайловна", "children": []}, {"content": "Токарева Юлия Александровна", "children": [{"content": "Ефимова Анастасия Анатольевна", "children": []}, {"content": "Петрова Лариса Витальевна", "children": []}], "payload": {"fold": 1}}, {"content": "Ермихина Марина Олеговна", "children": []}, {"content": "Демчук Наталья Александровна", "children": []}, {"content": "Духновский Сергей Витальевич", "children": [{"content": "Шелепина Эллина Константиновна", "children": []}, {"content": "Журавлева Юлия Александровна", "children": []}], "payload": {"fold": 1}}, {"content": "Мальтиникова Наталья Петровна", "children": []}, {"content": "Ермолаева Евгения Габдулганиевна", "children": []}, {"content": "Мягкова Мария Алексеевна", "children": []}, {"content": "Булыгина Анна Владимировна", "children": []}, {"content": "Николаева Ирина Александровна", "children": []}, {"content": "Хромов Анатолий Борисович", "children": []}, {"content": "Чумакова Дарья Михайловна", "children": []}, {"content": "Смирнова Елена Геннадьевна", "children": []}, {"content": "Нестерова Евгения Александровна", "children": []}, {"content": "Мельникова Нина Васильевна", "children": [{"content": "Назаревич Оксана Сергеевна", "children": []}, {"content": "Коротовских Татьяна Владимировна", "children": []}, {"content": "Семеновских Татьяна Викторовна", "children": []}, {"content": "Самылова Ольга Анатольевна", "children": []}, {"content": "Шамухаметова Елена Сафиулловна", "children": []}], "payload": {"fold": 1}}, {"content": "Гизатуллина Эльвира Рифовна", "children": []}, {"content": "Жигалин Станислав Сергеевич", "children": []}], "payload": {"fold": 1}, "_palette_idx": 83}, {"content": "Рахматшаева В.А.", "children": [], "_palette_idx": 84}, {"content": "Ле Куанг Шон", "children": [], "_palette_idx": 85}, {"content": "Семья Галина Владимировна", "children": [{"content": "Рындина Елена Николаевна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 86}, {"content": "Лю Цунъин", "children": [], "_palette_idx": 87}, {"content": "Шино Джон Ндемуфайо", "children": [], "_palette_idx": 88}, {"content": "Низовских Нина Аркадьевна", "children": [], "_palette_idx": 89}, {"content": "Дугарова Туяна Цыреновна", "children": [{"content": "Шахмалова Ирина Жаповна", "children": []}, {"content": "Эрдыниева Валентина Базаровна", "children": []}, {"content": "Бадиев Игорь Валерьевич", "children": []}], "payload": {"fold": 1}, "_palette_idx": 90}, {"content": "Канжунгуру Ожвалду Жозе", "children": [], "_palette_idx": 91}, {"content": "Басюк Виктор Стефанович", "children": [{"content": "Жуковский Сергей Владимирович", "children": []}], "payload": {"fold": 1}, "_palette_idx": 92}, {"content": "Иванова Анна Алексеевна", "children": [], "_palette_idx": 93}, {"content": "Айгумова Захрат Идрисовна", "children": [{"content": "Мататова Полина Рувиновна", "children": []}, {"content": "Айгунов Владислав Русланович", "children": []}], "payload": {"fold": 1}, "_palette_idx": 94}]};
+  colorTree(rightData);
+  const svgR = document.getElementById('mm-svg-right');
+  const mmR  = Markmap.create(svgR, MM_OPTS, rightData);
+  requestAnimationFrame(() => mmR.fit());
+  setTimeout(() => mmR.fit(), 300);
+  setTimeout(() => mmR.fit(), 800);
+}
+
+if (hasLeft) {
+  const leftData = {"content": "", "children": [{"content": "Васильченко Анатолий Анатольевич", "children": [], "_palette_idx": 0}, {"content": "Торопова Алла Владимировна", "children": [{"content": "Тараканова Наталия Эдуардовна", "children": []}, {"content": "Фань Ин", "children": []}, {"content": "Львова Татьяна Владимировна", "children": []}, {"content": "Ео Су Мин", "children": []}, {"content": "Семенова Дарья Алексеевна", "children": []}, {"content": "Лю Синьхун", "children": []}, {"content": "Ли Сяосяо", "children": []}, {"content": "Юй Шэнлинь", "children": []}, {"content": "Никитина Лилия Анатольевна", "children": [{"content": "Кузеванова Анастасия Анатольевна", "children": []}, {"content": "Лебедева Ксения Сергеевна", "children": []}], "payload": {"fold": 1}}, {"content": "Чугунов Евгений Валерьевич", "children": []}, {"content": "Малухова Фатима Владимировна", "children": []}, {"content": "Смирнов Алексей Алексеевич", "children": [{"content": "Курочкина Надежда Валерьевна", "children": []}, {"content": "Нехаева Юлия Анатольевна", "children": []}, {"content": "Кашапов Артём Сергеевич", "children": []}, {"content": "Фефилина Людмила Викторовна", "children": []}, {"content": "Соловьева Елизавета Валерьевна", "children": []}, {"content": "Григорян Артем Мхитарович", "children": []}, {"content": "Смирнова Анна Евгеньевна", "children": []}, {"content": "Кузнецова Дарья Анатольевна", "children": []}, {"content": "Живаев Николай Геннадьевич", "children": []}], "payload": {"fold": 1}}, {"content": "Морозова Нина Виссарионовна", "children": []}, {"content": "Харжевская Анна Альбертовна", "children": []}, {"content": "Левина Ирма Рашитовна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 1}, {"content": "Варданян Микаел Артаваздович", "children": [], "_palette_idx": 2}, {"content": "Мелков Сергей Викторович", "children": [], "_palette_idx": 3}, {"content": "Сапожникова Светлана Евгеньевна", "children": [], "_palette_idx": 4}, {"content": "Черная Анна Викторовна", "children": [], "_palette_idx": 5}, {"content": "Иванова Галина Евгеньевна", "children": [{"content": "Акимова Любовь Анатольевна", "children": [{"content": "Мищерякова Любовь Викторовна", "children": []}, {"content": "Карпухина Анна Александровна", "children": []}, {"content": "Кутепова Ольга Евгеньевна", "children": []}], "payload": {"fold": 1}}, {"content": "Чжан Хай Цзяо", "children": []}], "payload": {"fold": 1}, "_palette_idx": 6}, {"content": "Цветкова Римма Ивановна", "children": [{"content": "Гончарова Елена Викторовна", "children": [{"content": "Кузнецова Лариса Тимирьяновна", "children": []}, {"content": "Старицын Максим Владимирович", "children": []}, {"content": "Садретдинова Аэлита Ильгизовна", "children": []}], "payload": {"fold": 1}}, {"content": "Нозикова Наталья Валентиновна", "children": []}, {"content": "Полянская Людмила Анатольевна", "children": []}, {"content": "Дорошенко Татьяна Владимировна", "children": []}, {"content": "Цуканова Анна Петровна", "children": []}, {"content": "Чернобродов Евгений Романович", "children": []}, {"content": "Чебровская Светлана Владимировна", "children": []}, {"content": "Перевозчикова Вера Николаевна", "children": []}, {"content": "Медникова Анастасия Александровна", "children": []}, {"content": "Зенкова Татьяна Михайловна", "children": []}, {"content": "Ковнерова Елена Вячеславовна", "children": []}, {"content": "Садченко Мария Валентиновна", "children": []}, {"content": "Дутчина Оксана Борисовна", "children": []}, {"content": "Базилевич Евгений Михайлович", "children": []}, {"content": "Ковалева Марина Николаевна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 7}, {"content": "Горбунова Галина Павловна", "children": [], "_palette_idx": 8}, {"content": "Комиссаренко Тамара Ивановна", "children": [{"content": "Пантелеева Татьяна Викторовна", "children": []}, {"content": "Коренева Александра Анатольевна", "children": []}, {"content": "Толчинская Лариса Витальевна", "children": []}, {"content": "Ле Ван Кхуен", "children": []}, {"content": "Дмитриев Кирилл Геннадьевич", "children": []}, {"content": "Махортова Гузель Хасановна", "children": []}, {"content": "Колябин Сергей Викторович", "children": []}], "payload": {"fold": 1}, "_palette_idx": 9}, {"content": "Авхач Г.Н.", "children": [], "_palette_idx": 10}, {"content": "Кисленко, Валентина Яковлевна", "children": [{"content": "Верхова, Юлия Леонидовна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 11}, {"content": "Четверухина И.С.", "children": [], "_palette_idx": 12}, {"content": "Волков Е.В.", "children": [{"content": "Абдель Салам Хуссейн", "children": []}], "payload": {"fold": 1}, "_palette_idx": 13}, {"content": "Левин Владимир Анатольевич", "children": [{"content": "Пекарь Григорий Евгеньевич", "children": []}, {"content": "Стёпин Никита Евгеньевич", "children": []}, {"content": "Коновалов Дмитрий Андреевич", "children": []}, {"content": "Яковлев Максим Яковлевич", "children": []}, {"content": "Вершинин Анатолий Викторович", "children": []}, {"content": "Гинзгеймер Сергей Александрович", "children": []}], "payload": {"fold": 1}, "_palette_idx": 14}, {"content": "Плисенко Надежда Викторовна", "children": [], "_palette_idx": 15}, {"content": "Попова Людмила Владимировна", "children": [{"content": "Ильичев Сергей Николаевич", "children": []}, {"content": "Мозговой Дмитрий Сергеевич", "children": []}, {"content": "Мруг Александра Ивановна", "children": []}, {"content": "Линых Надежда Александровна", "children": []}, {"content": "Котлова Юлия Александровна", "children": []}, {"content": "Еремеева Анастасия Игоревна", "children": []}, {"content": "Фи Тхи Хиеу", "children": []}, {"content": "Артемов Владимир Александрович", "children": []}, {"content": "Ильясов Даниял Маратович", "children": []}, {"content": "Лата Мария Сергеевна", "children": []}, {"content": "Гайдукова Елена Александровна", "children": []}, {"content": "Сухарева Надежда Фёдоровна", "children": []}, {"content": "Галой Наталья Юрьевна", "children": []}, {"content": "Сидоров Антон Викторович", "children": []}, {"content": "Орлова Алла Львовна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 16}, {"content": "Кушнир Алексей Михайлович", "children": [], "_palette_idx": 17}, {"content": "Султангалиева Жанна Кадыргалиевна", "children": [], "_palette_idx": 18}, {"content": "Канжунгу Ожвалду Жозе", "children": [], "_palette_idx": 19}, {"content": "Клименко И.Ф.", "children": [], "_palette_idx": 20}, {"content": "Горянина (Рахматшаева) В.А.", "children": [], "_palette_idx": 21}, {"content": "Алексеева Надежда Ивановна", "children": [], "_palette_idx": 22}, {"content": "Поварницина Лидия Аполоньевна", "children": [], "_palette_idx": 23}, {"content": "Некрасова Евгения Владимировна", "children": [], "_palette_idx": 24}, {"content": "Тимошенко Е.П.", "children": [], "_palette_idx": 25}, {"content": "Хухлаева Ольга Владимировна", "children": [{"content": "Богданова Агафья Андреевна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 26}, {"content": "Валитова Ирина Евгеньевна", "children": [], "_palette_idx": 27}, {"content": "Рыжикова С.Е", "children": [], "_palette_idx": 28}, {"content": "Шадура А.Ф.", "children": [], "_palette_idx": 29}, {"content": "Крохин Игорь Павлович", "children": [], "_palette_idx": 30}, {"content": "Девис Лариса Анатольевна", "children": [], "_palette_idx": 31}, {"content": "Данилюк Светлана Богдановна", "children": [], "_palette_idx": 32}, {"content": "Поставнев В.М.", "children": [], "_palette_idx": 33}, {"content": "Алексеева Л.И.", "children": [{"content": "Буртовая Наталия Борисовна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 34}, {"content": "Носкова Наталья Викторовна", "children": [], "_palette_idx": 35}, {"content": "Бережнова Людмила Николаевна", "children": [{"content": "Гупалов Максим Михайлович", "children": []}, {"content": "Лаптева Лилия Брониславовна", "children": []}, {"content": "Афанасьев Максим Валерьевич", "children": []}, {"content": "Грязнова Виктория Юрьевна", "children": []}, {"content": "Крылов Максим Владимирович", "children": []}, {"content": "Казимирович Александр Михайлович", "children": []}, {"content": "Сидоров Игорь Александрович", "children": []}, {"content": "Гнездилов Виктор Александрович", "children": []}, {"content": "Рогожкина Екатерина Михайловна", "children": []}, {"content": "Аниканов Максим Валерьевич", "children": []}, {"content": "Васильева Светлана Викторовна", "children": []}, {"content": "Евсеенко Татьяна Валерьевна", "children": []}, {"content": "Янголь Дмитрий Юрьевич", "children": []}, {"content": "Романенко Наталья Леонидовна", "children": []}, {"content": "Воронов Сергей Алексеевич", "children": []}, {"content": "Смирнов Руслан Вадимович", "children": [{"content": "Васильева Анастасия Владимировна", "children": []}, {"content": "Логинов Алексей Николаевич", "children": []}, {"content": "Ксенофонтова Екатерина Андреевна", "children": []}], "payload": {"fold": 1}}], "payload": {"fold": 1}, "_palette_idx": 36}, {"content": "Симанкова Анна Алексеевна", "children": [{"content": "Карпенко Семен Витальевич", "children": []}], "payload": {"fold": 1}, "_palette_idx": 37}, {"content": "Поставнева И.В.", "children": [], "_palette_idx": 38}, {"content": "Тимошенко К.А.", "children": [], "_palette_idx": 39}, {"content": "Топоркова Жанна Викторовна", "children": [], "_palette_idx": 40}, {"content": "Ярулов Александр Анатольевич", "children": [{"content": "Писарева Ольга Евгеньевна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 41}, {"content": "Тульчинский Михаил Мордехаевич", "children": [], "_palette_idx": 42}, {"content": "Талалуева Татьяна Александровна", "children": [], "_palette_idx": 43}, {"content": "Голушко Татьяна Викторовна", "children": [], "_palette_idx": 44}, {"content": "Гаджимурадова Зугра Магомедовна", "children": [{"content": "Абдулвагабова Амина Магомедовна", "children": []}, {"content": "Луговой Руслан Александрович", "children": []}, {"content": "Махмузова Алина Вазирхановна", "children": []}], "payload": {"fold": 1}, "_palette_idx": 45}, {"content": "Эстербрук (Хазей) С. А.", "children": [], "_palette_idx": 46}]};
+  colorTree(leftData);
+  const svgL = document.getElementById('mm-svg-left');
+  const mmL  = Markmap.create(svgL, MM_OPTS, leftData);
+  requestAnimationFrame(() => mmL.fit());
+  setTimeout(() => mmL.fit(), 300);
+  setTimeout(() => mmL.fit(), 800);
+}
+
+window.addEventListener('resize', () => {
+  document.querySelectorAll('svg').forEach(s => {
+    if (s._mm) s._mm.fit();
+  });
+});
+</script>
+</body>
+</html>
