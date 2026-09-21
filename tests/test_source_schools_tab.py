@@ -12,7 +12,7 @@ def text(app):
 def test_renderer_overview_runs():
     app=AppTest.from_string(APP).run(timeout=30); t=text(app)
     assert not app.exception; assert 'Школы по источникам (демо)' in t; assert app.selectbox[0].label=='Научная школа'; assert 'Лев Семёнович Выготский' in app.selectbox[0].options; assert app.radio[0].options==['Обзор','Состав школы','Группы и хронология','Идеи и направления','Источники и подтверждения','Расхождения и качество данных']; assert any(m.label=='Представители' and m.value=='51' for m in app.metric); assert any(m.label=='Источники' and m.value=='13' for m in app.metric); assert any(m.label=='Подтверждения' and m.value=='39' for m in app.metric)
-    assert app.selectbox[1].label == 'Основная классификация'
+    assert len(app.selectbox) == 1
     assert [item.label for item in app.multiselect[:3]] == ['Исторические группы', 'Периоды', 'Научные направления']
     assert any(item.label == 'Логика сочетания измерений' for item in app.radio)
     assert any(item.label == 'Режим отображения' for item in app.radio)

@@ -26,10 +26,10 @@ def test_основное_дерево_использует_четыре_вза�
     assert tree.basis == "классификация_связи_с_выготским"
     branch_labels = [tree.graph.nodes[node]["label"] for node in tree.graph.successors(tree.root_id)]
     assert branch_labels == [
-        "Прямое руководство / обучение",
-        "Прямое сотрудничество",
-        "Внешнее прямое взаимодействие",
-        "Косвенная преемственность",
+        "Научное руководство и обучение",
+        "Непосредственное научное сотрудничество",
+        "Внешнее научное взаимодействие",
+        "Опосредованная научная преемственность",
     ]
     assert not any(label.startswith(("A1", "A2", "A3", "A4")) for label in branch_labels)
     person_nodes = [node for node, data in tree.graph.nodes(data=True) if data.get("kind") == "person"]

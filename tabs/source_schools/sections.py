@@ -122,14 +122,6 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
                 f"{as_display_text(get_first_field(alternative, 'примечание', 'примечание_об_источнике_названия'))}"
             )
     st.subheader("Структура школы")
-    relation_model = school.get("классификация_связи_с_выготским", {})
-    primary_label = str(relation_model.get("название", "Тип связи с Выготским")).strip()
-    st.selectbox(
-        "Основная классификация",
-        [primary_label],
-        disabled=True,
-        key="source_schools_primary_classification",
-    )
     catalog = build_supplementary_dimension_catalog(document)
     dimension_specs = (
         ("historical_group", "Исторические группы"),

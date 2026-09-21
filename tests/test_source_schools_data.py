@@ -218,9 +218,11 @@ def test_vygotsky_json_loads_and_counts():
     assert names["panteleimon_lyubimov"] == "Пантелеймон Саввич Любимов"
     assert names["fedor_shemyakin"] == "Фёдор Николаевич Шемякин"
     participants = {category["название"]: set(category["участники"]) for category in categories}
-    assert "panteleimon_lyubimov" in participants["Прямое сотрудничество"]
-    assert "kurt_koffka" in participants["Внешнее прямое взаимодействие"]
-    assert {"filipp_bassin", "fedor_shemyakin"}.issubset(participants["Косвенная преемственность"])
+    assert "panteleimon_lyubimov" in participants["Непосредственное научное сотрудничество"]
+    assert "kurt_koffka" in participants["Внешнее научное взаимодействие"]
+    assert {"filipp_bassin", "fedor_shemyakin"}.issubset(
+        participants["Опосредованная научная преемственность"]
+    )
 
 
 def test_primary_relation_classification_rejects_duplicate_membership():
