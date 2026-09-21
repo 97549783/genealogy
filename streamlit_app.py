@@ -3,68 +3,29 @@
 from __future__ import annotations
 
 import streamlit as st
-import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Академическая генеалогия", layout="wide")
-
-
-def _maybe_redirect_to_mukhina_tree() -> None:
-    """Перенаправляет секретный запрос на самостоятельную HTML-страницу дерева."""
-    if "mukina_tree" not in st.query_params:
-        return
-
-    st.markdown(
-        """
-<meta http-equiv="refresh" content="0; url=/app/static/mukhina_tree.html">
-<style>
-  [data-testid="stHeader"],
-  [data-testid="stToolbar"],
-  footer {
-    display: none !important;
-  }
-  [data-testid="stMainBlockContainer"] {
-    max-width: none !important;
-    padding: 0 !important;
-  }
-  iframe {
-    position: fixed !important;
-    inset: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    border: 0 !important;
-    z-index: 999999 !important;
-  }
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-    components.iframe("/app/static/mukhina_tree.html", height=1200, scrolling=False)
-    st.stop()
-
-
-_maybe_redirect_to_mukhina_tree()
-
-# Тяжёлые модули основного приложения импортируются только после проверки
-# самостоятельной статической страницы.
-from core.app import (  # noqa: E402
+from core.app import (
     build_app_context,
     maybe_render_admin_page_and_stop,
     render_app_header,
 )
-from core.ui.main_navigation import (  # noqa: E402
+from core.ui.main_navigation import (
     render_main_navigation,
     resolve_main_section_id,
 )
-from tabs.articles.tab import render_articles_analysis_tab  # noqa: E402
-from tabs.dissertation_search.tab import render_dissertation_search_tab  # noqa: E402
-from tabs.dissertation_characteristics.tab import render_dissertation_characteristics_tab  # noqa: E402
-from tabs.intersection.tab import render_opponents_intersection_tab  # noqa: E402
-from tabs.lineages.tab import render_school_trees_tab  # noqa: E402
-from tabs.registry import DEFAULT_TAB_ID  # noqa: E402
-from tabs.school_analysis.tab import render_school_analysis_tab  # noqa: E402
-from tabs.school_comparison.tab import render_school_comparison_tab  # noqa: E402
-from tabs.source_schools.tab import render_source_schools_tab  # noqa: E402
-from tabs.school_search.tab import render_school_search_tab  # noqa: E402
+from tabs.articles.tab import render_articles_analysis_tab
+from tabs.dissertation_search.tab import render_dissertation_search_tab
+from tabs.dissertation_characteristics.tab import render_dissertation_characteristics_tab
+from tabs.intersection.tab import render_opponents_intersection_tab
+from tabs.lineages.tab import render_school_trees_tab
+from tabs.registry import DEFAULT_TAB_ID
+from tabs.school_analysis.tab import render_school_analysis_tab
+from tabs.school_comparison.tab import render_school_comparison_tab
+from tabs.source_schools.tab import render_source_schools_tab
+from tabs.school_search.tab import render_school_search_tab
+
+
+st.set_page_config(page_title="Академическая генеалогия", layout="wide")
 
 st.markdown(
     """

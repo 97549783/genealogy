@@ -62,30 +62,6 @@ def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> Non
     assert not any("main-navigation" in item.value for item in app.markdown)
 
 
-def test_streamlit_app_mukhina_tree_short_circuits_to_static_page() -> None:
-    app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
-    app.query_params["mukina_tree"] = ""
-    app.run(timeout=30)
-
-    assert not app.exception
-    assert any(
-        'url=/app/static/mukhina_tree.html' in item.value
-        for item in app.markdown
-    )
-    assert not any("main-navigation" in item.value for item in app.markdown)
-
-
-def test_mukhina_tree_is_standalone_and_keeps_secret_url() -> None:
-    tree_html = (
-        Path(__file__).resolve().parents[1] / "static" / "mukhina_tree.html"
-    ).read_text(encoding="utf-8")
-
-    assert "Мухина Валерия Сергеевна" in tree_html
-    assert 'window.history.replaceState(null, "", "/?mukina_tree")' in tree_html
-    assert "height: 100vh" in tree_html
-    assert "streamlit" not in tree_html.lower()
-
-
 def _visible_text(app: AppTest) -> str:
     return "\n".join(
         getattr(item, "value", "")
