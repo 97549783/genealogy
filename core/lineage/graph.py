@@ -25,7 +25,7 @@ from typing import Callable, Dict, List, Literal, Optional, Set, Tuple
 import networkx as nx
 import pandas as pd
 
-from core.lineage.names import norm, variants
+from core.lineage.names import has_expanded_name, norm, variants
 from core.db import AUTHOR_COLUMN, SUPERVISOR_COLUMNS
 
 
@@ -79,9 +79,41 @@ def rows_for(
     (с учётом всех вариантов написания).
     """
     hits: Set[int] = set()
+    name_keys = {norm(v) for v in variants(name)}
     for v in variants(name):
         hits.update(index.get(norm(v), set()))
-    return df.loc[list(hits)] if hits else df.iloc[0:0]
+    if not hits:
+        return df.iloc[0:0]
+    subset = df.loc[sorted(hits)]
+    columns = [column for column in SUPERVISOR_COLUMNS if column in subset.columns]
+    if not columns:
+        return subset
+    matching_full_names = {
+        norm(str(raw))
+        for column in columns
+        for raw in subset[column].dropna()
+        if has_expanded_name(str(raw))
+        and name_keys.intersection(norm(value) for value in variants(str(raw)))
+    }
+    expanded_query = has_expanded_name(name)
+    if not expanded_query and len(matching_full_names) > 1:
+        return df.iloc[0:0]
+
+    def matches(raw: object) -> bool:
+        if pd.isna(raw):
+            return False
+        value = str(raw).strip()
+        if not name_keys.intersection(norm(item) for item in variants(value)):
+            return False
+        if expanded_query and has_expanded_name(value):
+            return norm(value) == norm(name)
+        # Сокращённая запись не привязывается к одной из разных персон с теми же инициалами.
+        return len(matching_full_names) <= 1
+
+    mask = pd.Series(False, index=subset.index)
+    for column in columns:
+        mask |= subset[column].map(matches)
+    return subset.loc[mask]
 
 
 # ---------------------------------------------------------------------------

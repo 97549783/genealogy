@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import textwrap
+from html import escape
+from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
@@ -346,6 +348,33 @@ def _count_levels(G: nx.DiGraph, root: str, levels: int = 2) -> int:
     return total
 
 
+def _markmap_node_content(G: nx.DiGraph, node: str) -> str:
+    """Добавляет безопасную ссылку к подписи, сохраняя обычный текст остальных узлов."""
+    attributes = G.nodes[node]
+    label = escape(str(attributes.get("label", node)))
+    href = str(attributes.get("href") or "")
+    if urlsplit(href).scheme not in {"http", "https"}:
+        return label
+    title = escape(str(attributes.get("link_title") or "Открыть дерево научного руководства в новой вкладке"), quote=True)
+    return (
+        f'<a class="markmap-lineage-link" href="{escape(href, quote=True)}" '
+        f'target="_blank" rel="noopener noreferrer" title="{title}">{label}</a>'
+    )
+
+
+_MARKMAP_LINK_CSS = """
+  a.markmap-lineage-link {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+    cursor: pointer;
+  }
+  #mm-root-label a.markmap-lineage-link {
+    pointer-events: auto;
+  }
+"""
+
+
 def _build_markmap_node(
     G: nx.DiGraph,
     node: str,
@@ -354,7 +383,7 @@ def _build_markmap_node(
     max_depth: int,
 ) -> Dict[str, Any]:
     if node in visited:
-        return {"content": str(G.nodes[node].get("label", node)), "children": []}
+        return {"content": _markmap_node_content(G, node), "children": []}
     visited.add(node)
 
     children_nodes = list(G.successors(node))
@@ -364,7 +393,7 @@ def _build_markmap_node(
     ]
 
     result: Dict[str, Any] = {
-        "content": str(G.nodes[node].get("label", node)),
+        "content": _markmap_node_content(G, node),
         "children": children_data,
     }
     if G.nodes[node].get("color"):
@@ -408,7 +437,7 @@ def build_markmap_html_bidirectional(
     right_children = all_children[half:]
 
     palette_js = json.dumps(_BRANCH_PALETTE)
-    root_json = json.dumps(str(G.nodes[root].get("label", root)), ensure_ascii=False)
+    root_json = json.dumps(_markmap_node_content(G, root), ensure_ascii=False)
     root_color = str(G.nodes[root].get("color", "#37474f"))
 
     def _make_subtree_json(children: List[str], palette_offset: int) -> str:
@@ -435,6 +464,7 @@ def build_markmap_html_bidirectional(
 <head>
 <meta charset="utf-8">
 <style>
+{_MARKMAP_LINK_CSS}
   html, body {{
     margin: 0; padding: 0; background: #fff;
     overflow: hidden;
@@ -515,9 +545,9 @@ def build_markmap_html_bidirectional(
 const {{ Markmap }} = window.markmap;
 
 const palette  = {palette_js};
-const rootName = {root_json};
+const rootContent = {root_json};
 
-document.getElementById('mm-root-label').textContent = rootName;
+document.getElementById('mm-root-label').innerHTML = rootContent;
 
 const hasLeft  = {json.dumps(has_left)};
 const hasRight = {json.dumps(has_right)};
@@ -638,6 +668,7 @@ def build_markmap_html_unidirectional(
 <head>
 <meta charset="utf-8">
 <style>
+{_MARKMAP_LINK_CSS}
   html, body {{
     margin: 0;
     padding: 0;

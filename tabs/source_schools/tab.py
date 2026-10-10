@@ -4,10 +4,13 @@ from __future__ import annotations
 import io
 
 import streamlit as st
+import pandas as pd
 
+from core.source_schools.lineages import get_source_school_lineages
 from core.source_schools.export import build_source_school_export_bundle
 from core.source_schools.tree import build_source_school_overview_tree
 from core.ui.tree_renderers import build_markmap_html, draw_hierarchical_tree
+from core.ui.links import build_share_url_from_params
 from core.source_schools.data import (
     SOURCE_SCHOOLS_DATA_DIR,
     SourceSchoolDataError,
@@ -41,7 +44,7 @@ _RENDERERS = {
 }
 
 
-def render_source_schools_tab() -> None:
+def render_source_schools_tab(*, df: pd.DataFrame | None = None, idx: dict | None = None, db_signature=None) -> None:
     """Отрисовывает демо-раздел школ, описанных в источниках."""
     st.markdown("## Школы по источникам (демо)")
     st.caption("Демонстрационное представление состава и структуры научных школ по опубликованным источникам.")
@@ -66,8 +69,18 @@ def render_source_schools_tab() -> None:
         key="source_schools_selected_school",
     )
     document = documents[school_id]
+    lineage_links = {}
+    if df is not None and idx is not None:
+        resolutions = get_source_school_lineages(document, df, idx, db_signature)
+        lineage_links = {
+            person_id: {
+                "href": build_share_url_from_params({"tab": "lineages", "root": resolution.root_name}),
+                "title": f"Диссертационных записей под руководством: {resolution.record_count}. Открыть дерево в новой вкладке.",
+            }
+            for person_id, resolution in resolutions.items()
+        }
     source_path = next((entry["path"] for entry in catalog if entry["school_id"] == school_id), "")
-    tree = build_source_school_overview_tree(document)
+    tree = build_source_school_overview_tree(document, lineage_links=lineage_links)
     tree_html, _tree_height = build_markmap_html(tree.graph, tree.root_id, branching_mode="bidirectional")
     figure = draw_hierarchical_tree(tree.graph, tree.root_id, title="Структура школы")
     png_buffer = io.BytesIO()
@@ -97,4 +110,8 @@ def render_source_schools_tab() -> None:
         horizontal=True,
         key="source_schools_view",
     )
-    _RENDERERS[view](document, build_source_school_index(document))
+    indexes = build_source_school_index(document)
+    if view == "overview":
+        render_overview_section(document, indexes, lineage_links=lineage_links)
+    else:
+        _RENDERERS[view](document, indexes)

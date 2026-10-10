@@ -196,6 +196,7 @@ def build_source_school_overview_tree(
     *,
     highlighted_person_ids: Collection[str] | None = None,
     hidden_person_ids: Collection[str] | None = None,
+    lineage_links: Mapping[str, Mapping[str, str]] | None = None,
 ) -> SourceSchoolTree:
     """Строит дерево обзорной структуры школы."""
     school = document["школа"]
@@ -278,6 +279,11 @@ def build_source_school_overview_tree(
         for person in other:
             person_id = str(person.get("id"))
             _add_person_node(graph, other_id, person_id, person, selected, hidden)
+    for _, attributes in graph.nodes(data=True):
+        link = (lineage_links or {}).get(str(attributes.get("person_id", "")))
+        if link:
+            attributes["href"] = link["href"]
+            attributes["link_title"] = link.get("title", "Открыть дерево научного руководства в новой вкладке")
     return SourceSchoolTree(graph=graph, root_id=root_id, root_label=root_label, basis=basis)
 
 

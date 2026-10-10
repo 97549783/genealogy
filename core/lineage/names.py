@@ -28,7 +28,13 @@ def norm(s: str) -> str:
     может встречаться в обоих написаниях (например, «Фёдоров» и «Федоров»),
     поэтому без этой замены совпадения теряются.
     """
-    return re.sub(r"\s+", " ", s.replace(".", " ").replace("ё", "е").strip().lower())
+    return re.sub(r"\s+", " ", s.casefold().replace("ё", "е").replace(".", " ").strip())
+
+
+def has_expanded_name(name: str) -> bool:
+    """Отличает развёрнутое имя от фамилии с инициалами."""
+    parts = norm(name).split()
+    return len(parts) >= 2 and len(parts[0]) > 1 and any(len(part) > 2 for part in parts[1:])
 
 
 # Псевдоним для обратной совместимости со старым именем _norm в streamlit_app.py

@@ -104,7 +104,7 @@ def _render_school_description(school: Mapping[str, Any]) -> None:
     _write_named_list("Организации", school.get("организации"))
 
 
-def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
+def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, Any], *, lineage_links=None) -> None:
     """Отрисовывает обзор школы."""
     school = document["школа"]
     demo = document["демо_представление"]
@@ -197,6 +197,7 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
         document,
         highlighted_person_ids=highlighted_person_ids,
         hidden_person_ids=hidden_person_ids,
+        lineage_links=lineage_links,
     )
     html, height = build_markmap_html(
         tree.graph,
@@ -205,7 +206,7 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
         branching_mode=("bidirectional" if mode == "Двустороннее ветвление" else "unidirectional"),
     )
     components.html(html, height=height, scrolling=False)
-    st.caption("Клик на узел — свернуть или развернуть ветвь. Колёсико мыши — масштаб; перетаскивание — панорама.")
+    st.caption("Клик на кружок узла — свернуть или развернуть ветвь. Подчёркнутое имя — открыть дерево научного руководства в новой вкладке. Колёсико мыши — масштаб; перетаскивание — панорама.")
     st.warning(
         "Тип связи — аналитическая систематизация по характеру непосредственной связи с Выготским. "
         "Она не создаёт неподтверждённых отношений научного руководства; источниковые формулировки сохранены в карточках персон."

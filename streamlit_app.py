@@ -70,7 +70,7 @@ def render_selected_section(section_id: str) -> None:
     elif section_id == "articles_comparison":
         render_articles_analysis_tab(df_lineage=ctx.df, idx_lineage=ctx.idx)
     elif section_id == "source_schools":
-        render_source_schools_tab()
+        render_source_schools_tab(df=ctx.df, idx=ctx.idx, db_signature=ctx.db_signature)
 
 
 render_selected_section(requested_tab_id)
