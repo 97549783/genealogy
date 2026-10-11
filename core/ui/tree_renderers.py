@@ -10,7 +10,7 @@ utils/tree_renderers.py — вспомогательные функции для
         Генерирует самодостаточный HTML (Markmap.js через ESM + JSON-дерево)
         для st.components.v1.html. Без autoloader, без Transformer,
         без streamlit-markmap.
-        Двунаправное дерево: дети основателя делятся пополам и расходятся
+        Двунаправное дерево: целые ветви распределяются по числу листьев
         влево и вправо через два отдельных SVG-инстанса Markmap.
 
     build_markmap_markdown(G, root, initial_expand_level) -> str
@@ -415,6 +415,64 @@ def _resolve_markmap_depth(G: nx.DiGraph, root: str, initial_expand_level: int) 
     return 1 if nodes_l1_l2 > _EXPAND_THRESHOLD else 2
 
 
+def _markmap_leaf_count(node: Dict[str, Any]) -> int:
+    """Считает листья полного дерева, включая свёрнутые и скрытые узлы."""
+    pending = [node]
+    leaves = 0
+    while pending:
+        children = pending.pop().get("children", [])
+        if children:
+            pending.extend(children)
+        else:
+            leaves += 1
+    return leaves
+
+
+def _split_markmap_branches(
+    branches: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Минимизирует разницу числа листьев сторон, сохраняя ветви целиком."""
+    if len(branches) < 2:
+        return [], branches
+    weights = [_markmap_leaf_count(branch) for branch in branches]
+    if len(set(weights)) == 1:
+        half = len(branches) // 2
+        return branches[:half], branches[half:]
+
+    target = sum(weights) // 2
+    mask = (1 << (target + 1)) - 1
+    reachable = 1  # Бит суммы: вначале достижима только сумма 0.
+    history = []
+    by_weight: Dict[int, List[int]] = {}
+    for index, weight in enumerate(weights):
+        by_weight.setdefault(weight, []).append(index)
+    for weight, indices in by_weight.items():
+        # Двоичные пакеты одинаковых весов сокращают число шагов для широких деревьев.
+        offset, size = 0, 1
+        while offset < len(indices):
+            batch = indices[offset:offset + size]
+            shifted = (reachable << (weight * len(batch))) & mask
+            if shifted & ~reachable:
+                history.append((reachable, batch))
+                reachable |= shifted
+            offset += len(batch)
+            size *= 2
+
+    remaining = reachable.bit_length() - 1
+    selected: Set[int] = set()
+    for previous, batch in reversed(history):
+        if not (previous >> remaining) & 1:
+            selected.update(batch)
+            remaining -= weights[batch[0]] * len(batch)
+    # Первая исходная ветвь остаётся слева; внутри сторон сохраняется порядок.
+    if 0 not in selected:
+        selected = set(range(len(branches))) - selected
+    return (
+        [branch for index, branch in enumerate(branches) if index in selected],
+        [branch for index, branch in enumerate(branches) if index not in selected],
+    )
+
+
 def build_markmap_html_bidirectional(
     G: nx.DiGraph,
     root: str,
@@ -431,30 +489,26 @@ def build_markmap_html_bidirectional(
     height_px = max(600, min(n_nodes * 32, 2000))
     max_depth = _resolve_markmap_depth(G, root, initial_expand_level)
 
-    all_children: List[str] = list(G.successors(root))
-    half = len(all_children) // 2
-    left_children  = all_children[:half]
-    right_children = all_children[half:]
+    branches = []
+    for index, child in enumerate(G.successors(root)):
+        node = _build_markmap_node(G, child, set(), depth=1, max_depth=max_depth)
+        node["_palette_idx"] = index
+        branches.append(node)
+    left_children, right_children = _split_markmap_branches(branches)
 
     palette_js = json.dumps(_BRANCH_PALETTE)
     root_json = json.dumps(_markmap_node_content(G, root), ensure_ascii=False)
     root_color = str(G.nodes[root].get("color", "#37474f"))
 
-    def _make_subtree_json(children: List[str], palette_offset: int) -> str:
-        child_nodes = []
-        for i, child in enumerate(children):
-            visited: Set[str] = set()
-            node = _build_markmap_node(G, child, visited, depth=1, max_depth=max_depth)
-            node["_palette_idx"] = palette_offset + i
-            child_nodes.append(node)
+    def _make_subtree_json(children: List[Dict[str, Any]]) -> str:
         root_node: Dict[str, Any] = {
             "content": "",
-            "children": child_nodes,
+            "children": children,
         }
         return json.dumps(root_node, ensure_ascii=False)
 
-    left_json  = _make_subtree_json(left_children,  palette_offset=0)
-    right_json = _make_subtree_json(right_children, palette_offset=half)
+    left_json = _make_subtree_json(left_children)
+    right_json = _make_subtree_json(right_children)
 
     has_left  = bool(left_children)
     has_right = bool(right_children)
