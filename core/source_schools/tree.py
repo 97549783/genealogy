@@ -8,6 +8,7 @@ import networkx as nx
 import pandas as pd
 
 from .data import SourceSchoolDataError
+from .dimensions import build_dimension_coverage, build_dimension_memberships, dimension_catalogs, has_canonical_assignments
 from .presentation import as_list, get_first_field
 
 _CATEGORY_LABELS = {
@@ -80,64 +81,44 @@ def build_person_primary_relation_index(document: Mapping[str, Any]) -> dict[str
 
 
 def build_supplementary_dimension_catalog(
-    document: Mapping[str, Any],
+    document: Mapping[str, Any], *, include_unverified: bool = False,
 ) -> dict[str, tuple[SupplementaryDimensionValue, ...]]:
-    """Формирует группы, периоды и направления для наложения на основной граф."""
-    school = document.get("школа", {})
-    structure = school.get("внутренняя_структура", {})
-
-    groups = tuple(
-        SupplementaryDimensionValue(
-            id=f"group:{group.get('id', index)}",
-            label=str(group.get("название") or group.get("id") or f"Группа {index + 1}"),
-            person_ids=tuple(str(item) for item in as_list(group.get("участники"))),
-        )
-        for index, group in enumerate(structure.get("исследовательские_группы", []))
-        if isinstance(group, Mapping)
-    )
-    periods = tuple(
-        SupplementaryDimensionValue(
-            id=f"period:{index}",
-            label=" — ".join(
-                part
-                for part in (
-                    str(get_first_field(period, "временной_диапазон", "период", default="")).strip(),
-                    str(get_first_field(period, "название_периода", "название", default=f"Период {index + 1}")).strip(),
-                )
-                if part
-            ),
-            person_ids=tuple(
-                str(item)
-                for item in as_list(get_first_field(period, "основные_представители", "персоны"))
-            ),
-        )
-        for index, period in enumerate(school.get("хронология", {}).get("периоды_развития", []))
-        if isinstance(period, Mapping)
-    )
-    directions = tuple(
-        SupplementaryDimensionValue(
-            id=f"direction:{index}",
-            label=str(
-                get_first_field(
-                    direction,
-                    "название_направления",
-                    "название",
-                    default=f"Направление {index + 1}",
-                )
-            ),
-            person_ids=tuple(
-                str(item)
-                for item in as_list(get_first_field(direction, "представители", "участники"))
-            ),
-        )
-        for index, direction in enumerate(structure.get("направления", []))
-        if isinstance(direction, Mapping)
-    )
-    return {
-        "historical_group": groups,
-        "period": periods,
-        "research_direction": directions,
-    }
+    """Читает каноническое членство и сохраняет совместимость старых документов."""
+    catalogs = dimension_catalogs(document)
+    memberships = build_dimension_memberships(document, include_unverified=include_unverified)
+    coverage = build_dimension_coverage(document, include_unverified=include_unverified)
+    canonical = has_canonical_assignments(document)
+    prefixes = {"historical_group": "group", "period": "period", "research_direction": "direction"}
+    result = {}
+    for dimension, items in catalogs.items():
+        values = []
+        for index, item in enumerate(items):
+            ident = str(item.get("id", index))
+            label = str(get_first_field(item, "название", "название_периода", "название_направления", default=ident))
+            if dimension == "period":
+                period = str(get_first_field(item, "временной_диапазон", "период", default="")).strip()
+                label = " — ".join(part for part in (period, label) if part)
+            if dimension == "historical_group" and item.get("вид") == "контекст":
+                label = "Контекст: " + label
+            values.append(SupplementaryDimensionValue(
+                id=f"{prefixes[dimension]}:{ident}", label=label,
+                person_ids=memberships[dimension][ident],
+            ))
+        if canonical:
+            values.extend((
+                SupplementaryDimensionValue(
+                    id=f"{prefixes[dimension]}:__unclassified__",
+                    label="Не размечено / недостаточно источниковых данных",
+                    person_ids=coverage[dimension]["unclassified_person_ids"],
+                ),
+                SupplementaryDimensionValue(
+                    id=f"{prefixes[dimension]}:__interpretative__",
+                    label="Редакторские и классификационные интерпретации",
+                    person_ids=coverage[dimension]["interpretative_person_ids"],
+                ),
+            ))
+        result[dimension] = tuple(values)
+    return result
 
 
 def combine_supplementary_selections(

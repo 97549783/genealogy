@@ -10,7 +10,11 @@ import streamlit.components.v1 as components
 
 from core.source_schools.bibliography import build_numbered_bibliography, build_source_number_index
 from core.source_schools.export import build_filtered_people_csv, build_filtered_people_xlsx
-from core.source_schools.presentation import as_display_text, as_list, get_first_field
+from core.source_schools.data import normalize_source_school_document
+from core.source_schools.dimensions import (
+    build_dimension_coverage, build_person_dimension_labels, has_canonical_assignments,
+)
+from core.source_schools.presentation import as_display_text, as_list, format_life_years, get_first_field
 from core.source_schools.tree import (
     build_person_primary_relation_index,
     build_source_school_overview_tree,
@@ -46,13 +50,58 @@ def _evidence_summary(evidence_id: str, indexes: Mapping[str, Mapping[str, Mappi
     source = indexes["sources"].get(evidence.get("идентификатор_источника"), {})
     locator = evidence.get("локатор")
     locator_text = f", {locator}" if locator else ""
-    return f"{_source_label(source)} — {evidence.get('содержание_свидетельства', '')}{locator_text}"
+    result = f"{_source_label(source)} — {evidence.get('содержание_свидетельства', '')}{locator_text}"
+    if evidence.get("тип_утверждения"):
+        result += f". Вид свидетельства: {as_display_text(evidence['тип_утверждения'])}."
+    if evidence.get("ограничения"):
+        result += f" Ограничение: {as_display_text(evidence['ограничения'])}"
+    return result
 
 
 def _write_named_list(title: str, value: Any) -> None:
     text = as_display_text(value)
     if text:
         st.write(f"**{title}:** {text}")
+
+
+def _render_person_source_notes(person: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
+    """Показывает варианты и ограничения рядом с утверждениями конкретной персоны."""
+    _write_named_list("Примечание", person.get("примечание"))
+    for disagreement in person.get("разночтения", []):
+        st.write(f"**Разночтение: {disagreement.get('вопрос', '')}**")
+        for variant in disagreement.get("варианты", []):
+            sources = "; ".join(
+                _source_label(indexes["sources"][source_id])
+                for source_id in variant.get("источники", [])
+                if source_id in indexes["sources"]
+            )
+            st.write(f"{variant.get('значение', '')} — {sources}; {variant.get('локатор', '')}.")
+        _write_named_list("Ограничение вывода", disagreement.get("ограничение"))
+    for limitation in dict.fromkeys(person.get("источниковые_ограничения", [])):
+        _write_named_list("Источниковое ограничение", limitation)
+
+
+def _render_assignment_status_note(document: Mapping[str, Any], dimension: str, value_id: str) -> None:
+    """Показывает статус членства отдельно от описания исторической группы."""
+    if not has_canonical_assignments(document):
+        return
+    counts = {"подтверждено": 0, "интерпретация": 0, "не_проверено": 0}
+    for item in document["школа"]["классификационные_назначения"]:
+        if item.get("измерение") == dimension and item.get("значение") == value_id:
+            counts[item["статус"]] += 1
+    st.caption(
+        f"Подтверждено: {counts['подтверждено']}; классификационные интерпретации: {counts['интерпретация']}; "
+        f"непроверенные назначения: {counts['не_проверено']} (в основной список не включены). "
+        "Основания каждого назначения доступны в карточке персоны."
+    )
+
+
+def _supplementary_value_label(value_id: str, values: Mapping[str, Any], *, show_count: bool) -> str:
+    """Безопасно форматирует значение, даже если каталог обновился в живой сессии."""
+    value = values.get(value_id)
+    if value is None:
+        return "Значение отсутствует в текущем каталоге"
+    return f"{value.label} ({len(value.person_ids)})" if show_count else value.label
 
 
 def _render_school_description(school: Mapping[str, Any]) -> None:
@@ -122,9 +171,18 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
                 f"{as_display_text(get_first_field(alternative, 'примечание', 'примечание_об_источнике_названия'))}"
             )
     st.subheader("Структура школы")
+    canonical = has_canonical_assignments(document)
+    if canonical:
+        st.caption(
+            "Фильтры учитывают подтверждённые назначения и классификационные интерпретации с источниковым основанием. "
+            "Название периода или направления может быть редакторским: источник подтверждает основание назначения, "
+            "а не обязательно точную формулировку фильтра. Спорные гипотезы сохранены в разделе расхождений и в выборки не включаются. "
+            "Отсутствие разметки не означает отсутствие исторической связи."
+        )
     catalog = build_supplementary_dimension_catalog(document)
+    coverage = build_dimension_coverage(document)
     dimension_specs = (
-        ("historical_group", "Исторические группы"),
+        ("historical_group", "Исторические группы и контексты" if canonical else "Исторические группы"),
         ("period", "Периоды"),
         ("research_direction", "Научные направления"),
     )
@@ -133,13 +191,26 @@ def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, A
     for column, (dimension_id, label) in zip(dimension_columns, dimension_specs, strict=True):
         values = catalog.get(dimension_id, ())
         value_by_id = {value.id: value for value in values}
+        widget_key = f"source_schools_supplementary_{dimension_id}"
+        if widget_key in st.session_state:
+            st.session_state[widget_key] = [item for item in st.session_state[widget_key] if item in value_by_id]
         with column:
             selections[dimension_id] = st.multiselect(
                 label,
                 list(value_by_id),
-                format_func=lambda value_id, value_by_id=value_by_id: value_by_id[value_id].label,
-                key=f"source_schools_supplementary_{dimension_id}",
+                format_func=lambda value_id, value_by_id=value_by_id: _supplementary_value_label(
+                    value_id, value_by_id, show_count=canonical,
+                ),
+                key=widget_key,
             )
+            if canonical:
+                stats = coverage[dimension_id]
+                st.caption(
+                    f"Размечено: {stats['assigned_person_count']} из {len(school['персоны'])}; "
+                    f"без разметки: {len(stats['unclassified_person_ids'])}; "
+                    f"с классификационными интерпретациями: {len(stats['interpretative_person_ids'])}; "
+                    f"с непроверенными назначениями: {len(stats['unverified_person_ids'])}."
+                )
     active_dimension_count = sum(bool(values) for values in selections.values())
     composition_mode = st.radio(
         "Логика сочетания измерений",
@@ -278,6 +349,7 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
         height=600,
         column_config={
             "Представитель": st.column_config.TextColumn(width="medium"),
+            "Годы жизни": st.column_config.TextColumn(width="small"),
             "Тип связи": st.column_config.TextColumn(width="medium"),
             "Категория": st.column_config.TextColumn(width="small"),
             "Роли": st.column_config.TextColumn(width="medium"),
@@ -285,6 +357,7 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
             "Период взаимодействия": st.column_config.TextColumn(width="small"),
             "Группы и контексты": st.column_config.TextColumn(width="medium"),
             "Основной вклад": st.column_config.TextColumn(width="large"),
+            "Разночтения и ограничения": st.column_config.TextColumn(width="large"),
             "Уверенность": st.column_config.NumberColumn(format="%.2f"),
             "Число источников": st.column_config.NumberColumn(width="small", format="%d"),
         },
@@ -298,13 +371,39 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
     )
     person = indexes["persons"][person_id]
     st.markdown(f"### {get_first_field(person, 'полное_имя', 'имя')}")
-    _write_named_list("Годы жизни", get_first_field(person, "годы_жизни", "даты"))
+    _write_named_list("Годы жизни", format_life_years(get_first_field(person, "годы_жизни", "даты")))
     _write_named_list("Тип связи с Выготским", build_person_primary_relation_index(document).get(person_id))
     _write_named_list("Категория включения как систематизация", person.get("категория_включения"))
     _write_named_list("Роли", person.get("роль_в_школе"))
     _write_named_list("Связь с Выготским", person.get("статус_связи_с_выготским"))
     _write_named_list("Период взаимодействия", person.get("период_взаимодействия"))
-    _write_named_list("Группы и контексты", person.get("группы_и_контексты"))
+    _render_person_source_notes(person, indexes)
+    if has_canonical_assignments(document):
+        classifications = build_person_dimension_labels(document)[str(person_id)]
+        for dimension, title in (("historical_group", "Группы и контексты"), ("period", "Периоды развития"), ("research_direction", "Научные направления")):
+            _write_named_list(title, classifications[dimension] or ["Не размечено / недостаточно источниковых данных"])
+        st.markdown("#### Основания классификационных назначений")
+        value_labels = {
+            (dimension, value.id.split(":", 1)[1]): value.label
+            for dimension, values in build_supplementary_dimension_catalog(document).items() for value in values
+        }
+        for assignment in document["школа"]["классификационные_назначения"]:
+            if assignment.get("персона") != person_id:
+                continue
+            status_label = {
+                "подтверждено": "подтверждено",
+                "интерпретация": "редакторская или классификационная интерпретация",
+                "не_проверено": "не проверено",
+            }[assignment["статус"]]
+            st.write(f"**{value_labels.get((assignment['измерение'], assignment['значение']), assignment['значение'])}:** {status_label}.")
+            _write_named_list("Примечание", assignment.get("примечание"))
+            for attribution in assignment.get("источниковые_атрибуции", []):
+                source = indexes["sources"].get(attribution.get("идентификатор_источника"), {})
+                st.write(f"{_source_label(source)}; {attribution.get('локатор', '')}. {attribution.get('утверждение', '')}")
+                if attribution.get("подтверждение"):
+                    st.write(_evidence_summary(attribution["подтверждение"], indexes))
+    else:
+        _write_named_list("Группы и контексты", person.get("группы_и_контексты"))
     _write_named_list("Основной вклад", get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"))
     _write_named_list("Уверенность", person.get("уверенность"))
     st.markdown("#### Источниковые атрибуции")
@@ -322,13 +421,14 @@ def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any
 
 def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает группы, направления, поколения и хронологию."""
-    school = document["школа"]
+    school = normalize_source_school_document(document)["школа"]
     structure = school["внутренняя_структура"]
     st.subheader("Исследовательские группы")
     for group in structure.get("исследовательские_группы", []):
         with st.expander(as_display_text(group.get("название", "Группа"))):
             _write_named_list("Период", group.get("период"))
             st.write("**Участники:** " + "; ".join(resolve_person_names(group.get("участники", []), indexes["persons"])))
+            _render_assignment_status_note(document, "historical_group", str(group.get("id")))
             for evidence_id in group.get("подтверждения", []):
                 st.write(_evidence_summary(evidence_id, indexes))
     st.subheader("Направления")
@@ -337,6 +437,7 @@ def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: M
             _write_named_list("Описание", direction.get("описание"))
             ids = as_list(get_first_field(direction, "представители", "участники"))
             st.write("**Представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
+            _render_assignment_status_note(document, "research_direction", str(direction.get("id")))
             for evidence_id in direction.get("подтверждения", []):
                 st.write(_evidence_summary(evidence_id, indexes))
     st.subheader("Поколения")
@@ -345,16 +446,20 @@ def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: M
         st.write(f"**{as_display_text(generation.get('название'))}:** {'; '.join(resolve_person_names(ids, indexes['persons']))}")
     st.subheader("Периоды развития")
     for period in school.get("хронология", {}).get("периоды_развития", []):
-        ids = as_list(get_first_field(period, "персоны", "основные_представители"))
+        ids = as_list(get_first_field(period, "участники", "персоны", "основные_представители"))
         with st.expander(as_display_text(get_first_field(period, "название", "название_периода", default="Период"))):
             _write_named_list("Период", get_first_field(period, "период", "временной_диапазон"))
             _write_named_list("Описание", period.get("описание"))
+            if has_canonical_assignments(document):
+                st.write("**Все размеченные участники:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
+                ids = as_list(period.get("основные_представители"))
             st.write("**Основные представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
+            _render_assignment_status_note(document, "period", str(period.get("id")))
 
 
 def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
     """Отрисовывает идеи и направления."""
-    school = document["школа"]
+    school = normalize_source_school_document(document)["школа"]
     ideas = school.get("идеи_и_направления", {})
     theoretical = get_first_field(school, "теоретические_основания", default=ideas.get("теоретические_основания", {}))
     main_idea = school.get("основная_идея")
@@ -371,6 +476,7 @@ def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Ma
             _write_named_list("Описание", direction.get("описание"))
             ids = as_list(get_first_field(direction, "представители", "участники"))
             st.write("**Представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
+            _render_assignment_status_note(document, "research_direction", str(direction.get("id")))
             for evidence_id in direction.get("подтверждения", []):
                 st.write(_evidence_summary(evidence_id, indexes))
 
@@ -436,6 +542,37 @@ def render_disagreements_and_quality_section(document: Mapping[str, Any], indexe
                 ]
                 st.write(f"**Источникозависимая интерпретация:** {get_first_field(position, 'формулировка', 'позиция')}")
                 st.write("**Источники:** " + "; ".join(source_names))
+                _write_named_list("Страница / раздел", position.get("локатор"))
+            _write_named_list("Ограничение вывода", disagreement.get("ограничение"))
+    hypotheses = school.get("журнал_классификационных_гипотез", [])
+    if hypotheses:
+        with st.expander("Принадлежности, не включённые в фильтры"):
+            catalog_labels = {
+                (dimension, value.id.split(":", 1)[1]): value.label
+                for dimension, values in build_supplementary_dimension_catalog(document).items()
+                for value in values
+            }
+            for hypothesis in hypotheses:
+                person = indexes["persons"].get(hypothesis.get("персона"), {})
+                label = catalog_labels.get((hypothesis.get("измерение"), hypothesis.get("значение")), "Неустановленная принадлежность")
+                st.write(f"**{get_first_field(person, 'полное_имя', 'имя')}: {label}**")
+                _write_named_list("Решение", hypothesis.get("решение"))
+                _write_named_list("Ограничение", hypothesis.get("ограничение"))
+                for attribution in hypothesis.get("источниковые_атрибуции", []):
+                    source = indexes["sources"].get(attribution.get("идентификатор_источника"), {})
+                    st.write(f"{_source_label(source)}; {attribution.get('локатор', '')}. {attribution.get('утверждение', '')}")
+    review_items = school.get("журнал_проверки_источников", [])
+    if review_items:
+        st.subheader("Результаты проверки источников")
+        for item in review_items:
+            with st.expander(item.get("предмет", "Результат проверки")):
+                _write_named_list("Дата проверки", item.get("дата"))
+                _write_named_list("Что сообщает источник", item.get("выявлено"))
+                _write_named_list("Принятое решение", item.get("принятое_решение"))
+                _write_named_list("Ограничения", item.get("ограничения"))
+                for attribution in item.get("источниковые_атрибуции", []):
+                    source = indexes["sources"].get(attribution.get("идентификатор_источника"), {})
+                    st.write(f"{_source_label(source)}; с. {attribution.get('печатная_страница')}; {attribution.get('локатор', '')}; {attribution.get('тип_свидетельства', '')}.")
     st.subheader("Качество данных")
     labels = {
         "использовано_несколько_источников": "Использовано несколько источников",

@@ -7,8 +7,9 @@ import pandas as pd
 
 from .data import normalize_source_school_document
 from .bibliography import build_source_number_index
-from .presentation import as_display_text, as_list, get_first_field
+from .presentation import as_display_text, as_list, format_life_years, get_first_field
 from .tree import build_person_primary_relation_index
+from .dimensions import build_person_dimension_labels, dimension_catalogs, has_canonical_assignments
 
 
 def _group_labels(document: Mapping[str, Any]) -> dict[str, str]:
@@ -37,6 +38,7 @@ def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
     normalized = normalize_source_school_document(document)
     group_labels = _group_labels(normalized)
     relation_labels = build_person_primary_relation_index(normalized)
+    dimension_labels = build_person_dimension_labels(normalized) if has_canonical_assignments(normalized) else None
     rows: list[dict[str, Any]] = []
     for person in normalized["школа"]["персоны"]:
         source_ids = [
@@ -48,18 +50,31 @@ def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
             {
                 "ID": person.get("id"),
                 "Представитель": get_first_field(person, "полное_имя", "имя"),
+                "Годы жизни": format_life_years(get_first_field(person, "годы_жизни", "даты")),
                 "Тип связи": relation_labels.get(str(person.get("id")), "Основатель" if "основатель" in as_list(person.get("роль_в_школе")) else ""),
                 "Категория": person.get("категория_включения", ""),
                 "Роли": _join_values(person.get("роль_в_школе", [])),
                 "Связь с Выготским": person.get("статус_связи_с_выготским", ""),
                 "Период взаимодействия": person.get("период_взаимодействия", ""),
-                "Группы и контексты": _join_groups(person.get("группы_и_контексты", []), group_labels),
+                "Группы и контексты": (
+                    _join_values(dimension_labels[str(person.get("id"))]["historical_group"])
+                    if dimension_labels is not None else _join_groups(person.get("группы_и_контексты", []), group_labels)
+                ),
                 "Основной вклад": get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"),
-                "Уверенность": float(person.get("уверенность", 0) or 0),
+                "Разночтения и ограничения": _join_values([
+                    person.get("примечание"),
+                    person.get("разночтения"),
+                    person.get("источниковые_ограничения"),
+                ]),
+                "Уверенность": float(person["уверенность"]) if person.get("уверенность") not in (None, "") else float("nan"),
                 "Число источников": len(set(source_ids)),
                 "Идентификаторы источников": "; ".join(dict.fromkeys(source_ids)),
             }
         )
+        if dimension_labels is not None:
+            values = dimension_labels[str(person.get("id"))]
+            rows[-1]["Периоды развития"] = _join_values(values["period"])
+            rows[-1]["Научные направления"] = _join_values(values["research_direction"])
     return pd.DataFrame(rows)
 
 
@@ -82,6 +97,8 @@ def filter_people_dataframe(
     """Фильтрует таблицу представителей без изменения исходного DataFrame."""
     filtered = dataframe.copy()
     mask = filtered["Уверенность"] >= minimum_confidence
+    if minimum_confidence <= 0:
+        mask |= filtered["Уверенность"].isna()
     if query.strip():
         query_lower = query.strip().lower()
         search_columns = [
@@ -118,7 +135,7 @@ def build_sources_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
                 "ID": source.get("id"),
                 "№": numbers.get(str(source.get("id")), ""),
                 "Источник": source.get("краткое_название") or source.get("библиографическое_описание", ""),
-                "Год": source.get("год", ""),
+                "Год": as_display_text(source.get("год", "")),
                 "Тип": source.get("тип", ""),
                 "DOI": source.get("doi", ""),
                 "Роль в описании": source.get("роль_в_описании", ""),
@@ -144,9 +161,51 @@ def build_evidence_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
                 "Тип утверждения": evidence.get("тип_утверждения", ""),
                 "Содержание свидетельства": evidence.get("содержание_свидетельства", ""),
                 "Локатор": evidence.get("локатор", ""),
+                "Вид свидетельства": evidence.get("тип_утверждения", ""),
+                "Ограничения": evidence.get("ограничения", ""),
                 "Статус": "Явное утверждение" if evidence.get("явное_утверждение") else "Интерпретация",
-                "Уверенность": float(evidence.get("уверенность", 0) or 0),
+                "Уверенность": float(evidence["уверенность"]) if evidence.get("уверенность") not in (None, "") else float("nan"),
             }
             for evidence in normalized["школа"]["подтверждения"]
         ]
+    )
+
+
+def build_classification_dataframes(document: Mapping[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Экспортирует назначения и адресные основания отдельными строками без потери статусов."""
+    school = document["школа"]
+    persons = {item["id"]: get_first_field(item, "полное_имя", "имя") for item in school["персоны"]}
+    sources = {item["id"]: item.get("краткое_название") or item.get("библиографическое_описание", "") for item in school["источники"]}
+    values = {
+        (dimension, str(item.get("id"))): get_first_field(item, "название", "название_периода", "название_направления")
+        for dimension, items in dimension_catalogs(document).items() for item in items
+    }
+    dimension_labels = {"historical_group": "Группа или контекст", "period": "Период развития", "research_direction": "Научное направление"}
+    assignment_rows, attribution_rows = [], []
+    for assignment in school.get("классификационные_назначения", []):
+        row = {
+            "ID назначения": assignment["id"],
+            "ID персоны": assignment["персона"],
+            "Представитель": persons.get(assignment["персона"], assignment["персона"]),
+            "Измерение": dimension_labels.get(assignment["измерение"], assignment["измерение"]),
+            "ID значения": assignment["значение"],
+            "Значение": values.get((assignment["измерение"], assignment["значение"]), assignment["значение"]),
+            "Статус": assignment["статус"],
+            "Временной контекст": as_display_text(assignment.get("временной_контекст", "")),
+            "Примечание": assignment.get("примечание", ""),
+        }
+        assignment_rows.append(row)
+        for attribution in assignment.get("источниковые_атрибуции", []):
+            attribution_rows.append({
+                **row,
+                "ID источника": attribution["идентификатор_источника"],
+                "Источник": sources.get(attribution["идентификатор_источника"], attribution["идентификатор_источника"]),
+                "ID подтверждения": attribution.get("подтверждение", ""),
+                "Локатор": attribution.get("локатор", ""),
+                "Утверждение": attribution.get("утверждение", ""),
+            })
+    columns = ["ID назначения", "ID персоны", "Представитель", "Измерение", "ID значения", "Значение", "Статус", "Временной контекст", "Примечание"]
+    return (
+        pd.DataFrame(assignment_rows, columns=columns),
+        pd.DataFrame(attribution_rows, columns=columns + ["ID источника", "Источник", "ID подтверждения", "Локатор", "Утверждение"]),
     )

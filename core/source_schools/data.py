@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import streamlit as st
 
 from .presentation import as_display_text, as_list, get_first_field
+from .dimensions import project_dimension_memberships, validate_dimension_assignments
 
 SOURCE_SCHOOLS_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "source_schools"
 SUPPORTED_SCHEMA_KEYS: tuple[str, ...] = (
@@ -162,7 +163,7 @@ def normalize_source_school_document(document: Mapping[str, Any]) -> dict[str, A
                 _status_to_bool(evidence.get("явное_или_выведенное")),
             )
 
-    return normalized
+    return project_dimension_memberships(normalized)
 
 
 def build_source_school_index(document: Mapping[str, Any]) -> dict[str, dict[str, Mapping[str, Any]]]:
@@ -297,6 +298,47 @@ def _validate_summary(block_name: str, block: Mapping[str, Any], counts: Mapping
             raise SourceSchoolDataError(f"Сводные показатели устарели: {block_name}.{key}.")
 
 
+def _validate_review_references(school: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
+    """Проверяет ссылки в разночтениях и журналах, которые не участвуют в фильтрах."""
+    sources, persons, evidence = indexes["sources"], indexes["persons"], indexes["evidence"]
+    for person in persons.values():
+        for disagreement in person.get("разночтения", []):
+            for variant in disagreement.get("варианты", []):
+                for source_id in variant.get("источники", []):
+                    if source_id not in sources:
+                        raise SourceSchoolDataError(f"Разночтение персоны {person['id']} ссылается на неизвестный источник.")
+    for candidate in school.get("кандидаты_на_расширение", []):
+        if any(source_id not in sources for source_id in candidate.get("источники", [])):
+            raise SourceSchoolDataError("Кандидат на расширение ссылается на неизвестный источник.")
+        if any(evidence_id not in evidence for evidence_id in candidate.get("подтверждения", [])):
+            raise SourceSchoolDataError("Кандидат на расширение ссылается на неизвестное подтверждение.")
+    seen_review_ids: set[str] = set()
+    for item in school.get("журнал_проверки_источников", []):
+        ident = item.get("id")
+        if not isinstance(ident, str) or not ident.strip() or ident in seen_review_ids:
+            raise SourceSchoolDataError("Журнал проверки требует уникальные непустые id.")
+        seen_review_ids.add(ident)
+        for attribution in item.get("источниковые_атрибуции", []):
+            page = attribution.get("печатная_страница")
+            if attribution.get("идентификатор_источника") not in sources:
+                raise SourceSchoolDataError("Журнал проверки ссылается на неизвестный источник.")
+            if type(page) is not int or page < 1:
+                raise SourceSchoolDataError("Журнал проверки требует положительную печатную страницу.")
+    active_keys = {
+        (item.get("персона"), item.get("измерение"), item.get("значение"))
+        for item in school.get("классификационные_назначения", [])
+    }
+    for hypothesis in school.get("журнал_классификационных_гипотез", []):
+        key = (hypothesis.get("персона"), hypothesis.get("измерение"), hypothesis.get("значение"))
+        if key in active_keys:
+            raise SourceSchoolDataError("Исключённая гипотеза одновременно присутствует в активном реестре.")
+        if hypothesis.get("персона") not in persons:
+            raise SourceSchoolDataError("Журнал гипотез ссылается на неизвестную персону.")
+        for attribution in hypothesis.get("источниковые_атрибуции", []):
+            if attribution.get("идентификатор_источника") not in sources:
+                raise SourceSchoolDataError("Журнал гипотез ссылается на неизвестный источник.")
+
+
 def validate_source_school_document(document: Mapping[str, Any]) -> None:
     """Проверяет обязательные поля, идентификаторы и ссылки."""
     if not isinstance(document, Mapping):
@@ -324,6 +366,8 @@ def validate_source_school_document(document: Mapping[str, Any]) -> None:
     persons = indexes["persons"]
     sources = indexes["sources"]
     evidence = indexes["evidence"]
+    validate_dimension_assignments(normalized)
+    _validate_review_references(school, indexes)
     _check_all_confidence_values(normalized)
     _check_aggregate_representatives(school, persons)
     _validate_primary_relation_classification(school, persons)

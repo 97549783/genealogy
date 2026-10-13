@@ -11,9 +11,17 @@ def text(app):
 
 def test_renderer_overview_runs():
     app=AppTest.from_string(APP).run(timeout=30); t=text(app)
-    assert not app.exception; assert 'Школы по источникам (демо)' in t; assert app.selectbox[0].label=='Научная школа'; assert 'Лев Семёнович Выготский' in app.selectbox[0].options; assert app.radio[0].options==['Обзор','Состав школы','Группы и хронология','Идеи и направления','Источники и подтверждения','Расхождения и качество данных']; assert any(m.label=='Представители' and m.value=='51' for m in app.metric); assert any(m.label=='Источники' and m.value=='13' for m in app.metric); assert any(m.label=='Подтверждения' and m.value=='39' for m in app.metric)
+    assert not app.exception
+    assert 'Школы по источникам (демо)' in t
+    assert app.selectbox[0].label == 'Научная школа'
+    assert 'Лев Семёнович Выготский' in app.selectbox[0].options
+    assert app.radio[0].options == ['Обзор', 'Состав школы', 'Группы и хронология', 'Идеи и направления', 'Источники и подтверждения', 'Расхождения и качество данных']
+    metrics = {m.label: m.value for m in app.metric}
+    assert metrics['Представители'] == '51'
+    assert metrics['Источники'] == '35'
+    assert metrics['Подтверждения'] == '99'
     assert len(app.selectbox) == 1
-    assert [item.label for item in app.multiselect[:3]] == ['Исторические группы', 'Периоды', 'Научные направления']
+    assert [item.label for item in app.multiselect[:3]] == ['Исторические группы и контексты', 'Периоды', 'Научные направления']
     assert any(item.label == 'Логика сочетания измерений' for item in app.radio)
     assert any(item.label == 'Режим отображения' for item in app.radio)
     assert 'пока выбор пуст, дерево показано полностью' in t
@@ -40,11 +48,11 @@ def test_people_mode_shows_filters_and_attributions():
 def test_overview_accepts_multiple_supplementary_dimensions():
     app = AppTest.from_string(APP).run(timeout=30)
     app.multiselect[0].set_value(['group:kharkov_group'])
-    app.multiselect[1].set_value(['period:2'])
+    app.multiselect[1].set_value(['period:network_1931_1934'])
     app.run(timeout=30)
     assert not app.exception
-    assert 'Харьковская группа' in app.multiselect[0].options
-    assert '1931–1934 — Разветвление сети' in app.multiselect[1].options
+    assert any('Харьковская группа' in value for value in app.multiselect[0].options)
+    assert any('1931–1934 — Разветвление сети' in value for value in app.multiselect[1].options)
     assert 'между активными измерениями — пересечение' in text(app)
 
 def test_sources_mode_shows_bibliography_and_evidence():

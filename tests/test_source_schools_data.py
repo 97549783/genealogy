@@ -200,14 +200,14 @@ def test_vygotsky_json_loads_and_counts():
     assert document["школа"]["идентификатор_школы"] == "vygotsky_cultural_historical_school"
     assert document["демо_представление"]["название_в_выпадающем_списке"] == "Лев Семёнович Выготский"
     assert len(document["школа"]["персоны"]) == 51
-    assert len(document["школа"]["источники"]) == 13
-    assert len(document["школа"]["подтверждения"]) == 39
+    assert len(document["школа"]["источники"]) == 35
+    assert len(document["школа"]["подтверждения"]) == 99
     categories = document["школа"]["классификация_связи_с_выготским"]["категории"]
     assert [category["код"] for category in categories] == ["A1", "A2", "A3", "A4"]
     assigned = [person_id for category in categories for person_id in category["участники"]]
     assert len(assigned) == len(set(assigned)) == 50
     names = {person["id"]: person["полное_имя"] for person in document["школа"]["персоны"]}
-    assert names["m_b_eidinova"] == "Марина Борисовна Эйдинова"
+    assert names["m_b_eidinova"] == "Мария Борисовна Эйдинова"
     assert names["e_i_pashkovskaya"] == "Екатерина Ильинична Пашковская"
     assert names["k_i_veresotskaya"] == "Ксения Ивановна Вересотская"
     assert names["a_a_shein"] == "А. А. Шеин"
@@ -220,9 +220,8 @@ def test_vygotsky_json_loads_and_counts():
     participants = {category["название"]: set(category["участники"]) for category in categories}
     assert "panteleimon_lyubimov" in participants["Непосредственное научное сотрудничество"]
     assert "kurt_koffka" in participants["Внешнее научное взаимодействие"]
-    assert {"filipp_bassin", "fedor_shemyakin"}.issubset(
-        participants["Опосредованная научная преемственность"]
-    )
+    assert "filipp_bassin" in participants["Опосредованная научная преемственность"]
+    assert "fedor_shemyakin" in participants["Внешнее научное взаимодействие"]
 
 
 def test_primary_relation_classification_rejects_duplicate_membership():
@@ -243,8 +242,8 @@ def test_catalog_contains_one_school():
 def test_cross_references_resolve():
     indexes = build_source_school_index(load_demo_document())
     assert len(indexes["persons"]) == 51
-    assert len(indexes["sources"]) == 13
-    assert len(indexes["evidence"]) == 39
+    assert len(indexes["sources"]) == 35
+    assert len(indexes["evidence"]) == 99
 
 
 def test_duplicate_person_id_raises():

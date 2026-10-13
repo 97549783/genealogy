@@ -67,14 +67,21 @@ def test_many_equal_weights_and_one_larger_branch_can_be_balanced_exactly():
     assert len(left) + len(right) == len(branches)
 
 
-def test_source_school_balances_24_26_without_changing_groups_colors_or_filter_placement():
+def test_source_school_balances_without_changing_groups_colors_or_filter_placement():
     document = json.loads(Path("data/source_schools/vygotsky_school_sources_demo.v1.json").read_text(encoding="utf-8"))
     url = "https://example.test/?tab=lineages&root=Leontiev"
     tree = build_source_school_overview_tree(document, lineage_links={"alexei_leontiev": {"href": url}})
     html, _ = build_markmap_html(tree.graph, tree.root_id)
     sides = [side_data(html, side)["children"] for side in ("left", "right")]
-    assert [sum(map(_markmap_leaf_count, side)) for side in sides] == [24, 26]
-    assert [[node["_palette_idx"] for node in side] for side in sides] == [[0, 2], [1, 3]]
+    leaf_counts = [sum(map(_markmap_leaf_count, side)) for side in sides]
+    weights = [tree.graph.out_degree(group) for group in tree.graph.successors(tree.root_id)]
+    optimal = min(abs(sum(weights) - 2 * sum(w for w, chosen in zip(weights, choices) if chosen))
+                  for choices in itertools.product((False, True), repeat=len(weights)))
+    assert abs(leaf_counts[0] - leaf_counts[1]) == optimal
+    assert sum(leaf_counts) == sum(weights)
+    indices = [[node["_palette_idx"] for node in side] for side in sides]
+    assert sorted(index for side in indices for index in side) == list(range(len(weights)))
+    assert all(side == sorted(side) for side in indices)
     by_palette = {node["_palette_idx"]: node for side in sides for node in side}
     for index, group in enumerate(tree.graph.successors(tree.root_id)):
         assert by_palette[index]["content"] == tree.graph.nodes[group]["label"]

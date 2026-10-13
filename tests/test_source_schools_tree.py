@@ -61,7 +61,7 @@ def test_многозначные_измерения_объединяются_в
     catalog = build_supplementary_dimension_catalog(document)
     selections = {
         "historical_group": ["group:pyaterka", "group:kharkov_group"],
-        "research_direction": ["direction:1"],
+        "research_direction": ["direction:child_development"],
         "period": [],
     }
     intersection = combine_supplementary_selections(catalog, selections, mode="intersection")

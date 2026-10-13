@@ -12,7 +12,9 @@ import pandas as pd
 from openpyxl.styles import Alignment
 
 from .bibliography import build_bibliography_text
-from .tables import build_evidence_dataframe, build_people_dataframe, build_sources_dataframe
+from .data import normalize_source_school_document
+from .dimensions import has_canonical_assignments
+from .tables import build_classification_dataframes, build_evidence_dataframe, build_people_dataframe, build_sources_dataframe
 from .tree import SourceSchoolTree, build_source_school_tree_edges_dataframe
 
 
@@ -54,6 +56,7 @@ def _write_sheet(writer: pd.ExcelWriter, name: str, dataframe: pd.DataFrame) -> 
 
 
 def _xlsx_bytes(document: Mapping[str, Any], tree: SourceSchoolTree) -> bytes:
+    document = normalize_source_school_document(document)
     school = document["школа"]
     structure = school.get("внутренняя_структура", {})
     output = io.BytesIO()
@@ -65,6 +68,11 @@ def _xlsx_bytes(document: Mapping[str, Any], tree: SourceSchoolTree) -> bytes:
         _write_sheet(writer, "Группы", pd.json_normalize(structure.get("исследовательские_группы", [])))
         _write_sheet(writer, "Направления", pd.json_normalize(structure.get("направления", [])))
         _write_sheet(writer, "Поколения", pd.json_normalize(structure.get("поколения", [])))
+        if has_canonical_assignments(document):
+            assignments, attributions = build_classification_dataframes(document)
+            _write_sheet(writer, "Периоды развития", pd.json_normalize(school.get("хронология", {}).get("периоды_развития", [])))
+            _write_sheet(writer, "Классификации", assignments)
+            _write_sheet(writer, "Основания классификаций", attributions)
         _write_sheet(writer, "Рёбра дерева", build_source_school_tree_edges_dataframe(tree))
     return output.getvalue()
 
@@ -91,6 +99,10 @@ def build_source_school_export_bundle(*, document: Mapping[str, Any], source_pat
         archive.writestr(f"{slug}.список_источников.txt", bibliography_txt_bytes)
         archive.writestr(f"{slug}.дерево.png", tree_png)
         archive.writestr(f"{slug}.интерактивное_дерево.html", tree_html_bytes)
+        if has_canonical_assignments(document):
+            assignments, attributions = build_classification_dataframes(document)
+            archive.writestr(f"{slug}.классификационные_назначения.csv", _csv_bytes(assignments))
+            archive.writestr(f"{slug}.основания_классификации.csv", _csv_bytes(attributions))
     return SourceSchoolExportBundle(json_bytes, xlsx_bytes, representatives_csv_bytes, sources_csv_bytes, evidence_csv_bytes, bibliography_txt_bytes, tree_html_bytes, tree_png, zip_output.getvalue())
 
 

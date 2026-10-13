@@ -45,6 +45,15 @@ def looks_technical_id(value: Any) -> bool:
     return isinstance(value, str) and value.startswith(_TECHNICAL_PREFIXES)
 
 
+def format_life_years(value: Any) -> str:
+    """Сохраняет неизвестную границу жизни вместо одиночного неоднозначного года."""
+    if isinstance(value, Mapping) and ("рождение" in value or "смерть" in value):
+        birth = as_display_text(value.get("рождение")) or "?"
+        death = as_display_text(value.get("смерть")) or "?"
+        return f"{birth}–{death}"
+    return as_display_text(value)
+
+
 def as_display_text(value: Any) -> str:
     """Преобразует вложенное значение JSON в пользовательский текст без технических ID."""
     if value is None:

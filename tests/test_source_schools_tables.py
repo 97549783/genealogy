@@ -32,7 +32,9 @@ def test_filters_work():
     assert all(role in x for x in filter_people_dataframe(df, roles=[role])['Роли'])
     assert all(group in x for x in filter_people_dataframe(df, groups=[group])['Группы и контексты'])
     assert all(source_id in x for x in filter_people_dataframe(df, source_ids=[source_id])['Идентификаторы источников'])
-    assert filter_people_dataframe(df, minimum_confidence=.95)['Уверенность'].min() >= .95
+    known = df.copy()
+    known.loc[known.index[0], 'Уверенность'] = .96
+    assert filter_people_dataframe(known, minimum_confidence=.95)['ID'].tolist() == [known.iloc[0]['ID']]
     assert sample['ID'] in set(filter_people_dataframe(df, categories=[category], roles=[role], minimum_confidence=0)['ID'])
 
 def test_transformations_do_not_mutate_document():
