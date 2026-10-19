@@ -163,15 +163,21 @@ def _render_table(document,dataframe,*,person_links,lineage_links,highlighted_id
     a,b,c=st.columns([2,1,1])
     with a:order=st.selectbox("Сортировать по",columns,format_func=labels.get,key=prefix+"_sort")
     with b:descending=st.checkbox("По убыванию",key=prefix+"_descending")
-    with c:size=st.selectbox("Строк на странице",[25,50,100,500],key=prefix+"_size")
+    with c:size=st.selectbox("Строк на странице",["all",25,50,100,500],
+        format_func=lambda value:"Все строки" if value=="all" else str(value),key=prefix+"_row_limit")
     ordered=dataframe.sort_values(order,ascending=not descending,kind="stable",na_position="last")
     signature=tuple(ordered["id"])
     if st.session_state.get(prefix+"_signature")!=signature:
         st.session_state[prefix+"_page"]=1;st.session_state[prefix+"_signature"]=signature
-    pages=max(1,(len(ordered)+size-1)//size)
-    if st.session_state.get(prefix+"_page",1)>pages:st.session_state[prefix+"_page"]=1
-    page=st.number_input("Страница таблицы",min_value=1,max_value=pages,step=1,key=prefix+"_page")
-    chunk=ordered.iloc[(page-1)*size:page*size]
+    if size=="all":
+        chunk=ordered
+        table_note=f"Показаны все строки; строк в выборке: {len(ordered)}."
+    else:
+        pages=max(1,(len(ordered)+size-1)//size)
+        if st.session_state.get(prefix+"_page",1)>pages:st.session_state[prefix+"_page"]=1
+        page=st.number_input("Страница таблицы",min_value=1,max_value=pages,step=1,key=prefix+"_page")
+        chunk=ordered.iloc[(page-1)*size:page*size]
+        table_note=f"Страница {page} из {pages}; строк в выборке: {len(ordered)}."
     st.markdown('''<style>
 .source-schools-table-scroll {overflow-x:auto;max-width:100%;margin:0.5rem 0 1rem}
 .source-schools-table {border-collapse:collapse;width:100%;font-size:0.92rem}
@@ -181,7 +187,7 @@ def _render_table(document,dataframe,*,person_links,lineage_links,highlighted_id
 .source-schools-table a {text-decoration:underline}
 .source-school-tree-link {display:inline-flex;vertical-align:middle;margin-left:.3rem}
 </style>'''+_table_html(chunk,columns,labels,person_links,lineage_links,highlighted_ids),unsafe_allow_html=True)
-    st.caption(f"Страница {page} из {pages}; строк в выборке: {len(ordered)}. Имя открывает карточку школы, значок дерева — научное руководство. Обе ссылки открываются в новой вкладке.")
+    st.caption(table_note+" Имя открывает карточку школы, значок дерева — научное руководство. Обе ссылки открываются в новой вкладке.")
     from core.source_schools.export import build_filtered_people_csv,build_filtered_people_xlsx
     export=ordered[[c for c in ["id",*columns] if c in ordered]].rename(columns=labels)
     left,right=st.columns(2)
@@ -191,23 +197,27 @@ def _render_table(document,dataframe,*,person_links,lineage_links,highlighted_id
 
 def render_overview_section(document,indexes,*,lineage_links=None,person_links=None,school_link=None,presentation="tree"):
     lineage_links=lineage_links or {};person_links=person_links or {}
-    _render_school_description(document)
     people=build_people_dataframe(document)
     selected,active,treatment=_filters(document,people)
     selected_ids=set(selected["id"])
     hidden=set(people["id"])-selected_ids if active and treatment=="hide" else None
     if presentation in {"tree","together"}:
         st.subheader("Структура школы")
+        mode=st.radio("Режим ветвления",["Одностороннее ветвление","Двустороннее ветвление"],
+            horizontal=True,key="source_schools_tree_branching_"+document["школа"]["идентификатор_школы"])
         tree=build_source_school_overview_tree(document,highlighted_person_ids=selected_ids if active else None,
             hidden_person_ids=hidden,lineage_links=lineage_links,person_links=person_links,school_link=school_link)
-        markup,height=build_markmap_html(tree.graph,tree.root_id,branching_mode="bidirectional")
+        markup,height=build_markmap_html(tree.graph,tree.root_id,initial_expand_level=0,
+            branching_mode="bidirectional" if mode=="Двустороннее ветвление" else "unidirectional")
         components.html(markup,height=height,scrolling=False)
+        st.caption("Клик на кружок узла — свернуть или развернуть ветвь. Имя открывает карточку в новой вкладке, значок дерева — научное руководство. Колёсико мыши — масштаб; перетаскивание — панорама.")
         if active and selected.empty:st.info("По выбранным условиям никто не найден. Структура дерева сохранена.")
     if presentation in {"table","together"}:
         st.subheader("Табличное представление")
         shown=selected if active and treatment=="hide" else people
         _render_table(document,shown,person_links=person_links,lineage_links=lineage_links,
             highlighted_ids=selected_ids if active and treatment=="highlight" else None)
+    _render_school_description(document)
 
 
 def render_person_card(document,indexes,person_id,*,person_links=None,lineage_links=None):

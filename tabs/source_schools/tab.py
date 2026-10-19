@@ -59,9 +59,9 @@ def _presentation_changed(key):
     st.query_params["view"]=st.session_state[key]
 
 
-def _prepare_export(document,source_path,person_links,lineage_links,school_url):
+def _prepare_export(document,source_path,person_links,lineage_links,school_url,*,branching_mode="unidirectional"):
     tree=build_source_school_overview_tree(document,person_links=person_links,lineage_links=lineage_links,school_link=school_url)
-    markup,_=build_markmap_html(tree.graph,tree.root_id,branching_mode="bidirectional")
+    markup,_=build_markmap_html(tree.graph,tree.root_id,initial_expand_level=0,branching_mode=branching_mode)
     figure=draw_hierarchical_tree(tree.graph,tree.root_id,title="Структура школы")
     try:
         png=io.BytesIO();figure.savefig(png,format="png",dpi=120,bbox_inches="tight")
@@ -71,14 +71,18 @@ def _prepare_export(document,source_path,person_links,lineage_links,school_url):
 
 def _render_export(document,source_path,person_links,lineage_links,school_url):
     sid=document["школа"]["идентификатор_школы"]
+    branching_mode="bidirectional" if st.session_state.get("source_schools_tree_branching_"+sid)=="Двустороннее ветвление" else "unidirectional"
     with st.expander("Экспорт данных школы",expanded=False):
         st.download_button("Скачать исходный JSON",json.dumps(document,ensure_ascii=False,indent=2).encode("utf-8"),
             file_name=sid+".json",mime="application/json",key="source_schools_json_"+sid)
         if st.button("Подготовить Excel и полный архив",key="source_schools_prepare_"+sid):
             with st.spinner("Подготавливаем таблицы и изображения полной школы…"):
-                try:st.session_state["source_schools_bundle_"+sid]=_prepare_export(document,source_path,person_links,lineage_links,school_url)
+                try:
+                    st.session_state["source_schools_bundle_"+sid]=_prepare_export(document,source_path,person_links,lineage_links,school_url,branching_mode=branching_mode)
+                    st.session_state["source_schools_bundle_branching_"+sid]=branching_mode
                 except (ValueError,OSError,RuntimeError) as exc:st.error("Не удалось подготовить экспорт: "+str(exc))
         bundle=st.session_state.get("source_schools_bundle_"+sid)
+        if st.session_state.get("source_schools_bundle_branching_"+sid)!=branching_mode:bundle=None
         if bundle:
             st.download_button("Скачать данные в Excel",bundle.xlsx_bytes,file_name=sid+".данные.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key="source_schools_xlsx_"+sid)
             st.download_button("Скачать список источников",bundle.bibliography_txt_bytes,file_name=sid+".источники.txt",mime="text/plain",key="source_schools_bib_"+sid)

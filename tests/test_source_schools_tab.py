@@ -198,6 +198,7 @@ render_overview_section(document,build_source_school_index(document),presentatio
 
 def test_table_pagination_resets_after_a_filter_changes_the_result():
     app=start(view='table');assert not app.exception
+    widget(app,'selectbox','Строк на странице').set_value(25);app.run(timeout=60)
     widget(app,'number_input','Страница таблицы').set_value(3);app.run(timeout=60)
     assert not app.exception
     widget(app,'text_input','Поиск по представителям').set_value('А. А. Шеин')
@@ -205,6 +206,45 @@ def test_table_pagination_resets_after_a_filter_changes_the_result():
     assert not app.exception
     assert widget(app,'number_input','Страница таблицы').value==1
     assert 'строк в выборке: 1' in text(app)
+
+
+def test_table_defaults_to_all_rows_and_pagination_is_optional():
+    app=start(view='table')
+    assert not app.exception
+
+    def row_count():
+        table=next(m.value for m in app.markdown if '<tbody>' in m.value)
+        return table.split('<tbody>',1)[1].split('</tbody>',1)[0].count('<tr')
+
+    assert widget(app,'selectbox','Строк на странице').value=='all'
+    assert not any(w.label=='Страница таблицы' for w in app.number_input)
+    assert row_count()==51
+    widget(app,'selectbox','Строк на странице').set_value(25);app.run(timeout=60)
+    assert not app.exception and row_count()==25
+    widget(app,'number_input','Страница таблицы').set_value(3);app.run(timeout=60)
+    assert row_count()==1
+    widget(app,'selectbox','Строк на странице').set_value('all');app.run(timeout=60)
+    assert not app.exception and row_count()==51
+    assert not any(w.label=='Страница таблицы' for w in app.number_input)
+    widget(app,'text_input','Поиск по представителям').set_value('Нет такого человека')
+    widget(app,'radio','Режим отображения').set_value('hide');app.run(timeout=60)
+    assert not app.exception and row_count()==0
+
+
+def test_tree_restores_unidirectional_default_and_can_switch_both_ways():
+    app=start(view='tree')
+    assert not app.exception
+    assert widget(app,'radio','Режим ветвления').value=='Одностороннее ветвление'
+    assert '<svg id="mm">' in app.get('iframe')[0].proto.srcdoc
+    assert 'mm-svg-left' not in app.get('iframe')[0].proto.srcdoc
+    widget(app,'radio','Режим ветвления').set_value('Двустороннее ветвление');app.run(timeout=60)
+    assert not app.exception and 'mm-svg-left' in app.get('iframe')[0].proto.srcdoc
+    widget(app,'radio','Представление').set_value('together');app.run(timeout=60)
+    assert not app.exception
+    assert widget(app,'radio','Режим ветвления').value=='Двустороннее ветвление'
+    assert 'mm-svg-right' in app.get('iframe')[0].proto.srcdoc
+    widget(app,'radio','Режим ветвления').set_value('Одностороннее ветвление');app.run(timeout=60)
+    assert not app.exception and '<svg id="mm">' in app.get('iframe')[0].proto.srcdoc
 
 
 def test_presentation_switch_updates_the_durable_route():
@@ -243,6 +283,10 @@ def test_each_philosophical_school_opens_its_own_native_table_and_counts(school_
     assert metrics['Источники']==str(len(d['источники']))
     assert 'Табличное представление' in text(app)
     assert all(any(w.label==f['название'] for w in app.multiselect) for f in d['классификации']['гибкие_измерения'])
+    from core.source_schools.tables import build_people_dataframe
+    body=next(m.value for m in app.markdown if '<tbody>' in m.value).split('<tbody>',1)[1].split('</tbody>',1)[0]
+    assert body.count('<tr')==len(build_people_dataframe(d))
+    assert not any(w.label=='Страница таблицы' for w in app.number_input)
 
 
 def test_incoming_table_permalink_overrides_a_previous_local_section():

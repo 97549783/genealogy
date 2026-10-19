@@ -14,6 +14,9 @@ from core.db import SUPERVISOR_COLUMNS
 from core.lineage.graph import rows_for
 from core.lineage.names import has_expanded_name, norm
 
+# Пересчитываем и ранее отсутствовавшие ссылки после обновления правил сопоставления.
+_MATCHING_POLICY_REVISION = 2
+
 
 @dataclass(frozen=True)
 class SourcePersonLineage:
@@ -53,7 +56,8 @@ def _valid_basis_ids(document):
 
 def _grounded(item, valid_bases):
     refs = item.get("основания", [])
-    return bool(refs) and all(str(ref) in valid_bases for ref in refs)
+    # Дополнительная архивная ссылка без локатора не отменяет адресные подтверждения.
+    return any(str(ref) in valid_bases for ref in refs)
 
 
 def _person_candidates(person, valid_bases):
@@ -109,12 +113,12 @@ def resolve_source_school_lineages(
 
 
 @st.cache_data(show_spinner=False)
-def _cached_source_school_lineages(db_signature, scope_signature, document_json, _df, _idx):
+def _cached_source_school_lineages(db_signature, scope_signature, document_json, matching_policy_revision, _df, _idx):
     return resolve_source_school_lineages(json.loads(document_json), _df, _idx)
 
 
 def get_source_school_lineages(document, df, idx, db_signature) -> dict[str, SourcePersonLineage]:
-    """Обновляет кэш при изменении базы, выборки, вариантов имён или решений об идентификации."""
+    """Обновляет кэш при изменении данных, идентификации или правил сопоставления."""
     relevant = {
         "объекты": {"персоны": document.get("объекты", {}).get("персоны", [])},
         "состав": document.get("состав", []),
@@ -125,5 +129,6 @@ def get_source_school_lineages(document, df, idx, db_signature) -> dict[str, Sou
     hashes = pd.util.hash_pandas_object(df[columns], index=True).values.tobytes()
     scope_signature = hashlib.sha256(hashes).hexdigest()
     return _cached_source_school_lineages(
-        db_signature, scope_signature, json.dumps(relevant, ensure_ascii=False, sort_keys=True), df, idx,
+        db_signature, scope_signature, json.dumps(relevant, ensure_ascii=False, sort_keys=True),
+        _MATCHING_POLICY_REVISION, df, idx,
     )

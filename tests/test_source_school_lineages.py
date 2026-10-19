@@ -112,6 +112,36 @@ def test_native_alias_requires_real_evidence_and_unique_root():
     assert not resolve_source_school_lineages(doc,df,index(df))
 
 
+def test_migrated_vygotsky_names_keep_trees_despite_supplementary_unlocated_citations():
+    from source_school_fixtures import load_vygotsky
+    from core.source_schools.links import build_source_school_url
+    from core.source_schools.tables import build_people_dataframe
+    from tabs.source_schools.sections import _table_html
+
+    doc=load_vygotsky()
+    roots={
+        'lev_vygotsky':'Выготский Лев Семёнович',
+        'alexei_leontiev':'Леонтьев Алексей Николаевич',
+        'alexander_luria':'Лурия Александр Романович',
+        'bluma_zeigarnik':'Зейгарник Блюма Вульфовна',
+    }
+    df=pd.DataFrame([{'Code':str(i),'candidate_name':'Ученик '+str(i),'supervisors_1.name':name}
+                     for i,name in enumerate(roots.values())])
+    found=resolve_source_school_lineages(doc,df,index(df))
+    assert {pid:r.root_name for pid,r in found.items()}==roots
+    school=doc['школа']['идентификатор_школы']
+    cards={pid:{'href':build_source_school_url(school,person_id=pid,view='person')} for pid in roots}
+    links={pid:{'href':'https://example.test/?tab=lineages&root='+pid} for pid in found}
+    tree=build_source_school_overview_tree(doc,person_links=cards,lineage_links=links)
+    for pid in roots:
+        content=_markmap_node_content(tree.graph,'person:'+pid)
+        assert 'source-school-tree-icon' in content and links[pid]['href'].replace('&','&amp;') in content
+        assert cards[pid]['href'].replace('&','&amp;') in content
+    people=build_people_dataframe(doc)
+    table=_table_html(people[people['id'].isin(roots)],['Имя'],{'Имя':'Имя'},cards,links)
+    assert table.count('source-school-tree-icon')==4
+
+
 def test_initials_partial_names_and_ambiguous_identification_do_not_create_tree():
     df=pd.DataFrame([{'Code':'1','candidate_name':'Ученик','supervisors_1.name':'Леонтьев Алексей Николаевич'}])
     assert not resolve_source_school_lineages(document('Леонтьев А. Н.'),df,index(df))
@@ -153,3 +183,17 @@ def test_cache_invalidates_database_path_scope_and_alias_changes():
     assert get_source_school_lineages(doc,expanded,index(expanded),('first.db',1,10))['leontiev'].record_count==2
     doc['объекты']['персоны'][0]['имя']='Другое Полное Имя'
     assert not get_source_school_lineages(doc,expanded,index(expanded),('first.db',1,10))
+
+
+def test_matching_policy_update_discards_cached_missing_icons(monkeypatch):
+    import core.source_schools.lineages as module
+
+    module._cached_source_school_lineages.clear()
+    doc=document()
+    df=pd.DataFrame([{'Code':'1','candidate_name':'Ученик','supervisors_1.name':'Леонтьев Алексей Николаевич'}])
+    idx=index(df)
+    with monkeypatch.context() as previous:
+        previous.setattr(module,'_MATCHING_POLICY_REVISION',1)
+        previous.setattr(module,'_grounded',lambda *args:False)
+        assert not module.get_source_school_lineages(doc,df,idx,('same.db',1,10))
+    assert module.get_source_school_lineages(doc,df,idx,('same.db',1,10))['leontiev'].record_count==1
