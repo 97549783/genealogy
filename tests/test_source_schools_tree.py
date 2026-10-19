@@ -17,6 +17,57 @@ from core.ui.tree_renderers import build_markmap_html
 from source_school_fixtures import load_vygotsky, synthetic_document
 
 
+@pytest.mark.parametrize('school_id,representatives,related', [
+    ('bryansk_scientific_philosophical_school',13,8),
+    ('perm_philosophical_school',23,10),
+    ('rostov_philosophical_school',14,68),
+    ('ural_philosophical_school',35,4),
+    ('russian_noosphere_scientific_school',126,150),
+])
+def test_philosophical_schools_use_two_exclusive_membership_branches(school_id,representatives,related):
+    from core.source_schools.data import load_source_school_document
+    from source_school_fixtures import VYGOTSKY_PATH
+
+    doc=load_source_school_document(VYGOTSKY_PATH.parent/(school_id+'.json'))
+    before=copy.deepcopy(doc)
+    tree=build_source_school_overview_tree(doc)
+    branches=list(tree.graph.successors(tree.root_id))
+    assert tree.basis=='отношение_к_школе'
+    assert [tree.graph.nodes[n]['label'] for n in branches]==['Представители','Связанные лица']
+    assert [tree.graph.out_degree(n) for n in branches]==[representatives,related]
+    for branch in branches:
+        relation=tree.graph.nodes[branch]['membership_relation']
+        expected={'person:'+m['персона'] for m in doc['состав']
+                  if m['решение']=='включено' and m['отношение_к_школе']==relation}
+        assert set(tree.graph.successors(branch))==expected
+    person_nodes=[n for n,a in tree.graph.nodes(data=True) if a.get('person_id')]
+    assert len(person_nodes)==representatives+related
+    assert all(tree.graph.in_degree(n)==1 for n in person_nodes)
+    assert doc==before
+    selected=next(iter(doc['состав']))['персона']
+    overlay=build_source_school_overview_tree(doc,highlighted_person_ids={selected},
+        hidden_person_ids={n.removeprefix('person:') for n in person_nodes if n!='person:'+selected})
+    assert list(overlay.graph.edges)==list(tree.graph.edges)
+    assert list(overlay.graph.successors(overlay.root_id))==branches
+
+
+def test_membership_division_keeps_unknowns_separate_and_defers_to_explicit_primary():
+    doc=synthetic_document()
+    doc['отображение']['без_основного_деления']='по_отношению_к_школе'
+    doc['состав'][1]['отношение_к_школе']='связанное_лицо'
+    doc['состав'][2]['отношение_к_школе']='не_установлено'
+    tree=build_source_school_overview_tree(doc)
+    assert [tree.graph.nodes[n]['label'] for n in tree.graph.successors(tree.root_id)]==[
+        'Представители','Связанные лица','Отношение к школе не установлено']
+    assert set(tree.graph.successors('membership:не_установлено'))=={'person:person_gamma'}
+    assert 'person:person_candidate' not in tree.graph
+    primary_doc=synthetic_document(primary=True)
+    primary_doc['отображение']['без_основного_деления']='по_отношению_к_школе'
+    primary_tree=build_source_school_overview_tree(primary_doc)
+    assert primary_tree.basis=='основное_деление'
+    assert not any(a.get('kind')=='membership_category' for _,a in primary_tree.graph.nodes(data=True))
+
+
 def test_vygotsky_retains_four_categories_and_one_center_person():
     tree = build_source_school_overview_tree(load_vygotsky())
     assert tree.basis == 'основное_деление'

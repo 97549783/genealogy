@@ -8,6 +8,18 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+MEMBERSHIP_GROUP_LABELS = {
+    "представитель": "Представители",
+    "связанное_лицо": "Связанные лица",
+    "не_установлено": "Отношение к школе не установлено",
+}
+
+
+def uses_membership_division(document: Mapping[str, Any]) -> bool:
+    """Основные ветви берутся из состава, если не задано отдельное основное деление."""
+    return (document.get("классификации", {}).get("основное_деление") is None
+            and document.get("отображение", {}).get("без_основного_деления") == "по_отношению_к_школе")
+
 
 def school_id(document: Mapping[str, Any]) -> str:
     return str(document["школа"]["идентификатор_школы"])

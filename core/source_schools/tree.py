@@ -8,6 +8,7 @@ import networkx as nx
 import pandas as pd
 
 from .data import SourceSchoolDataError
+from .model import MEMBERSHIP_GROUP_LABELS, membership_index, uses_membership_division
 from .presentation import get_first_field
 
 _HIGHLIGHT_COLOR = "#ff8f00"
@@ -240,7 +241,20 @@ def build_source_school_overview_tree(
                                     color=_HIGHLIGHT_COLOR if root_person_id in selected else _DIMMED_COLOR)
     used = {root_person_id} if root_is_person else set()
     primary = document.get("классификации", {}).get("основное_деление")
-    if not isinstance(primary, Mapping):
+    if uses_membership_division(document):
+        members = membership_index(document)
+        for relation, label in MEMBERSHIP_GROUP_LABELS.items():
+            ids = [pid for pid in by_id if pid not in used and members[pid]["отношение_к_школе"] == relation]
+            if not ids:
+                continue
+            node_id = "membership:" + relation
+            graph.add_node(node_id, label=label, kind="membership_category", membership_relation=relation)
+            graph.add_edge(root_id, node_id)
+            for person_id in ids:
+                _add_person_node(graph, node_id, person_id, by_id[person_id], selected, hidden)
+                used.add(person_id)
+        basis = "отношение_к_школе"
+    elif not isinstance(primary, Mapping):
         for person_id, person in by_id.items():
             if person_id not in used:
                 _add_person_node(graph, root_id, person_id, person, selected, hidden)

@@ -300,6 +300,24 @@ def test_incoming_table_permalink_overrides_a_previous_local_section():
     assert 'Табличное представление' in text(app)
 
 
+def test_philosophical_membership_division_filters_tree_and_full_table_together():
+    app=start(school='rostov_philosophical_school',view='together')
+    assert not app.exception
+    assert widget(app,'multiselect','Отношение к школе').options==['Представители','Связанные лица']
+    markup=app.get('iframe')[0].proto.srcdoc
+    assert 'Представители' in markup and 'Связанные лица' in markup
+    widget(app,'multiselect','Отношение к школе').set_value(['связанное_лицо'])
+    widget(app,'radio','Режим отображения').set_value('hide');app.run(timeout=60)
+    assert not app.exception
+    table=next(m.value for m in app.markdown if '<tbody>' in m.value)
+    body=table.split('<tbody>',1)[1].split('</tbody>',1)[0]
+    assert body.count('<tr')==68 and '<td>Представитель</td>' not in body
+    markup=app.get('iframe')[0].proto.srcdoc
+    assert 'Представители' in markup and 'Связанные лица' in markup
+    assert '"_hidden": true' in markup
+    assert 'Совпало персон: 68 из 82' in text(app)
+
+
 def test_idea_sections_follow_dictionary_metadata_without_parsing_codes_or_prose():
     from tabs.source_schools.sections import _school_idea_records
     d=synthetic_document();school=d['школа']['идентификатор_школы']

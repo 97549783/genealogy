@@ -49,6 +49,18 @@ def test_empty_explicit_selection_is_empty_but_no_selection_retains_all_people()
     assert filter_people_dataframe(df,person_ids={'person_beta'})['id'].tolist()==['person_beta']
 
 
+def test_membership_filter_is_exclusive_and_combines_with_flexible_filters():
+    doc=synthetic_document()
+    doc['состав'][1]['отношение_к_школе']='связанное_лицо'
+    df=build_people_dataframe(doc)
+    assert filter_people_dataframe(df,membership_types=['связанное_лицо'])['id'].tolist()==['person_beta']
+    assert set(filter_people_dataframe(df,membership_types=['представитель'])['id'])=={
+        'person_alpha','person_gamma','person_delta'}
+    assert len(filter_people_dataframe(df,membership_types=['представитель','связанное_лицо']))==4
+    assert filter_people_dataframe(df,membership_types=['связанное_лицо'],
+        facet_selections={'historical_group':['group_alpha']},mode='union').empty
+
+
 def test_five_facets_and_no_primary_have_native_columns():
     d=synthetic_document(facet_count=5);df=build_people_dataframe(d)
     assert all('facet:'+f['id'] in df.columns for f in d['классификации']['гибкие_измерения'])

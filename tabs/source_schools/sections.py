@@ -10,8 +10,9 @@ import streamlit.components.v1 as components
 
 from core.source_schools.bibliography import build_numbered_bibliography, build_source_number_index
 from core.source_schools.model import (
-    accepted_information, dimension_definitions, field_definitions, format_locator,
+    MEMBERSHIP_GROUP_LABELS, accepted_information, dimension_definitions, field_definitions, format_locator,
     format_value, included_persons, membership_index, person_basis_ids,
+    uses_membership_division,
 )
 from core.source_schools.tables import (
     build_people_dataframe, build_candidates_dataframe, configured_table_columns,
@@ -117,9 +118,16 @@ def _filters(document, dataframe, *, scope="overview"):
             selections[fid]=st.multiselect(definition["название"],list(labels),format_func=labels.get,key=prefix+"_facet_"+fid,help=definition["описание"])
     primary=document["классификации"]["основное_деление"]
     selected_primary=[]
+    selected_membership=[]
     if primary:
         labels={c["id"]:c["название"] for c in primary["категории"]}
         selected_primary=st.multiselect(primary["название"],list(labels),format_func=labels.get,key=prefix+"_primary")
+    elif uses_membership_division(document):
+        displayed=set(dataframe["id"])
+        present={m["отношение_к_школе"] for m in document["состав"] if m["персона"] in displayed}
+        labels={key:label for key,label in MEMBERSHIP_GROUP_LABELS.items() if key in present}
+        selected_membership=st.multiselect("Отношение к школе",list(labels),format_func=labels.get,key=prefix+"_membership",
+            help="Взаимоисключающие группы из реестра состава. Отбор по ним ограничивает поиск и гибкие фильтры.")
     mode=st.radio("Логика сочетания измерений",["intersection","union"],
         format_func=lambda v:{"intersection":"И — пересечение","union":"ИЛИ — объединение"}[v],
         index=0 if document["отображение"]["логика_между_фильтрами_по_умолчанию"]=="И" else 1,
@@ -128,8 +136,9 @@ def _filters(document, dataframe, *, scope="overview"):
         format_func=lambda v:{"highlight":"Подсветить совпадения","hide":"Скрыть несовпадающих"}[v],
         index=0 if document["отображение"]["режим_отбора_по_умолчанию"]=="подсветка" else 1,
         horizontal=True,key=prefix+"_treatment")
-    subset=filter_people_dataframe(dataframe,query=query,facet_selections=selections,primary_categories=selected_primary,mode=mode)
-    active=bool(query.strip() or selected_primary or any(selections.values()))
+    subset=filter_people_dataframe(dataframe,query=query,facet_selections=selections,primary_categories=selected_primary,
+        membership_types=selected_membership,mode=mode)
+    active=bool(query.strip() or selected_primary or selected_membership or any(selections.values()))
     st.caption(f"Совпало персон: {len(subset)} из {len(dataframe)}. Внутри измерения — ИЛИ; между активными измерениями — {'пересечение' if mode=='intersection' else 'объединение'}.")
     if not active:st.caption("Пока выбор пуст, дерево показано полностью.")
     return subset,active,treatment

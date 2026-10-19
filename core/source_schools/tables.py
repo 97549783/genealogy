@@ -89,8 +89,9 @@ def filter_people_dataframe(dataframe: pd.DataFrame, *, query: str = "",
                             person_ids: Collection[str] | None = None,
                             facet_selections: Mapping[str, Collection[str]] | None = None,
                             primary_categories: Collection[str] = (), source_ids: Collection[str] = (),
+                            membership_types: Collection[str] = (),
                             mode: str = "intersection") -> pd.DataFrame:
-    """ИЛИ внутри измерения; И/ИЛИ между измерениями. Текст и источники добавляют условие И."""
+    """ИЛИ внутри и И/ИЛИ между гибкими измерениями; состав, основное деление и текст ограничивают выборку через И."""
     if mode not in {"intersection", "union"}:
         raise ValueError(f"Неизвестная логика фильтров: {mode}")
     if dataframe.empty:
@@ -101,6 +102,8 @@ def filter_people_dataframe(dataframe: pd.DataFrame, *, query: str = "",
     if query.strip():
         searchable = dataframe.drop(columns=["Уверенность"], errors="ignore").fillna("").astype(str).agg(" ".join, axis=1)
         mask &= searchable.str.contains(query.strip(), case=False, regex=False)
+    if membership_types:
+        mask &= dataframe["Отношение к школе"].isin({RELATION_LABELS.get(value, value) for value in membership_types})
     active_sets = []
     memberships = dataframe.attrs.get("facet_memberships", {})
     for dimension, selections in (facet_selections or {}).items():
