@@ -1,605 +1,411 @@
-"""Отрисовка внутренних режимов демо-раздела школ по источникам."""
+"""Общие представления источниковых школ, их персон и подтверждений."""
 from __future__ import annotations
 
-import io
+from html import escape
 from typing import Any, Mapping
-from urllib.parse import urlparse
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 from core.source_schools.bibliography import build_numbered_bibliography, build_source_number_index
-from core.source_schools.export import build_filtered_people_csv, build_filtered_people_xlsx
-from core.source_schools.data import normalize_source_school_document
-from core.source_schools.dimensions import (
-    build_dimension_coverage, build_person_dimension_labels, has_canonical_assignments,
+from core.source_schools.model import (
+    accepted_information, dimension_definitions, field_definitions, format_locator,
+    format_value, included_persons, membership_index, person_basis_ids,
 )
-from core.source_schools.presentation import as_display_text, as_list, format_life_years, get_first_field
-from core.source_schools.tree import (
-    build_person_primary_relation_index,
-    build_source_school_overview_tree,
-    build_supplementary_dimension_catalog,
-    combine_supplementary_selections,
-)
-from core.ui.tree_renderers import build_markmap_html, draw_hierarchical_tree
 from core.source_schools.tables import (
-    build_evidence_dataframe,
-    build_people_dataframe,
-    build_sources_dataframe,
-    filter_people_dataframe,
-    resolve_person_names,
+    build_people_dataframe, build_candidates_dataframe, configured_table_columns,
+    filter_people_dataframe, table_column_labels,
 )
+from core.source_schools.tree import build_source_school_overview_tree
+from core.ui.tree_renderers import build_markmap_html
+
+_STATUS = {"сверено":"Сверено с источником", "унаследовано":"Унаследованная сверка", "частично_сверено":"Частично сверено", "не_проверено":"Ещё не проверено", "ошибка":"Требует исправления"}
+_NATURE = {"источниковое_сообщение":"Сообщение источника", "авторская_оценка":"Оценка автора", "редакторская_интерпретация":"Редакторская интерпретация", "источниковое_отнесение":"Отнесение в источнике", "классификационная_интерпретация":"Редакторское отнесение"}
+_MEMBERSHIP = {"представитель":"Представитель", "связанное_лицо":"Связанное лицо", "не_установлено":"Характер связи не установлен"}
+_DECISION = {"включено":"Включён в описание", "кандидат":"Кандидат на включение", "исключено":"Не включён в рабочий состав", "принято":"Принято", "гипотеза":"Гипотеза", "отклонено":"Отклонено"}
 
 
-def _safe_url(url: str | None) -> bool:
-    return bool(url) and urlparse(url).scheme in {"http", "https"}
+def _safe_url(url: object) -> bool:
+    from core.source_schools.links import _safe_link_url
+    return isinstance(url,str) and bool(_safe_link_url(url,allow_relative=True))
 
 
-def _source_label(source: Mapping[str, Any]) -> str:
-    return source.get("краткое_название") or source.get("библиографическое_описание", source.get("id", ""))
+def _anchor(text: str, link: Mapping[str, str] | str | None) -> str:
+    href = link.get("href", "") if isinstance(link, Mapping) else str(link or "")
+    if not _safe_url(href):
+        return escape(text)
+    title = link.get("title", text) if isinstance(link, Mapping) else text
+    return f'<a href="{escape(href, quote=True)}" target="_blank" rel="noopener noreferrer" title="{escape(title, quote=True)}">{escape(text)}</a>'
 
 
-def _evidence_status(value: Any) -> str:
-    return "Явное утверждение" if value else "Интерпретация"
+def _tree_icon(link: Mapping[str, str] | None) -> str:
+    if not link or not _safe_url(link.get("href")):
+        return ""
+    from core.source_schools.links import tree_icon_link
+    return tree_icon_link(link["href"], link.get("title", "Открыть дерево научного руководства"))
 
 
-def _evidence_summary(evidence_id: str, indexes: Mapping[str, Mapping[str, Mapping[str, Any]]]) -> str:
-    evidence = indexes["evidence"].get(evidence_id)
-    if not evidence:
-        return "Подтверждение не найдено"
-    source = indexes["sources"].get(evidence.get("идентификатор_источника"), {})
-    locator = evidence.get("локатор")
-    locator_text = f", {locator}" if locator else ""
-    result = f"{_source_label(source)} — {evidence.get('содержание_свидетельства', '')}{locator_text}"
-    if evidence.get("тип_утверждения"):
-        result += f". Вид свидетельства: {as_display_text(evidence['тип_утверждения'])}."
-    if evidence.get("ограничения"):
-        result += f" Ограничение: {as_display_text(evidence['ограничения'])}"
+def _basis_ids(document, record):
+    assertions = {r["id"]:r for key in ("сведения", "связи") for r in document[key]}
+    result, visited = set(), set()
+    def collect(item):
+        result.update(item.get("основания", []))
+        for ident in item.get("опирается_на", []):
+            if ident in assertions and ident not in visited:
+                visited.add(ident); collect(assertions[ident])
+    collect(record)
     return result
 
 
-def _write_named_list(title: str, value: Any) -> None:
-    text = as_display_text(value)
-    if text:
-        st.write(f"**{title}:** {text}")
+def _basis_note(document, ids):
+    numbers = build_source_number_index(document)
+    result = []
+    for basis in document["основания"]:
+        if basis["id"] in ids:
+            number = numbers[basis["источник"]]
+            locator = format_locator(basis.get("локатор"))
+            label = f"Источник № {number}" + (f", {locator}" if locator else ", место не уточнено")
+            if label not in result:result.append(label)
+    return "; ".join(result)
 
 
-def _render_person_source_notes(person: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
-    """Показывает варианты и ограничения рядом с утверждениями конкретной персоны."""
-    _write_named_list("Примечание", person.get("примечание"))
-    for disagreement in person.get("разночтения", []):
-        st.write(f"**Разночтение: {disagreement.get('вопрос', '')}**")
-        for variant in disagreement.get("варианты", []):
-            sources = "; ".join(
-                _source_label(indexes["sources"][source_id])
-                for source_id in variant.get("источники", [])
-                if source_id in indexes["sources"]
-            )
-            st.write(f"{variant.get('значение', '')} — {sources}; {variant.get('локатор', '')}.")
-        _write_named_list("Ограничение вывода", disagreement.get("ограничение"))
-    for limitation in dict.fromkeys(person.get("источниковые_ограничения", [])):
-        _write_named_list("Источниковое ограничение", limitation)
+def _render_record(document, record, *, show_label=False):
+    definition = field_definitions(document).get(record.get("поле"), {})
+    if show_label:st.markdown("**" + definition.get("название", "Сведения") + "**")
+    st.write(format_value(record.get("значение")))
+    labels = [_NATURE.get(record.get("характер"), ""), _STATUS.get(record.get("проверка", {}).get("статус"), "")]
+    if record.get("роль_значения") == "вариант":labels.insert(0,"Альтернативный вариант")
+    note = _basis_note(document, _basis_ids(document,record))
+    st.caption(" · ".join(x for x in labels if x) + (". " + note if note else ". Источниковая опора пока не уточнена."))
+    for warning in record.get("ограничения", []):st.caption(warning)
 
 
-def _render_assignment_status_note(document: Mapping[str, Any], dimension: str, value_id: str) -> None:
-    """Показывает статус членства отдельно от описания исторической группы."""
-    if not has_canonical_assignments(document):
-        return
-    counts = {"подтверждено": 0, "интерпретация": 0, "не_проверено": 0}
-    for item in document["школа"]["классификационные_назначения"]:
-        if item.get("измерение") == dimension and item.get("значение") == value_id:
-            counts[item["статус"]] += 1
-    st.caption(
-        f"Подтверждено: {counts['подтверждено']}; классификационные интерпретации: {counts['интерпретация']}; "
-        f"непроверенные назначения: {counts['не_проверено']} (в основной список не включены). "
-        "Основания каждого назначения доступны в карточке персоны."
-    )
+def _render_school_description(document):
+    school=document["школа"]
+    st.write(school["границы_описания"])
+    if school["альтернативные_названия"]:
+        with st.expander("Альтернативные названия"):
+            for item in school["альтернативные_названия"]:
+                st.write(item["написание"])
+                if item.get("примечание"):st.caption(item["примечание"])
+    st.caption("Дисциплины: " + "; ".join(school["дисциплины"]))
+    st.caption("Страны деятельности: " + (", ".join(x["название"] for x in school["страны"]) or "Пока не размечены"))
+    st.caption("Языки описания: " + ", ".join(document["метаданные"]["языки_данных"]))
+    if school["языки_работ"]:
+        with st.expander("Языки работ школы"):
+            roles={"язык_оригиналов":"Оригиналы", "язык_переводов":"Переводы", "язык_работ_не_уточнён":"Оригинал или перевод пока не уточнён"}
+            for tag in school["языки_работ"]:
+                st.markdown(f"**{tag['название']}** · {roles[tag['роль']]}")
+                st.write(tag["охват"])
+                st.caption(_basis_note(document,tag["основания"]))
+    with st.expander("Паспорт школы", expanded=False):
+        for record in accepted_information(document,school["идентификатор_школы"]):
+            _render_record(document,record,show_label=True)
 
 
-def _supplementary_value_label(value_id: str, values: Mapping[str, Any], *, show_count: bool) -> str:
-    """Безопасно форматирует значение, даже если каталог обновился в живой сессии."""
-    value = values.get(value_id)
-    if value is None:
-        return "Значение отсутствует в текущем каталоге"
-    return f"{value.label} ({len(value.person_ids)})" if show_count else value.label
+def _filters(document, dataframe, *, scope="overview"):
+    sid=document["школа"]["идентификатор_школы"]
+    prefix=f"source_schools_{sid}_{scope}"
+    query=st.text_input("Поиск по представителям",key=prefix+"_query")
+    facets=dimension_definitions(document,include_primary=False)
+    selections={}
+    columns=st.columns(min(3,max(1,len(facets))))
+    for n,(fid,definition) in enumerate(facets.items()):
+        labels={v["id"]:v["название"] for v in definition["значения"]}
+        with columns[n%len(columns)]:
+            selections[fid]=st.multiselect(definition["название"],list(labels),format_func=labels.get,key=prefix+"_facet_"+fid,help=definition["описание"])
+    primary=document["классификации"]["основное_деление"]
+    selected_primary=[]
+    if primary:
+        labels={c["id"]:c["название"] for c in primary["категории"]}
+        selected_primary=st.multiselect(primary["название"],list(labels),format_func=labels.get,key=prefix+"_primary")
+    mode=st.radio("Логика сочетания измерений",["intersection","union"],
+        format_func=lambda v:{"intersection":"И — пересечение","union":"ИЛИ — объединение"}[v],
+        index=0 if document["отображение"]["логика_между_фильтрами_по_умолчанию"]=="И" else 1,
+        horizontal=True,key=prefix+"_logic")
+    treatment=st.radio("Режим отображения",["highlight","hide"],
+        format_func=lambda v:{"highlight":"Подсветить совпадения","hide":"Скрыть несовпадающих"}[v],
+        index=0 if document["отображение"]["режим_отбора_по_умолчанию"]=="подсветка" else 1,
+        horizontal=True,key=prefix+"_treatment")
+    subset=filter_people_dataframe(dataframe,query=query,facet_selections=selections,primary_categories=selected_primary,mode=mode)
+    active=bool(query.strip() or selected_primary or any(selections.values()))
+    st.caption(f"Совпало персон: {len(subset)} из {len(dataframe)}. Внутри измерения — ИЛИ; между активными измерениями — {'пересечение' if mode=='intersection' else 'объединение'}.")
+    if not active:st.caption("Пока выбор пуст, дерево показано полностью.")
+    return subset,active,treatment
 
 
-def _render_school_description(school: Mapping[str, Any]) -> None:
-    """Отрисовывает описательную часть обзора под интерактивным графом."""
-    _write_named_list("Тип школы", school.get("тип_школы"))
-    st.caption(as_display_text(school.get("примечание_к_типу")))
-    disciplines = school.get("дисциплинарная_принадлежность", {})
-    main_idea = school.get("основная_идея", {})
-    chronology = school.get("хронология", {})
-    _write_named_list(
-        "Дисциплинарные области",
-        get_first_field(disciplines, "области", default=school.get("дисциплинарные_области")),
-    )
-    _write_named_list(
-        "Ключевые слова",
-        get_first_field(disciplines, "ключевые_слова", default=school.get("ключевые_слова")),
-    )
-    _write_named_list("Основная идея", main_idea)
-    _write_named_list(
-        "Проблема",
-        get_first_field(main_idea, "центральная_проблема", default=school.get("проблема")),
-    )
-    _write_named_list(
-        "Гипотеза",
-        get_first_field(main_idea, "центральная_гипотеза", default=school.get("гипотеза")),
-    )
-    _write_named_list(
-        "Теория",
-        get_first_field(main_idea, "центральная_теория", default=school.get("теория")),
-    )
-    _write_named_list(
-        "Метод",
-        get_first_field(main_idea, "центральный_метод", default=school.get("метод")),
-    )
-    _write_named_list(
-        "Хронология",
-        get_first_field(
-            chronology,
-            "кратко",
-            "общий_период",
-            "описание",
-            "дата_или_период_возникновения",
-            "период_активности",
-            "период_расцвета",
-            "примечание_о_неопределенности_хронологии",
-        ),
-    )
-    _write_named_list("География", school.get("география"))
-    _write_named_list("Организации", school.get("организации"))
+def _table_html(dataframe,columns,labels,person_links,lineage_links,highlighted_ids=None):
+    headers="".join('<th scope="col">'+escape(labels.get(c,c))+'</th>' for c in columns)
+    rows=[]
+    for _,row in dataframe.iterrows():
+        pid=str(row["id"]);cells=[]
+        for column in columns:
+            if column=="Имя":
+                value=_anchor(str(row[column]),person_links.get(pid))+" "+_tree_icon(lineage_links.get(pid))
+            else:
+                raw=row.get(column,"")
+                value=escape("" if raw is None or (isinstance(raw,float) and pd.isna(raw)) else str(raw)).replace("\n","<br>")
+            cells.append("<td>"+value+"</td>")
+        css=' class="source-schools-match"' if highlighted_ids is not None and pid in highlighted_ids else ""
+        rows.append("<tr"+css+">"+"".join(cells)+"</tr>")
+    return '<div class="source-schools-table-scroll"><table class="source-schools-table"><thead><tr>'+headers+'</tr></thead><tbody>'+"".join(rows)+'</tbody></table></div>'
 
 
-def render_overview_section(document: Mapping[str, Any], indexes: Mapping[str, Any], *, lineage_links=None) -> None:
-    """Отрисовывает обзор школы."""
-    school = document["школа"]
-    demo = document["демо_представление"]
-    st.subheader(demo["заголовок_страницы"])
-    st.caption(demo["подзаголовок"])
-    col_people, col_sources, col_evidence = st.columns(3)
-    col_people.metric("Представители", len(school["персоны"]))
-    col_sources.metric("Источники", len(school["источники"]))
-    col_evidence.metric("Подтверждения", len(school["подтверждения"]))
-    _write_named_list("Каноническое название", school.get("каноническое_название"))
-    with st.expander("Альтернативные названия", expanded=False):
-        for alternative in school.get("альтернативные_названия", []):
-            st.write(
-                f"{as_display_text(alternative.get('название'))} — "
-                f"{as_display_text(get_first_field(alternative, 'примечание', 'примечание_об_источнике_названия'))}"
-            )
-    st.subheader("Структура школы")
-    canonical = has_canonical_assignments(document)
-    if canonical:
-        st.caption(
-            "Фильтры учитывают подтверждённые назначения и классификационные интерпретации с источниковым основанием. "
-            "Название периода или направления может быть редакторским: источник подтверждает основание назначения, "
-            "а не обязательно точную формулировку фильтра. Спорные гипотезы сохранены в разделе расхождений и в выборки не включаются. "
-            "Отсутствие разметки не означает отсутствие исторической связи."
-        )
-    catalog = build_supplementary_dimension_catalog(document)
-    coverage = build_dimension_coverage(document)
-    dimension_specs = (
-        ("historical_group", "Исторические группы и контексты" if canonical else "Исторические группы"),
-        ("period", "Периоды"),
-        ("research_direction", "Научные направления"),
-    )
-    selections: dict[str, list[str]] = {}
-    dimension_columns = st.columns(3)
-    for column, (dimension_id, label) in zip(dimension_columns, dimension_specs, strict=True):
-        values = catalog.get(dimension_id, ())
-        value_by_id = {value.id: value for value in values}
-        widget_key = f"source_schools_supplementary_{dimension_id}"
-        if widget_key in st.session_state:
-            st.session_state[widget_key] = [item for item in st.session_state[widget_key] if item in value_by_id]
-        with column:
-            selections[dimension_id] = st.multiselect(
-                label,
-                list(value_by_id),
-                format_func=lambda value_id, value_by_id=value_by_id: _supplementary_value_label(
-                    value_id, value_by_id, show_count=canonical,
-                ),
-                key=widget_key,
-            )
-            if canonical:
-                stats = coverage[dimension_id]
-                st.caption(
-                    f"Размечено: {stats['assigned_person_count']} из {len(school['персоны'])}; "
-                    f"без разметки: {len(stats['unclassified_person_ids'])}; "
-                    f"с классификационными интерпретациями: {len(stats['interpretative_person_ids'])}; "
-                    f"с непроверенными назначениями: {len(stats['unverified_person_ids'])}."
-                )
-    active_dimension_count = sum(bool(values) for values in selections.values())
-    composition_mode = st.radio(
-        "Логика сочетания измерений",
-        ["intersection", "union"],
-        format_func=lambda value: (
-            "Пересечение (И): персона должна соответствовать каждому выбранному измерению"
-            if value == "intersection"
-            else "Объединение (ИЛИ): достаточно соответствия любому выбранному измерению"
-        ),
-        horizontal=True,
-        disabled=active_dimension_count < 2,
-        key="source_schools_supplementary_composition",
-    )
-    display_mode = st.radio(
-        "Режим отображения",
-        ["highlight", "hide"],
-        format_func=lambda value: (
-            "Подсветить выбранное, остальное затенить"
-            if value == "highlight"
-            else "Скрыть остальное"
-        ),
-        horizontal=True,
-        key="source_schools_supplementary_display_mode",
-    )
-    highlighted_person_ids = combine_supplementary_selections(
-        catalog,
-        selections,
-        mode=composition_mode,
-    )
-    hidden_person_ids: set[str] | None = None
-    if highlighted_person_ids is not None and display_mode == "hide":
-        all_person_ids = {str(person.get("id")) for person in school.get("персоны", [])}
-        hidden_person_ids = all_person_ids - highlighted_person_ids
-    if highlighted_person_ids is None:
-        st.caption(
-            "Четыре типа связи задают положение узлов. В каждом дополнительном измерении можно выбрать несколько значений; "
-            "пока выбор пуст, дерево показано полностью."
-        )
-    else:
-        composition_label = "пересечение" if composition_mode == "intersection" and active_dimension_count > 1 else "объединение"
-        action_label = "видимыми оставлены" if display_mode == "hide" else "подсвечены оранжевым"
-        st.caption(
-            f"{action_label.capitalize()} {len(highlighted_person_ids)} персон; внутри каждого измерения действует объединение, "
-            f"между активными измерениями — {composition_label}. Структура и порядок типов связи не меняются."
-        )
-        if not highlighted_person_ids:
-            st.warning("Выбранная комбинация не содержит общих персон. Измените значения или выберите объединение (ИЛИ).")
-    mode = st.radio(
-        "Режим ветвления",
-        ["Одностороннее ветвление", "Двустороннее ветвление"],
-        horizontal=True,
-        key="source_schools_tree_branching",
-    )
-    tree = build_source_school_overview_tree(
-        document,
-        highlighted_person_ids=highlighted_person_ids,
-        hidden_person_ids=hidden_person_ids,
-        lineage_links=lineage_links,
-    )
-    html, height = build_markmap_html(
-        tree.graph,
-        tree.root_id,
-        initial_expand_level=0,
-        branching_mode=("bidirectional" if mode == "Двустороннее ветвление" else "unidirectional"),
-    )
-    components.html(html, height=height, scrolling=False)
-    st.caption("Клик на кружок узла — свернуть или развернуть ветвь. Подчёркнутое имя — открыть дерево научного руководства в новой вкладке. Колёсико мыши — масштаб; перетаскивание — панорама.")
-    st.warning(
-        "Тип связи — аналитическая систематизация по характеру непосредственной связи с Выготским. "
-        "Она не создаёт неподтверждённых отношений научного руководства; источниковые формулировки сохранены в карточках персон."
-    )
-    figure = draw_hierarchical_tree(tree.graph, tree.root_id, title="Структура школы")
-    png_buffer = io.BytesIO()
-    figure.savefig(png_buffer, format="png", dpi=180, bbox_inches="tight")
-    st.download_button("Скачать дерево в PNG", png_buffer.getvalue(), file_name="vygotsky_cultural_historical_school.дерево.png", mime="image/png", key="source_schools_tree_png")
-    st.download_button("Скачать интерактивное дерево в HTML", html.encode("utf-8"), file_name="vygotsky_cultural_historical_school.интерактивное_дерево.html", mime="text/html", key="source_schools_tree_html")
-    _render_school_description(school)
+def _render_table(document,dataframe,*,person_links,lineage_links,highlighted_ids=None,scope="overview"):
+    sid=document["школа"]["идентификатор_школы"];prefix=f"source_schools_{sid}_{scope}_table"
+    labels=table_column_labels(document)
+    options=[c for c in labels if c in dataframe.columns and c not in {"id","Имя","Идентификаторы источников","Уверенность"}]
+    defaults=[c for c in configured_table_columns(document) if c in options]
+    if "Отношение к школе" not in defaults:defaults.insert(0,"Отношение к школе")
+    selected=st.multiselect("Столбцы таблицы",options,default=defaults,format_func=labels.get,key=prefix+"_columns")
+    columns=["Имя",*selected]
+    a,b,c=st.columns([2,1,1])
+    with a:order=st.selectbox("Сортировать по",columns,format_func=labels.get,key=prefix+"_sort")
+    with b:descending=st.checkbox("По убыванию",key=prefix+"_descending")
+    with c:size=st.selectbox("Строк на странице",[25,50,100,500],key=prefix+"_size")
+    ordered=dataframe.sort_values(order,ascending=not descending,kind="stable",na_position="last")
+    signature=tuple(ordered["id"])
+    if st.session_state.get(prefix+"_signature")!=signature:
+        st.session_state[prefix+"_page"]=1;st.session_state[prefix+"_signature"]=signature
+    pages=max(1,(len(ordered)+size-1)//size)
+    if st.session_state.get(prefix+"_page",1)>pages:st.session_state[prefix+"_page"]=1
+    page=st.number_input("Страница таблицы",min_value=1,max_value=pages,step=1,key=prefix+"_page")
+    chunk=ordered.iloc[(page-1)*size:page*size]
+    st.markdown('''<style>
+.source-schools-table-scroll {overflow-x:auto;max-width:100%;margin:0.5rem 0 1rem}
+.source-schools-table {border-collapse:collapse;width:100%;font-size:0.92rem}
+.source-schools-table th,.source-schools-table td {border:1px solid #a9b4bf66;padding:.5rem .65rem;text-align:left;vertical-align:top;min-width:9rem;max-width:32rem;overflow-wrap:anywhere}
+.source-schools-table th {background:#80808018;white-space:nowrap}
+.source-schools-table .source-schools-match {background:#ffab4030}
+.source-schools-table a {text-decoration:underline}
+.source-school-tree-link {display:inline-flex;vertical-align:middle;margin-left:.3rem}
+</style>'''+_table_html(chunk,columns,labels,person_links,lineage_links,highlighted_ids),unsafe_allow_html=True)
+    st.caption(f"Страница {page} из {pages}; строк в выборке: {len(ordered)}. Имя открывает карточку школы, значок дерева — научное руководство. Обе ссылки открываются в новой вкладке.")
+    from core.source_schools.export import build_filtered_people_csv,build_filtered_people_xlsx
+    export=ordered[[c for c in ["id",*columns] if c in ordered]].rename(columns=labels)
+    left,right=st.columns(2)
+    with left:st.download_button("Скачать таблицу CSV",build_filtered_people_csv(export),file_name=sid+".выборка.csv",mime="text/csv",key=prefix+"_csv")
+    with right:st.download_button("Скачать таблицу Excel",build_filtered_people_xlsx(export),file_name=sid+".выборка.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=prefix+"_xlsx")
 
 
-def render_people_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
-    """Отрисовывает состав школы с фильтрами и карточкой персоны."""
-    st.warning(document["демо_представление"]["методологическое_предупреждение"])
-    dataframe = build_people_dataframe(document)
-    query = st.text_input("Поиск по представителям", key="source_schools_people_query")
-    relation_types = st.multiselect(
-        "Тип связи с Выготским",
-        sorted(value for value in dataframe["Тип связи"].dropna().unique() if value),
-        key="source_schools_people_relation_types",
-    )
-    roles = st.multiselect(
-        "Роль в школе",
-        sorted({role for value in dataframe["Роли"] for role in str(value).split("; ") if role}),
-        key="source_schools_people_roles",
-    )
-    groups = st.multiselect(
-        "Группа или контекст",
-        sorted({group for value in dataframe["Группы и контексты"] for group in str(value).split("; ") if group}),
-        key="source_schools_people_groups",
-    )
-    source_options = {source["id"]: _source_label(source) for source in document["школа"]["источники"]}
-    source_ids = st.multiselect(
-        "Источник",
-        list(source_options),
-        format_func=lambda source_id: source_options[source_id],
-        key="source_schools_people_sources",
-    )
-    minimum_confidence = st.slider(
-        "Минимальная уверенность",
-        0.0,
-        1.0,
-        0.0,
-        0.05,
-        key="source_schools_people_confidence",
-    )
-    filtered = filter_people_dataframe(
-        dataframe,
-        query=query,
-        relation_types=relation_types,
-        roles=roles,
-        groups=groups,
-        source_ids=source_ids,
-        minimum_confidence=minimum_confidence,
-    )
-    st.write(f"Найдено представителей: {len(filtered)}")
-    if filtered.empty:
-        st.info("По заданным условиям представители не найдены.")
-        return
-    export_view = filtered.drop(columns=["ID", "Идентификаторы источников"])
-    col_csv, col_xlsx = st.columns(2)
-    col_csv.download_button("Скачать выбранных представителей в CSV", build_filtered_people_csv(export_view), file_name="vygotsky_cultural_historical_school.представители_выборка.csv", mime="text/csv", key="source_schools_people_export_csv")
-    col_xlsx.download_button("Скачать выбранных представителей в Excel", build_filtered_people_xlsx(export_view), file_name="vygotsky_cultural_historical_school.представители_выборка.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="source_schools_people_export_xlsx")
-    st.dataframe(
-        export_view,
-        hide_index=True,
-        use_container_width=True,
-        height=600,
-        column_config={
-            "Представитель": st.column_config.TextColumn(width="medium"),
-            "Годы жизни": st.column_config.TextColumn(width="small"),
-            "Тип связи": st.column_config.TextColumn(width="medium"),
-            "Категория": st.column_config.TextColumn(width="small"),
-            "Роли": st.column_config.TextColumn(width="medium"),
-            "Связь с Выготским": st.column_config.TextColumn(width="medium"),
-            "Период взаимодействия": st.column_config.TextColumn(width="small"),
-            "Группы и контексты": st.column_config.TextColumn(width="medium"),
-            "Основной вклад": st.column_config.TextColumn(width="large"),
-            "Разночтения и ограничения": st.column_config.TextColumn(width="large"),
-            "Уверенность": st.column_config.NumberColumn(format="%.2f"),
-            "Число источников": st.column_config.NumberColumn(width="small", format="%d"),
-        },
-    )
-    labels = dict(zip(filtered["ID"], filtered["Представитель"], strict=False))
-    person_id = st.selectbox(
-        "Карточка представителя",
-        list(labels),
-        format_func=lambda selected_id: labels[selected_id],
-        key="source_schools_person_card",
-    )
-    person = indexes["persons"][person_id]
-    st.markdown(f"### {get_first_field(person, 'полное_имя', 'имя')}")
-    _write_named_list("Годы жизни", format_life_years(get_first_field(person, "годы_жизни", "даты")))
-    _write_named_list("Тип связи с Выготским", build_person_primary_relation_index(document).get(person_id))
-    _write_named_list("Категория включения как систематизация", person.get("категория_включения"))
-    _write_named_list("Роли", person.get("роль_в_школе"))
-    _write_named_list("Связь с Выготским", person.get("статус_связи_с_выготским"))
-    _write_named_list("Период взаимодействия", person.get("период_взаимодействия"))
-    _render_person_source_notes(person, indexes)
-    if has_canonical_assignments(document):
-        classifications = build_person_dimension_labels(document)[str(person_id)]
-        for dimension, title in (("historical_group", "Группы и контексты"), ("period", "Периоды развития"), ("research_direction", "Научные направления")):
-            _write_named_list(title, classifications[dimension] or ["Не размечено / недостаточно источниковых данных"])
-        st.markdown("#### Основания классификационных назначений")
-        value_labels = {
-            (dimension, value.id.split(":", 1)[1]): value.label
-            for dimension, values in build_supplementary_dimension_catalog(document).items() for value in values
-        }
-        for assignment in document["школа"]["классификационные_назначения"]:
-            if assignment.get("персона") != person_id:
-                continue
-            status_label = {
-                "подтверждено": "подтверждено",
-                "интерпретация": "редакторская или классификационная интерпретация",
-                "не_проверено": "не проверено",
-            }[assignment["статус"]]
-            st.write(f"**{value_labels.get((assignment['измерение'], assignment['значение']), assignment['значение'])}:** {status_label}.")
-            _write_named_list("Примечание", assignment.get("примечание"))
-            for attribution in assignment.get("источниковые_атрибуции", []):
-                source = indexes["sources"].get(attribution.get("идентификатор_источника"), {})
-                st.write(f"{_source_label(source)}; {attribution.get('локатор', '')}. {attribution.get('утверждение', '')}")
-                if attribution.get("подтверждение"):
-                    st.write(_evidence_summary(attribution["подтверждение"], indexes))
-    else:
-        _write_named_list("Группы и контексты", person.get("группы_и_контексты"))
-    _write_named_list("Основной вклад", get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"))
-    _write_named_list("Уверенность", person.get("уверенность"))
-    st.markdown("#### Источниковые атрибуции")
-    for attribution in person.get("источниковые_атрибуции", []):
-        source_number = build_source_number_index(document).get(attribution["идентификатор_источника"], "?")
-        source = indexes["sources"][attribution["идентификатор_источника"]]
-        evidence = indexes["evidence"][attribution["подтверждение"]]
-        st.write(
-            f"**[{source_number}] {_source_label(source)}:** {attribution.get('формулировка_роли')} / "
-            f"систематизация: {attribution.get('нормализованная_роль')} — "
-            f"{_evidence_status(attribution.get('явное_утверждение'))}. "
-            f"Подтверждение: {evidence.get('содержание_свидетельства')} ({evidence.get('локатор')})."
-        )
+def render_overview_section(document,indexes,*,lineage_links=None,person_links=None,school_link=None,presentation="tree"):
+    lineage_links=lineage_links or {};person_links=person_links or {}
+    _render_school_description(document)
+    people=build_people_dataframe(document)
+    selected,active,treatment=_filters(document,people)
+    selected_ids=set(selected["id"])
+    hidden=set(people["id"])-selected_ids if active and treatment=="hide" else None
+    if presentation in {"tree","together"}:
+        st.subheader("Структура школы")
+        tree=build_source_school_overview_tree(document,highlighted_person_ids=selected_ids if active else None,
+            hidden_person_ids=hidden,lineage_links=lineage_links,person_links=person_links,school_link=school_link)
+        markup,height=build_markmap_html(tree.graph,tree.root_id,branching_mode="bidirectional")
+        components.html(markup,height=height,scrolling=False)
+        if active and selected.empty:st.info("По выбранным условиям никто не найден. Структура дерева сохранена.")
+    if presentation in {"table","together"}:
+        st.subheader("Табличное представление")
+        shown=selected if active and treatment=="hide" else people
+        _render_table(document,shown,person_links=person_links,lineage_links=lineage_links,
+            highlighted_ids=selected_ids if active and treatment=="highlight" else None)
 
 
-def render_groups_and_chronology_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
-    """Отрисовывает группы, направления, поколения и хронологию."""
-    school = normalize_source_school_document(document)["школа"]
-    structure = school["внутренняя_структура"]
-    st.subheader("Исследовательские группы")
-    for group in structure.get("исследовательские_группы", []):
-        with st.expander(as_display_text(group.get("название", "Группа"))):
-            _write_named_list("Период", group.get("период"))
-            st.write("**Участники:** " + "; ".join(resolve_person_names(group.get("участники", []), indexes["persons"])))
-            _render_assignment_status_note(document, "historical_group", str(group.get("id")))
-            for evidence_id in group.get("подтверждения", []):
-                st.write(_evidence_summary(evidence_id, indexes))
-    st.subheader("Направления")
-    for direction in structure.get("направления", []):
-        with st.expander(as_display_text(get_first_field(direction, "название", "название_направления", default="Направление"))):
-            _write_named_list("Описание", direction.get("описание"))
-            ids = as_list(get_first_field(direction, "представители", "участники"))
-            st.write("**Представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
-            _render_assignment_status_note(document, "research_direction", str(direction.get("id")))
-            for evidence_id in direction.get("подтверждения", []):
-                st.write(_evidence_summary(evidence_id, indexes))
-    st.subheader("Поколения")
-    for generation in structure.get("поколения", []):
-        ids = as_list(get_first_field(generation, "представители", "участники"))
-        st.write(f"**{as_display_text(generation.get('название'))}:** {'; '.join(resolve_person_names(ids, indexes['persons']))}")
-    st.subheader("Периоды развития")
-    for period in school.get("хронология", {}).get("периоды_развития", []):
-        ids = as_list(get_first_field(period, "участники", "персоны", "основные_представители"))
-        with st.expander(as_display_text(get_first_field(period, "название", "название_периода", default="Период"))):
-            _write_named_list("Период", get_first_field(period, "период", "временной_диапазон"))
-            _write_named_list("Описание", period.get("описание"))
-            if has_canonical_assignments(document):
-                st.write("**Все размеченные участники:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
-                ids = as_list(period.get("основные_представители"))
-            st.write("**Основные представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
-            _render_assignment_status_note(document, "period", str(period.get("id")))
+def render_person_card(document,indexes,person_id,*,person_links=None,lineage_links=None):
+    person_links=person_links or {};lineage_links=lineage_links or {}
+    people={p["id"]:p for p in document["объекты"]["персоны"]}
+    person=people.get(person_id)
+    if person is None:
+        st.warning("Персона с таким идентификатором в выбранной школе не найдена.")
+        return False
+    st.subheader(person["имя"])
+    st.caption("Карточка в школе: "+document["школа"]["каноническое_название"])
+    member=membership_index(document).get(person_id,{})
+    st.caption(_DECISION.get(member.get("решение"),"Состав не определён")+" · "+_MEMBERSHIP.get(member.get("отношение_к_школе"),""))
+    identification=person.get("идентификация",{})
+    if identification.get("статус")!="установлена":st.warning("Идентификация: "+identification.get("статус","не установлена").replace("_"," "))
+    if person.get("варианты_имени"):st.write("Другие написания: "+"; ".join(a["написание"] for a in person["варианты_имени"]))
+    if person.get("примечание"):st.write(person["примечание"])
+    link=_anchor("Открыть отдельную карточку ↗",person_links.get(person_id))
+    icon=_tree_icon(lineage_links.get(person_id))
+    st.markdown(link+(" · "+icon+" Научное руководство" if icon else ""),unsafe_allow_html=True)
+    if not icon:st.caption("Дерево научного руководства для этой персоны пока не сопоставлено с базой.")
+    tabs=st.tabs(["Сведения","Классификации","Связи","Источники и подтверждения","Разночтения"])
+    with tabs[0]:
+        records=[r for r in accepted_information(document,person_id,include_variants=True)]
+        if not records:st.info("Индивидуальные сведения пока не добавлены.")
+        for record in records:_render_record(document,record,show_label=True)
+    with tabs[1]:
+        defs=dimension_definitions(document)
+        assignments=[a for a in document["классификационные_назначения"] if a["персона"]==person_id]
+        if not assignments:st.info("Классификационные отнесения пока отсутствуют.")
+        for a in assignments:
+            definition=defs[a["измерение"]]
+            values={v["id"]:v["название"] for v in definition.get("значения",definition.get("категории",[]))}
+            st.markdown("**"+definition["название"]+"**: "+values[a["значение"]])
+            st.caption(_DECISION[a["решение"]]+" · "+_NATURE[a["характер"]]+" · "+_STATUS[a["проверка"]["статус"]])
+            if a.get("интервалы"):st.write("; ".join(format_value({"вид":"интервал","значение":i}) for i in a["интервалы"]))
+            st.caption(_basis_note(document,_basis_ids(document,a)))
+            if a.get("примечание"):st.write(a["примечание"])
+    with tabs[2]:
+        entities={**people,**{o["id"]:o for o in document["объекты"]["прочие"]},document["школа"]["идентификатор_школы"]:document["школа"]}
+        labels={x["код"]:x["название"] for x in document["словари"]["типы_связей"]}
+        relations=[r for r in document["связи"] if person_id in (r["от"],r["к"]) and r["решение"]=="принято"]
+        if not relations:st.info("Индивидуальные отношения пока не добавлены.")
+        for r in relations:
+            def entity(ident):
+                item=entities[ident];name=item.get("имя") or item.get("название") or item.get("каноническое_название","")
+                return _anchor(name,person_links.get(ident))
+            st.markdown(entity(r["от"])+" → "+escape(labels[r["тип"]])+" → "+entity(r["к"]),unsafe_allow_html=True)
+            if r.get("формулировка_источника"):st.write(r["формулировка_источника"])
+            if r.get("нормализованная_роль"):st.caption(r["нормализованная_роль"])
+            st.caption(_basis_note(document,_basis_ids(document,r)))
+    with tabs[3]:
+        st.markdown("**Источниковые атрибуции**")
+        ids=set(person_basis_ids(document,person_id))
+        bases=[b for b in document["основания"] if b["id"] in ids]
+        _render_bases(document,bases,key="person_"+person_id)
+    with tabs[4]:
+        related_records={"персона":{person_id},
+            "связь":{r["id"] for r in document["связи"] if person_id in (r["от"],r["к"])},
+            "состав":{m["id"] for m in document["состав"] if m["персона"]==person_id},
+            "назначение":{a["id"] for a in document["классификационные_назначения"] if a["персона"]==person_id}}
+        subjects={person_id,*related_records["связь"]}
+        related_records["сведение"]={r["id"] for r in document["сведения"] if r["субъект"] in subjects}
+        disagreements=[x for x in document["редактура"]["разночтения"]
+            if any(ref["id"] in related_records.get(ref["реестр"],set()) for v in x["варианты"] for ref in v["записи"])]
+        if not disagreements:st.info("Адресные разночтения для этой карточки не указаны.")
+        for item in disagreements:_render_disagreement(document,item)
+    return True
 
 
-def render_ideas_and_directions_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
-    """Отрисовывает идеи и направления."""
-    school = normalize_source_school_document(document)["школа"]
-    ideas = school.get("идеи_и_направления", {})
-    theoretical = get_first_field(school, "теоретические_основания", default=ideas.get("теоретические_основания", {}))
-    main_idea = school.get("основная_идея")
-    _write_named_list("Основная идея", main_idea)
-    _write_named_list("Теоретические основания", theoretical)
-    _write_named_list("Ключевые понятия", get_first_field(theoretical, "понятия", "ключевые_понятия", "основные_понятия", default=ideas.get("ключевые_понятия")))
-    _write_named_list("Теории", get_first_field(theoretical, "теории", default=ideas.get("теории")))
-    _write_named_list("Методы", get_first_field(theoretical, "методы", default=ideas.get("методы")))
-    _write_named_list("Интеллектуальные источники", get_first_field(theoretical, "интеллектуальные_источники", "источники_идей", default=ideas.get("интеллектуальные_источники")))
-    _write_named_list("Основные результаты", get_first_field(school, "основные_результаты", default=ideas.get("основные_результаты")))
-    _write_named_list("Связанные школы", get_first_field(school, "связи_с_другими_школами", "связанные_школы", default=ideas.get("связанные_школы")))
-    for direction in school["внутренняя_структура"].get("направления", []):
-        with st.expander(as_display_text(get_first_field(direction, "название", "название_направления", default="Направление"))):
-            _write_named_list("Описание", direction.get("описание"))
-            ids = as_list(get_first_field(direction, "представители", "участники"))
-            st.write("**Представители:** " + "; ".join(resolve_person_names(ids, indexes["persons"])))
-            _render_assignment_status_note(document, "research_direction", str(direction.get("id")))
-            for evidence_id in direction.get("подтверждения", []):
-                st.write(_evidence_summary(evidence_id, indexes))
+def render_people_section(document,indexes,*,person_links=None,lineage_links=None):
+    people=build_people_dataframe(document)
+    selected,active,treatment=_filters(document,people,scope="people")
+    st.caption(f"Найдено представителей и связанных лиц: {len(selected)}")
+    shown=selected if active and treatment=="hide" else people
+    _render_table(document,shown,person_links=person_links or {},lineage_links=lineage_links or {},
+        highlighted_ids=set(selected["id"]) if active and treatment=="highlight" else None,scope="people")
+    candidates=build_candidates_dataframe(document)
+    with st.expander(f"Кандидаты на включение ({len(candidates)})"):
+        if candidates.empty:st.info("Кандидатов нет.")
+        else:_render_table(document,candidates,person_links=person_links or {},lineage_links=lineage_links or {},scope="candidates")
+    all_people={p["id"]:p for p in document["объекты"]["персоны"]}
+    options=list(selected["id"])
+    selected_person=st.selectbox("Карточка персоны",options,index=None,format_func=lambda ident:all_people[ident]["имя"],key="source_schools_card_"+document["школа"]["идентификатор_школы"])
+    if selected_person:render_person_card(document,indexes,selected_person,person_links=person_links,lineage_links=lineage_links)
 
 
-def render_sources_and_evidence_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
-    """Отрисовывает источники и подтверждения."""
-    st.subheader("Список использованных источников")
-    st.caption(
-        "Библиографические описания приведены в формате, близком к ГОСТ; автоматическая сертифицированная "
-        "проверка ГОСТ не выполняется. Дата обращения показывается для электронных источников."
-    )
-    for row in build_numbered_bibliography(document):
-        st.markdown(f"{row['№']}. {row['описание']}")
-        if _safe_url(row.get("url")):
-            st.link_button("Открыть источник", row["url"], key=f"source_schools_open_source_{row['№']}")
-    with st.expander("Таблица источников", expanded=False):
-        st.dataframe(build_sources_dataframe(document).drop(columns=["ID"]), hide_index=True, use_container_width=True)
-    evidence_dataframe = build_evidence_dataframe(document)
-    source_filter = st.multiselect(
-        "Источник подтверждения",
-        sorted(evidence_dataframe["Источник"].unique()),
-        key="source_schools_evidence_sources",
-    )
-    type_filter = st.multiselect(
-        "Тип утверждения",
-        sorted(evidence_dataframe["Тип утверждения"].unique()),
-        key="source_schools_evidence_types",
-    )
-    status_filter = st.multiselect(
-        "Статус утверждения",
-        ["Явное утверждение", "Интерпретация"],
-        key="source_schools_evidence_status",
-    )
-    filtered = evidence_dataframe.copy()
-    if source_filter:
-        filtered = filtered[filtered["Источник"].isin(source_filter)]
-    if type_filter:
-        filtered = filtered[filtered["Тип утверждения"].isin(type_filter)]
-    if status_filter:
-        filtered = filtered[filtered["Статус"].isin(status_filter)]
-    st.dataframe(filtered.drop(columns=["ID"]), hide_index=True, use_container_width=True)
-    for _, row in filtered.iterrows():
-        with st.expander(str(row["Содержание свидетельства"])[:80]):
-            st.write(f"**{row['Источник']}:**")
-            st.write(f"**Содержание свидетельства:** {row['Содержание свидетельства']}")
-            st.write(f"**Локатор:** {row['Локатор']}")
-            st.write(f"**Тип утверждения:** {row['Тип утверждения']}")
-            st.write(f"**Статус:** {row['Статус']}")
-            st.write(f"**Уверенность:** {row['Уверенность']}")
+def render_groups_and_chronology_section(document,indexes):
+    st.subheader("Исследовательские группы и хронология")
+    primary=document["классификации"]["основное_деление"]
+    if primary:
+        with st.expander(primary["название"]):
+            for rule in primary["правила_отнесения"]:st.write(rule)
+            for c in primary["категории"]:st.markdown("**"+c["название"]+"**: "+c["критерий"])
+    for obj in document["объекты"]["прочие"]:
+        if obj["тип"] in {"коллектив","организация","место","период","событие","школа"}:
+            with st.expander(obj["название"]):
+                st.caption(obj["тип"].capitalize()+" · "+str(obj.get("подтип") or ""))
+                if obj.get("примечание"):st.write(obj["примечание"])
+                for r in accepted_information(document,obj["id"],include_variants=True):_render_record(document,r,show_label=True)
+                st.caption(_basis_note(document,obj["идентификация"]["основания"]))
 
 
-def render_disagreements_and_quality_section(document: Mapping[str, Any], indexes: Mapping[str, Any]) -> None:
-    """Отрисовывает расхождения и качество данных."""
-    school = document["школа"]
-    quality = document["контроль_качества"]
-    for disagreement in school.get("историографические_расхождения", []):
-        with st.expander(disagreement.get("вопрос", "Расхождение")):
-            for position in disagreement.get("позиции", []):
-                source_names = [
-                    _source_label(indexes["sources"][source_id])
-                    for source_id in position.get("источники", [])
-                    if source_id in indexes["sources"]
-                ]
-                st.write(f"**Источникозависимая интерпретация:** {get_first_field(position, 'формулировка', 'позиция')}")
-                st.write("**Источники:** " + "; ".join(source_names))
-                _write_named_list("Страница / раздел", position.get("локатор"))
-            _write_named_list("Ограничение вывода", disagreement.get("ограничение"))
-    hypotheses = school.get("журнал_классификационных_гипотез", [])
-    if hypotheses:
-        with st.expander("Принадлежности, не включённые в фильтры"):
-            catalog_labels = {
-                (dimension, value.id.split(":", 1)[1]): value.label
-                for dimension, values in build_supplementary_dimension_catalog(document).items()
-                for value in values
-            }
-            for hypothesis in hypotheses:
-                person = indexes["persons"].get(hypothesis.get("персона"), {})
-                label = catalog_labels.get((hypothesis.get("измерение"), hypothesis.get("значение")), "Неустановленная принадлежность")
-                st.write(f"**{get_first_field(person, 'полное_имя', 'имя')}: {label}**")
-                _write_named_list("Решение", hypothesis.get("решение"))
-                _write_named_list("Ограничение", hypothesis.get("ограничение"))
-                for attribution in hypothesis.get("источниковые_атрибуции", []):
-                    source = indexes["sources"].get(attribution.get("идентификатор_источника"), {})
-                    st.write(f"{_source_label(source)}; {attribution.get('локатор', '')}. {attribution.get('утверждение', '')}")
-    review_items = school.get("журнал_проверки_источников", [])
-    if review_items:
-        st.subheader("Результаты проверки источников")
-        for item in review_items:
-            with st.expander(item.get("предмет", "Результат проверки")):
-                _write_named_list("Дата проверки", item.get("дата"))
-                _write_named_list("Что сообщает источник", item.get("выявлено"))
-                _write_named_list("Принятое решение", item.get("принятое_решение"))
-                _write_named_list("Ограничения", item.get("ограничения"))
-                for attribution in item.get("источниковые_атрибуции", []):
-                    source = indexes["sources"].get(attribution.get("идентификатор_источника"), {})
-                    st.write(f"{_source_label(source)}; с. {attribution.get('печатная_страница')}; {attribution.get('локатор', '')}; {attribution.get('тип_свидетельства', '')}.")
+def _school_idea_records(document):
+    """Выбирает содержательные сведения по разделам словаря.
+
+    Стандартные поля задают опорные разделы. Пользовательские поля могут
+    относиться к ним либо к разделам идей, теорий, методов и результатов;
+    их коды не требуют отдельного толкования для каждой школы.
+    """
+    definitions=field_definitions(document)
+    standard={"main_ideas","contribution","author_assessment"}
+    def normalize(label):return " ".join(str(label).casefold().replace("ё","е").replace("_"," ").split())
+    stems=("иде","теор","теорет","метод","понят","результ","вклад","оценк","проблем","гипотез",
+           "idea","theor","method","concept","result","contribut","assess","problem","hypothes")
+    declared=[*document["отображение"].get("разделы_паспорта",[]),
+              *(definition.get("раздел","") for definition in definitions.values())]
+    sections={normalize(label) for label in declared
+              if any(word.startswith(stems) for word in normalize(label).split())}
+    sections.update(normalize(definitions[code]["раздел"]) for code in standard if code in definitions)
+    sid=document["школа"]["идентификатор_школы"]
+    return [record for record in accepted_information(document,sid,include_variants=True)
+            if record["поле"] in standard or normalize(definitions[record["поле"]].get("раздел","")) in sections]
+
+
+def render_ideas_and_directions_section(document,indexes):
+    st.subheader("Основная идея и направления")
+    for r in _school_idea_records(document):_render_record(document,r,show_label=True)
+    for obj in document["объекты"]["прочие"]:
+        if obj["тип"] in {"направление","метод","понятие","результат","работа"}:
+            with st.expander(obj["название"]):
+                st.caption(obj["тип"].capitalize())
+                if obj.get("примечание"):st.write(obj["примечание"])
+                for r in accepted_information(document,obj["id"],include_variants=True):_render_record(document,r,show_label=True)
+                st.caption(_basis_note(document,obj["идентификация"]["основания"]))
+
+
+def _render_bases(document,bases,*,key):
+    if not bases:
+        st.info("Адресные подтверждения пока не добавлены.");return
+    sources={s["id"]:s for s in document["источники"]}
+    numbers=build_source_number_index(document)
+    sid=document["школа"]["идентификатор_школы"]
+    page_key="source_schools_bases_page_"+sid+"_"+key
+    pages=max(1,(len(bases)+19)//20)
+    if st.session_state.get(page_key,1)>pages:st.session_state[page_key]=1
+    page=st.number_input("Страница подтверждений",min_value=1,max_value=pages,step=1,key=page_key)
+    st.caption(f"Подтверждений: {len(bases)}")
+    for b in bases[(page-1)*20:page*20]:
+        source=sources[b["источник"]]
+        with st.expander(f"Источник № {numbers[source['id']]} · {format_locator(b.get('локатор')) or 'Место не уточнено'}"):
+            st.write(source["библиографическое_описание"])
+            for access in source.get("доступы",[]):
+                if _safe_url(access.get("url")):
+                    st.markdown(_anchor("Открыть источник ↗ · "+access["назначение"].replace("_"," "),access["url"]),unsafe_allow_html=True)
+            st.caption(_STATUS[b["проверка"]["статус"]]+" · "+b["тип_свидетельства"].replace("_"," "))
+            fragment=b.get("фрагмент")
+            if fragment:
+                st.caption({"цитата":"Цитата","пересказ":"Пересказ","сводка":"Сводка"}[fragment["вид"]])
+                st.write(fragment["текст"])
+            else:st.caption("Источник и локатор указаны; текстовый фрагмент не воспроизведён.")
+            for x in b.get("ограничения",[]):st.warning(x)
+
+
+def render_sources_and_evidence_section(document,indexes):
+    st.subheader("Использованные источники")
+    for item in build_numbered_bibliography(document):st.write(f"{item['№']}. {item['описание']}")
+    st.caption("Дата обращения относится к конкретной ссылке, если она указана в исходных данных.")
+    sources={s["id"]:s for s in document["источники"]}
+    chosen=st.multiselect("Источник подтверждения",list(sources),format_func=lambda k:sources[k]["название"],key="source_schools_basis_sources_"+document["школа"]["идентификатор_школы"])
+    bases=[b for b in document["основания"] if not chosen or b["источник"] in chosen]
+    _render_bases(document,bases,key="all")
+
+
+def _render_disagreement(document,item):
+    with st.expander(item["тема"]):
+        st.caption(item["статус"].replace("_"," "))
+        for variant in item["варианты"]:
+            st.write(variant["формулировка"])
+            st.caption(_basis_note(document,variant["основания"]))
+        if item.get("редакторское_решение"):st.info(item["редакторское_решение"])
+
+
+def render_disagreements_and_quality_section(document,indexes):
     st.subheader("Качество данных")
-    labels = {
-        "использовано_несколько_источников": "Использовано несколько источников",
-        "расхождения_источников_сохранены": "Расхождения между источниками сохранены",
-        "прямые_и_косвенные_связи_разделены": "Прямые и косвенные связи разделены",
-        "ссылки_разрешены": "Ссылки разрешены",
-        "сводка_согласована": "Сводка согласована",
-    }
-    checks = dict(quality.get("проверки", {}))
-    for key in ("использовано_несколько_источников", "расхождения_источников_сохранены", "прямые_и_косвенные_связи_разделены"):
-        if key in quality:
-            checks[key] = quality[key]
-    for key, value in checks.items():
-        message = f"{labels.get(key, as_display_text(key))}: {'да' if value else 'требует проверки'}"
-        if value:
-            st.success(message)
-        else:
-            st.warning(message)
-    _write_named_list("Недостаточно сведений", get_first_field(quality, "недостаточно_сведений", "поля_с_недостаточной_информацией"))
-    _write_named_list("Интерпретативные выводы", get_first_field(quality, "интерпретативные_выводы", "потенциально_интерпретативные_выводы"))
-    _write_named_list("Примечания", get_first_field(quality, "примечания", "замечания"))
-    metadata = get_first_field(quality, "метаданные_извлечения", default={})
-    school_metadata = get_first_field(school, "метаданные_извлечения", default={})
-    if school_metadata:
-        metadata = {**metadata, **school_metadata}
-    for key, value in metadata.items():
-        _write_named_list(as_display_text(str(key)), value)
-    with st.expander("Кандидаты для дальнейшего расширения данных"):
-        st.caption("Эти персоны или группы пока не входят в проверенный основной список.")
-        st.write(as_display_text(school.get("кандидаты_на_расширение")))
+    st.caption("Редакционное состояние: "+document["метаданные"]["статус"].replace("_"," "))
+    for note in document["редактура"]["ограничения"]:st.warning(note)
+    st.subheader("Разночтения")
+    for item in document["редактура"]["разночтения"]:_render_disagreement(document,item)
+    st.subheader("Классификационные гипотезы")
+    people={p["id"]:p["имя"] for p in document["объекты"]["персоны"]}
+    for a in document["классификационные_назначения"]:
+        if a["решение"]!="гипотеза":continue
+        st.write(people[a["персона"]])
+        if a.get("примечание"):st.write(a["примечание"])
+        st.caption(_basis_note(document,_basis_ids(document,a)))
+    with st.expander("Журнал редакторских решений"):
+        for item in document["редактура"]["журнал_решений"]:
+            st.markdown("**"+item["предмет"]+"**")
+            for field,label in [("выявлено","Выявлено"),("принятое_решение","Решение"),("результат","Результат")]:
+                if item.get(field):st.write(label+": "+item[field])

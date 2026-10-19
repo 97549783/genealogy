@@ -22,11 +22,12 @@ from __future__ import annotations
 import json
 import textwrap
 from html import escape
-from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import matplotlib.pyplot as plt
 import networkx as nx
+
+from core.source_schools.links import _safe_link_url, tree_icon_link
 
 _BRANCH_PALETTE: List[str] = [
     "#ef5350", "#ab47bc", "#5c6bc0", "#29b6f6", "#26a69a",
@@ -349,29 +350,59 @@ def _count_levels(G: nx.DiGraph, root: str, levels: int = 2) -> int:
 
 
 def _markmap_node_content(G: nx.DiGraph, node: str) -> str:
-    """Добавляет безопасную ссылку к подписи, сохраняя обычный текст остальных узлов."""
+    """Разделяет ссылки на карточку и дерево руководства; экранирует текст источников."""
     attributes = G.nodes[node]
     label = escape(str(attributes.get("label", node)))
-    href = str(attributes.get("href") or "")
-    if urlsplit(href).scheme not in {"http", "https"}:
-        return label
-    title = escape(str(attributes.get("link_title") or "Открыть дерево научного руководства в новой вкладке"), quote=True)
-    return (
-        f'<a class="markmap-lineage-link" href="{escape(href, quote=True)}" '
-        f'target="_blank" rel="noopener noreferrer" title="{title}">{label}</a>'
-    )
+    source_link = attributes.get("link_kind") in {"source_person", "source_school"}
+    href = _safe_link_url(str(attributes.get("href") or ""), allow_relative=source_link)
+    content = label
+    if href:
+        default_title = "Открыть карточку участника школы в новой вкладке" if source_link else "Открыть дерево научного руководства в новой вкладке"
+        title = escape(str(attributes.get("link_title") or default_title), quote=True)
+        css_class = "markmap-source-link" if source_link else "markmap-lineage-link"
+        content = (
+            f'<a class="{css_class}" href="{escape(href, quote=True)}" '
+            f'target="_blank" rel="noopener noreferrer" title="{title}">{label}</a>'
+        )
+    if source_link or attributes.get("lineage_href"):
+        content += tree_icon_link(str(attributes.get("lineage_href") or ""),
+                                  str(attributes.get("lineage_title") or "Открыть дерево научного руководства в новой вкладке"))
+    return content
+
+
+def _script_json(value: Any) -> str:
+    """Исключает закрывающие HTML-теги из JSON, встраиваемого в скрипт."""
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 _MARKMAP_LINK_CSS = """
-  a.markmap-lineage-link {
+  a.markmap-lineage-link, a.markmap-source-link {
     color: inherit;
     text-decoration: underline;
     text-underline-offset: 0.15em;
     cursor: pointer;
   }
-  #mm-root-label a.markmap-lineage-link {
+  a.source-school-tree-icon { text-decoration: none; }
+  a.markmap-lineage-link:focus-visible, a.markmap-source-link:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  #mm-root-label a.markmap-lineage-link, #mm-root-label a.markmap-source-link {
     pointer-events: auto;
   }
+"""
+
+_MARKMAP_LINK_JS = """
+// Обычные ссылки сохраняют работу Enter, клавиш-модификаторов и target=_blank.
+// Их события не передаются обработчикам перемещения и сворачивания Markmap.
+['click', 'pointerdown', 'keydown'].forEach(type => {
+  document.addEventListener(type, event => {
+    if (event.target.closest && event.target.closest('a.markmap-source-link, a.markmap-lineage-link')) {
+      event.stopPropagation();
+    }
+  }, true);
+});
 """
 
 
@@ -497,7 +528,7 @@ def build_markmap_html_bidirectional(
     left_children, right_children = _split_markmap_branches(branches)
 
     palette_js = json.dumps(_BRANCH_PALETTE)
-    root_json = json.dumps(_markmap_node_content(G, root), ensure_ascii=False)
+    root_json = _script_json(_markmap_node_content(G, root))
     root_color = str(G.nodes[root].get("color", "#37474f"))
 
     def _make_subtree_json(children: List[Dict[str, Any]]) -> str:
@@ -505,7 +536,7 @@ def build_markmap_html_bidirectional(
             "content": "",
             "children": children,
         }
-        return json.dumps(root_node, ensure_ascii=False)
+        return _script_json(root_node)
 
     left_json = _make_subtree_json(left_children)
     right_json = _make_subtree_json(right_children)
@@ -596,6 +627,7 @@ def build_markmap_html_bidirectional(
 <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.0/dist/browser/index.js"></script>
 <script>
+{_MARKMAP_LINK_JS}
 const {{ Markmap }} = window.markmap;
 
 const palette  = {palette_js};
@@ -637,6 +669,8 @@ function isHiddenDatum(datum) {{
 function applyVisibility(svg) {{
   d3.select(svg).selectAll('g.markmap-node')
     .style('opacity', datum => isHiddenDatum(datum) ? 0 : 1)
+    .style('visibility', datum => isHiddenDatum(datum) ? 'hidden' : null)
+    .attr('aria-hidden', datum => isHiddenDatum(datum) ? 'true' : null)
     .style('pointer-events', datum => isHiddenDatum(datum) ? 'none' : null);
   d3.select(svg).selectAll('path.markmap-link')
     .style('opacity', datum => isHiddenDatum(datum && datum.target ? datum.target : datum) ? 0 : 1);
@@ -714,7 +748,7 @@ def build_markmap_html_unidirectional(
 
     visited: Set[str] = set()
     tree_data = _build_markmap_node(G, root, visited, depth=0, max_depth=max_depth)
-    tree_json = json.dumps(tree_data, ensure_ascii=False)
+    tree_json = _script_json(tree_data)
     palette_js = json.dumps(_BRANCH_PALETTE)
 
     html = f"""<!DOCTYPE html>
@@ -742,6 +776,7 @@ def build_markmap_html_unidirectional(
 <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/markmap-view@0.18.0/dist/browser/index.js"></script>
 <script>
+{_MARKMAP_LINK_JS}
 const {{ Markmap }} = window.markmap;
 const palette = {palette_js};
 const data = {tree_json};
@@ -765,6 +800,8 @@ function isHiddenDatum(datum) {{
 function applyVisibility(svg) {{
   d3.select(svg).selectAll('g.markmap-node')
     .style('opacity', datum => isHiddenDatum(datum) ? 0 : 1)
+    .style('visibility', datum => isHiddenDatum(datum) ? 'hidden' : null)
+    .attr('aria-hidden', datum => isHiddenDatum(datum) ? 'true' : null)
     .style('pointer-events', datum => isHiddenDatum(datum) ? 'none' : null);
   d3.select(svg).selectAll('path.markmap-link')
     .style('opacity', datum => isHiddenDatum(datum && datum.target ? datum.target : datum) ? 0 : 1);

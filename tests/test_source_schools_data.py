@@ -1,383 +1,161 @@
+"""Native v2.1 loading, source integrity and migration-preservation contract."""
 from __future__ import annotations
-
 import copy
+import json
+from collections import Counter
 
 import pytest
 
 from core.source_schools.data import (
-    SOURCE_SCHOOLS_DATA_DIR,
-    SourceSchoolDataError,
-    build_source_school_index,
-    load_source_school_catalog,
-    load_source_school_file,
+    SOURCE_SCHOOLS_DATA_DIR, SourceSchoolDataError, build_source_school_index,
+    load_source_school_catalog, load_source_school_file, normalize_source_school_document,
     validate_source_school_document,
 )
-
-PATH = SOURCE_SCHOOLS_DATA_DIR / "vygotsky_school_sources_demo.v1.json"
-
-
-def load_demo_document():
-    return load_source_school_file(PATH)
+from source_school_fixtures import TEMPLATE, VYGOTSKY_PATH, load_vygotsky, synthetic_document
 
 
-def make_canonical_document():
-    return {
-        "школа": {
-            "идентификатор_школы": "synthetic_school",
-            "каноническое_название": "Синтетическая школа",
-            "персоны": [
-                {
-                    "id": "person_alpha",
-                    "полное_имя": "Альфа Исследователь",
-                    "категория_включения": "ядро",
-                    "роль_в_школе": ["участник"],
-                    "статус_связи_с_выготским": "демонстрационная связь",
-                    "основной_вклад": "Проверка связности",
-                    "уверенность": 0.9,
-                    "подтверждения": ["evidence_alpha"],
-                    "источниковые_атрибуции": [
-                        {
-                            "идентификатор_источника": "source_alpha",
-                            "подтверждение": "evidence_alpha",
-                            "формулировка_роли": "участник",
-                            "нормализованная_роль": "участник",
-                            "явное_утверждение": True,
-                            "уверенность": 0.9,
-                        }
-                    ],
-                },
-                {
-                    "id": "person_beta",
-                    "полное_имя": "Бета Исследователь",
-                    "категория_включения": "последователь",
-                    "роль_в_школе": ["последователь"],
-                    "статус_связи_с_выготским": "опосредованная связь",
-                    "основной_вклад": "Проверка агрегатов",
-                    "уверенность": 0.8,
-                    "подтверждения": ["evidence_beta"],
-                    "источниковые_атрибуции": [
-                        {
-                            "идентификатор_источника": "source_beta",
-                            "подтверждение": "evidence_beta",
-                            "формулировка_роли": "последователь",
-                            "нормализованная_роль": "последователь",
-                            "явное_утверждение": False,
-                            "уверенность": 0.8,
-                        }
-                    ],
-                },
-            ],
-            "источники": [
-                {
-                    "id": "source_alpha",
-                    "краткое_название": "Источник Альфа",
-                    "библиографическое_описание": "Описание источника Альфа",
-                    "url": "https://example.org/alpha",
-                },
-                {
-                    "id": "source_beta",
-                    "краткое_название": "Источник Бета",
-                    "библиографическое_описание": "Описание источника Бета",
-                },
-            ],
-            "подтверждения": [
-                {
-                    "id": "evidence_alpha",
-                    "идентификатор_источника": "source_alpha",
-                    "содержание_свидетельства": "Свидетельство Альфа",
-                    "локатор": "с. 1",
-                    "явное_утверждение": True,
-                    "уверенность": 0.9,
-                },
-                {
-                    "id": "evidence_beta",
-                    "идентификатор_источника": "source_beta",
-                    "содержание_свидетельства": "Свидетельство Бета",
-                    "локатор": "с. 2",
-                    "явное_утверждение": False,
-                    "уверенность": 0.8,
-                },
-            ],
-            "внутренняя_структура": {
-                "исследовательские_группы": [
-                    {
-                        "id": "group_alpha",
-                        "название": "Группа Альфа",
-                        "участники": ["person_alpha"],
-                        "подтверждения": ["evidence_alpha"],
-                    }
-                ],
-                "направления": [
-                    {
-                        "название": "Направление Альфа",
-                        "представители": ["person_alpha"],
-                        "подтверждения": ["evidence_alpha"],
-                    }
-                ],
-                "поколения": [{"название": "Поколение", "представители": ["person_beta"]}],
-            },
-            "хронология": {
-                "периоды_развития": [
-                    {"название": "Период", "персоны": ["person_alpha"], "описание": "Описание периода"}
-                ]
-            },
-            "историографические_расхождения": [
-                {
-                    "вопрос": "Вопрос",
-                    "позиции": [{"формулировка": "Позиция", "источники": ["source_alpha"]}],
-                }
-            ],
-        },
-        "демо_представление": {
-            "название_в_выпадающем_списке": "Синтетическая школа",
-            "заголовок_страницы": "Синтетическая школа",
-            "подзаголовок": "Проверка",
-            "рекомендуемые_разделы": ["Обзор"],
-            "методологическое_предупреждение": "Предупреждение",
-            "сводные_показатели": {
-                "число_персон": 2,
-                "число_источников": 2,
-                "число_подтверждений": 2,
-                "персоны_по_категориям": {"ядро": 1, "последователь": 1},
-            },
-        },
-        "контроль_качества": {
-            "число_персон": 2,
-            "число_источников": 2,
-            "число_подтверждений": 2,
-            "персоны_по_категориям": {"ядро": 1, "последователь": 1},
-        },
-    }
+def test_vygotsky_v2_preserves_composition_names_sources_and_primary_categories():
+    d = load_source_school_file(VYGOTSKY_PATH)
+    assert d['версия_схемы'] == '2.1'
+    assert d['школа']['идентификатор_школы'] == 'vygotsky_cultural_historical_school'
+    assert sum(m['решение']=='включено' for m in d['состав']) == 51
+    assert sum(m['решение']=='кандидат' for m in d['состав']) == 11
+    assert len(d['источники']) == 35
+    assert len(d['основания']) >= 99
+    primary=d['классификации']['основное_деление']
+    assert [c['код'] for c in primary['категории']] == ['A1','A2','A3','A4']
+    assignments=[a for a in d['классификационные_назначения'] if a['измерение']==primary['id'] and a['решение']=='принято']
+    assert Counter(a['значение'] for a in assignments)=={'a1':28,'a2':13,'a3':4,'a4':5}
+    assert len({a['персона'] for a in assignments}) == 50
+    names={p['id']:p['имя'] for p in d['объекты']['персоны']}
+    assert {k:names[k] for k in ['m_b_eidinova','e_i_pashkovskaya','k_i_veresotskaya','a_a_shein']} == {
+        'm_b_eidinova':'Мария Борисовна Эйдинова','e_i_pashkovskaya':'Екатерина Ильинична Пашковская',
+        'k_i_veresotskaya':'Ксения Ивановна Вересотская','a_a_shein':'А. А. Шеин'}
+    by_person={a['персона']:a['значение'] for a in assignments}
+    assert by_person['panteleimon_lyubimov']=='a2'
+    assert by_person['kurt_koffka']==by_person['fedor_shemyakin']=='a3'
+    assert by_person['filipp_bassin']=='a4'
 
 
-def make_full_contract_document():
-    document = make_canonical_document()
-    school = document["школа"]
-    school["дисциплинарная_принадлежность"] = {
-        "области": ["психология"],
-        "ключевые_слова": ["развитие"],
-    }
-    school["основная_идея"] = {
-        "краткая_формулировка": "Краткая формулировка идеи.",
-        "центральная_проблема": "Проблема развития.",
-        "центральная_гипотеза": "Гипотеза развития.",
-        "центральная_теория": "Теория развития.",
-        "центральный_метод": "Метод исследования.",
-        "подтверждения": ["evidence_alpha"],
-    }
-    school["теоретические_основания"] = {
-        "понятия": ["понятие"],
-        "теории": ["теория"],
-        "методы": ["метод"],
-        "интеллектуальные_источники": ["источник идей"],
-    }
-    school["основные_результаты"] = ["результат"]
-    school["связи_с_другими_школами"] = [{"название": "Другая школа", "уверенность": 0.7}]
-    school["представители"] = {"ядро": ["person_alpha"], "последователи": ["person_beta"]}
-    period = school["хронология"]["периоды_развития"][0]
-    period["название_периода"] = period.pop("название")
-    period["временной_диапазон"] = "1924–1934"
-    period["основные_представители"] = period.pop("персоны")
-    school["хронология"]["дата_или_период_возникновения"] = "1924"
-    school["хронология"]["период_активности"] = "1924–1934"
-    school["метаданные_извлечения"] = {"метод_извлечения": "ручная проверка", "общая_уверенность": 0.9}
-    document["контроль_качества"] = {
-        "число_персон": 2,
-        "число_источников": 2,
-        "число_подтверждений": 2,
-        "использовано_несколько_источников": True,
-        "расхождения_источников_сохранены": True,
-        "прямые_и_косвенные_связи_разделены": True,
-        "поля_с_недостаточной_информацией": ["границы"],
-        "потенциально_интерпретативные_выводы": ["роль"],
-        "замечания": ["замечание"],
-    }
-    return document
+def test_catalog_contains_all_six_native_schools_and_no_template():
+    catalog=load_source_school_catalog(SOURCE_SCHOOLS_DATA_DIR)
+    assert {c['school_id'] for c in catalog} == {
+        'vygotsky_cultural_historical_school','bryansk_scientific_philosophical_school','perm_philosophical_school',
+        'russian_noosphere_scientific_school','ural_philosophical_school','rostov_philosophical_school'}
+    assert all(c['label'] and c['school_id'] for c in catalog)
 
 
-def test_vygotsky_json_loads_and_counts():
-    document = load_demo_document()
-    assert document["школа"]["идентификатор_школы"] == "vygotsky_cultural_historical_school"
-    assert document["демо_представление"]["название_в_выпадающем_списке"] == "Лев Семёнович Выготский"
-    assert len(document["школа"]["персоны"]) == 51
-    assert len(document["школа"]["источники"]) == 35
-    assert len(document["школа"]["подтверждения"]) == 99
-    categories = document["школа"]["классификация_связи_с_выготским"]["категории"]
-    assert [category["код"] for category in categories] == ["A1", "A2", "A3", "A4"]
-    assigned = [person_id for category in categories for person_id in category["участники"]]
-    assert len(assigned) == len(set(assigned)) == 50
-    names = {person["id"]: person["полное_имя"] for person in document["школа"]["персоны"]}
-    assert names["m_b_eidinova"] == "Мария Борисовна Эйдинова"
-    assert names["e_i_pashkovskaya"] == "Екатерина Ильинична Пашковская"
-    assert names["k_i_veresotskaya"] == "Ксения Ивановна Вересотская"
-    assert names["a_a_shein"] == "А. А. Шеин"
-    assert names["natalia_menchinskaya"] == "Наталья Александровна Менчинская"
-    assert names["natalia_morozova"] == "Наталья Григорьевна Морозова"
-    assert names["filipp_bassin"] == "Филипп Вениаминович Бассин"
-    assert names["kurt_koffka"] == "Курт Коффка"
-    assert names["panteleimon_lyubimov"] == "Пантелеймон Саввич Любимов"
-    assert names["fedor_shemyakin"] == "Фёдор Николаевич Шемякин"
-    participants = {category["название"]: set(category["участники"]) for category in categories}
-    assert "panteleimon_lyubimov" in participants["Непосредственное научное сотрудничество"]
-    assert "kurt_koffka" in participants["Внешнее научное взаимодействие"]
-    assert "filipp_bassin" in participants["Опосредованная научная преемственность"]
-    assert "fedor_shemyakin" in participants["Внешнее научное взаимодействие"]
+def test_indexes_use_raw_native_registries_including_candidates():
+    d=load_vygotsky(); indexes=build_source_school_index(d)
+    assert len(indexes['persons']) == 62
+    assert len(indexes['sources']) == 35
+    assert set(indexes['evidence']) == {b['id'] for b in d['основания']}
+    assert indexes['persons']['a_a_shein']['имя'] == 'А. А. Шеин'
 
 
-def test_primary_relation_classification_rejects_duplicate_membership():
-    document = load_demo_document()
-    categories = document["школа"]["классификация_связи_с_выготским"]["категории"]
-    categories[1]["участники"].append(categories[0]["участники"][0])
-    with pytest.raises(SourceSchoolDataError, match="включена одновременно"):
-        validate_source_school_document(document)
+def test_optional_primary_and_zero_or_many_facets_are_valid():
+    for primary,n in [(False,0),(False,5),(True,3)]:
+        validate_source_school_document(synthetic_document(primary=primary,facet_count=n))
 
 
-def test_catalog_contains_one_school():
-    catalog = load_source_school_catalog(SOURCE_SCHOOLS_DATA_DIR)
-    assert len(catalog) == 1
-    assert catalog[0]["school_id"] == "vygotsky_cultural_historical_school"
-    assert catalog[0]["label"] == "Лев Семёнович Выготский"
+def test_duplicate_primary_membership_is_rejected():
+    d=synthetic_document(primary=True)
+    a=copy.deepcopy(d['классификационные_назначения'][-2]);a['id']='another_primary';a['значение']='category_beta'
+    d['классификационные_назначения'].append(a)
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
 
 
-def test_cross_references_resolve():
-    indexes = build_source_school_index(load_demo_document())
-    assert len(indexes["persons"]) == 51
-    assert len(indexes["sources"]) == 35
-    assert len(indexes["evidence"]) == 99
+@pytest.mark.parametrize('registry', ['персоны','источники','основания'])
+def test_duplicate_global_ids_are_rejected(registry):
+    d=synthetic_document()
+    rows=d['объекты']['персоны'] if registry=='персоны' else d[registry]
+    rows[1]['id']=rows[0]['id']
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
 
 
-def test_duplicate_person_id_raises():
-    document = make_canonical_document()
-    document["школа"]["персоны"][1]["id"] = document["школа"]["персоны"][0]["id"]
-    with pytest.raises(SourceSchoolDataError, match="повторяющийся идентификатор"):
-        validate_source_school_document(document)
+@pytest.mark.parametrize('mutation', ['person_evidence','evidence_source','assignment_person','assignment_dimension','assignment_value','information_field','center'])
+def test_unknown_live_references_are_rejected(mutation):
+    d=synthetic_document()
+    if mutation=='person_evidence':d['объекты']['персоны'][0]['идентификация']['основания']=['missing_evidence']
+    elif mutation=='evidence_source':d['основания'][0]['источник']='missing_source'
+    elif mutation.startswith('assignment_'):
+        field={'assignment_person':'персона','assignment_dimension':'измерение','assignment_value':'значение'}[mutation]
+        d['классификационные_назначения'][0][field]='missing_reference'
+    elif mutation=='information_field':d['сведения'][0]['поле']='missing_field'
+    else:d['отображение']['центр']['id']='missing_school'
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
 
 
-def test_unknown_evidence_in_person_raises():
-    document = make_canonical_document()
-    document["школа"]["персоны"][0]["подтверждения"] = ["unknown_evidence"]
-    with pytest.raises(SourceSchoolDataError, match="неизвестное подтверждение"):
-        validate_source_school_document(document)
+def test_pdf_file_must_belong_to_the_same_source():
+    d=synthetic_document();d['основания'][0]['файл']='file_beta'
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
 
 
-def test_unknown_source_in_evidence_raises():
-    document = make_canonical_document()
-    document["школа"]["подтверждения"][0]["идентификатор_источника"] = "unknown_source"
-    with pytest.raises(SourceSchoolDataError, match="неизвестный источник"):
-        validate_source_school_document(document)
+@pytest.mark.parametrize('page',[0,11])
+def test_pdf_pages_must_be_positive_and_within_known_file_length(page):
+    d=synthetic_document();d['основания'][0]['локатор']['страницы_pdf']=[page]
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
 
 
-def test_unknown_group_participant_raises():
-    document = make_canonical_document()
-    document["школа"]["внутренняя_структура"]["исследовательские_группы"][0]["участники"].append("unknown_person")
-    with pytest.raises(SourceSchoolDataError, match="Неизвестная персона"):
-        validate_source_school_document(document)
+def test_source_and_locator_are_sufficient_without_invented_quote():
+    d=synthetic_document()
+    assert d['основания'][0]['фрагмент'] is None
+    validate_source_school_document(d)
 
 
-def test_bad_confidence_raises():
-    document = make_canonical_document()
-    document["школа"]["персоны"][0]["уверенность"] = 1.5
-    with pytest.raises(SourceSchoolDataError, match="уверенность"):
-        validate_source_school_document(document)
+def test_unpublished_file_preserves_hash_without_invented_url():
+    d=synthetic_document();f=d['источники'][0]['файлы'][0];f['sha256']='f'*64
+    validate_source_school_document(d)
+    assert f['путь_ресурса'] is None and d['источники'][0]['доступы']==[]
 
 
-def test_stale_summary_raises():
-    document = make_canonical_document()
-    document["демо_представление"]["сводные_показатели"]["число_персон"] = 1
-    with pytest.raises(SourceSchoolDataError, match="Сводные показатели устарели"):
-        validate_source_school_document(document)
+def test_confidence_with_origin_is_validated():
+    d=synthetic_document();d['объекты']['персоны'][0]['оценка_уверенности']={'значение':1.5,'происхождение':'прежняя_разметка'}
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
 
 
-def test_duplicate_school_id_across_catalog_raises(tmp_path):
-    text = PATH.read_text(encoding="utf-8")
-    (tmp_path / "a.json").write_text(text, encoding="utf-8")
-    (tmp_path / "b.json").write_text(text, encoding="utf-8")
-    with pytest.raises(SourceSchoolDataError, match="идентификатор школы"):
-        load_source_school_catalog(tmp_path)
+def test_v1_aliases_and_stale_stored_summaries_are_not_runtime_contract():
+    d=synthetic_document();d['демо_представление']={'сводные_показатели':{'число_персон':1}}
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document({'школа':{'персоны':[]}})
 
 
-def test_malformed_json_raises(tmp_path):
-    path = tmp_path / "bad.json"
-    path.write_text("{", encoding="utf-8")
-    with pytest.raises(SourceSchoolDataError, match="некорректный JSON"):
-        load_source_school_file(path)
+def test_normalization_does_not_mutate_or_manufacture_legacy_fields():
+    d=synthetic_document();before=copy.deepcopy(d);normalized=normalize_source_school_document(d)
+    assert d==before and normalized==before and normalized is not d
+    assert 'персоны' not in normalized['школа']
 
 
-def test_missing_directory_returns_empty_catalog(tmp_path):
-    assert load_source_school_catalog(tmp_path / "нет") == []
+def test_duplicate_school_id_across_catalog_is_rejected(tmp_path):
+    text=json.dumps(synthetic_document(),ensure_ascii=False)
+    for name in ['a.json','b.json']:(tmp_path/name).write_text(text,encoding='utf-8')
+    with pytest.raises(SourceSchoolDataError):load_source_school_catalog(tmp_path)
 
 
-def test_summary_aliases_from_supplied_contract_are_supported():
-    document = make_canonical_document()
-    summary = document["демо_представление"]["сводные_показатели"]
-    summary.clear()
-    summary.update(
-        {
-            "количество_персон": 2,
-            "количество_источников": 2,
-            "количество_подтверждений": 2,
-            "по_категориям": {"ядро": 1, "последователь": 1},
-        }
-    )
-    document["контроль_качества"].pop("персоны_по_категориям")
-    validate_source_school_document(document)
+def test_template_is_not_a_catalog_school(tmp_path):
+    (tmp_path/'template.json').write_bytes(TEMPLATE.read_bytes())
+    assert load_source_school_catalog(tmp_path)==[]
 
 
-def test_person_field_aliases_are_normalized():
-    document = make_canonical_document()
-    person = document["школа"]["персоны"][0]
-    person["имя"] = person.pop("полное_имя")
-    person["даты"] = "1900–1980"
-    person["основные_идеи_или_вклад"] = person.pop("основной_вклад")
-    validate_source_school_document(document)
+def test_malformed_json_has_a_domain_error(tmp_path):
+    p=tmp_path/'bad.json';p.write_text('{',encoding='utf-8')
+    with pytest.raises(SourceSchoolDataError):load_source_school_file(p)
 
 
-def test_attribution_source_must_match_evidence_source():
-    document = make_canonical_document()
-    document["школа"]["персоны"][0]["источниковые_атрибуции"][0]["подтверждение"] = "evidence_beta"
-    with pytest.raises(SourceSchoolDataError, match="подтверждением другого источника"):
-        validate_source_school_document(document)
+def test_missing_file_has_a_domain_error(tmp_path):
+    with pytest.raises(SourceSchoolDataError):load_source_school_file(tmp_path/'missing.json')
 
 
-def test_missing_file_has_domain_error(tmp_path):
-    with pytest.raises(SourceSchoolDataError, match="Файл школы не найден"):
-        load_source_school_file(tmp_path / "нет.json")
+def test_missing_directory_returns_an_empty_catalog(tmp_path):
+    assert load_source_school_catalog(tmp_path/'missing')==[]
 
 
-def test_wrong_list_item_type_has_domain_error():
-    document = make_canonical_document()
-    document["школа"]["персоны"].append("не объект")
-    with pytest.raises(SourceSchoolDataError, match="должен быть объектом"):
-        validate_source_school_document(document)
-
-
-def test_nested_full_json_contract_is_supported():
-    validate_source_school_document(make_full_contract_document())
-
-
-def test_all_confidence_fields_are_validated():
-    document = make_full_contract_document()
-    document["школа"]["связи_с_другими_школами"][0]["уверенность"] = 1.5
-    with pytest.raises(SourceSchoolDataError, match="уверенность"):
-        validate_source_school_document(document)
-
-
-def test_aggregate_representatives_are_validated():
-    document = make_full_contract_document()
-    document["школа"]["представители"] = {"ученики": ["unknown_person"]}
-    with pytest.raises(SourceSchoolDataError, match="школа.представители"):
-        validate_source_school_document(document)
-
-
-def test_nested_items_have_domain_errors():
-    document = make_canonical_document()
-    document["школа"]["внутренняя_структура"]["направления"].append("не объект")
-    with pytest.raises(SourceSchoolDataError, match="должен быть объектом"):
-        validate_source_school_document(document)
-
-
-def test_chronology_wrong_type_has_domain_error():
-    document = make_canonical_document()
-    document["школа"]["хронология"] = "не объект"
-    with pytest.raises(SourceSchoolDataError, match="хронология"):
-        validate_source_school_document(document)
+@pytest.mark.parametrize('mutation',['wrong_registry_type','missing_stable_id','unknown_decision','unknown_version','invalid_language'])
+def test_invalid_native_schema_fields_are_rejected(mutation):
+    d=synthetic_document()
+    if mutation=='wrong_registry_type':d['объекты']['персоны'][0]='not a record'
+    elif mutation=='missing_stable_id':d['классификации']['гибкие_измерения'][0]['значения'][0].pop('id')
+    elif mutation=='unknown_decision':d['классификационные_назначения'][0]['решение']='certain'
+    elif mutation=='unknown_version':d['версия_схемы']='99.0'
+    else:d['метаданные']['языки_данных']=['not a language tag']
+    with pytest.raises(SourceSchoolDataError):validate_source_school_document(d)

@@ -10,3 +10,4 @@ plotly
 rapidfuzz
 sentence-transformers
 torch
+jsonschema>=4.18

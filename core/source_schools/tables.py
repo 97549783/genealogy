@@ -1,211 +1,197 @@
-"""Табличные преобразования для демо школ по источникам."""
+"""Динамические таблицы персон, оснований и классификаций школ формата v2.1."""
 from __future__ import annotations
 
+import json
 from typing import Any, Collection, Mapping
 
 import pandas as pd
 
-from .data import normalize_source_school_document
 from .bibliography import build_source_number_index
-from .presentation import as_display_text, as_list, format_life_years, get_first_field
-from .tree import build_person_primary_relation_index
-from .dimensions import build_person_dimension_labels, dimension_catalogs, has_canonical_assignments
+from .dimensions import build_dimension_memberships, build_person_dimension_labels
+from .model import (
+    dimension_definitions, display_persons, field_definitions, format_locator,
+    format_value, included_persons, information_text, membership_index,
+    person_qualifications, person_source_ids, primary_category_index,
+)
+
+RELATION_LABELS = {"представитель": "Представитель", "связанное_лицо": "Связанное лицо", "не_установлено": "Не установлено"}
+SYSTEM_COLUMNS = {"system:name": "Имя", "system:primary_category": "Основная категория",
+                  "system:sources": "Число источников", "system:genealogy": "Научное руководство",
+                  "system:membership": "Отношение к школе"}
 
 
-def _group_labels(document: Mapping[str, Any]) -> dict[str, str]:
-    structure = document.get("школа", {}).get("внутренняя_структура", {}) if isinstance(document.get("школа", {}), Mapping) else {}
-    return {str(group.get("id")): str(group.get("название", group.get("id"))) for group in structure.get("исследовательские_группы", []) if isinstance(group, Mapping)}
+def resolve_person_names(person_ids: Collection[str], person_index: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    return [str(person_index[p].get("имя", p)) for p in person_ids if p in person_index]
 
 
-def _join_groups(value: Any, labels: Mapping[str, str]) -> str:
-    return "; ".join(as_display_text(labels.get(str(item), item)) for item in as_list(value) if as_display_text(labels.get(str(item), item)))
+def table_column_labels(document: Mapping[str, Any]) -> dict[str, str]:
+    return {"id": "ID", "Имя": "Имя", "Отношение к школе": "Отношение к школе",
+            "Основная категория": "Основная категория", "Число источников": "Число источников",
+            "Идентификаторы источников": "Идентификаторы источников", "Уверенность": "Уверенность (прежняя оценка)",
+            "Разночтения и ограничения": "Разночтения и ограничения",
+            **{f"field:{k}": v["название"] for k, v in field_definitions(document).items()},
+            **{f"facet:{k}": v["название"] for k, v in dimension_definitions(document, include_primary=False).items()}}
 
 
-def _join_values(value: Any) -> str:
-    return "; ".join(as_display_text(item) for item in as_list(value) if as_display_text(item))
+def configured_table_columns(document: Mapping[str, Any]) -> list[str]:
+    """Разрешает ключи столбцов схемы, пропуская отсутствующие генеалогические поля."""
+    available = set(table_column_labels(document))
+    return list(dict.fromkeys(column for key in document["отображение"]["колонки_таблицы_по_умолчанию"]
+                              if (column := SYSTEM_COLUMNS.get(key, key)) in available
+                              and (column != "Основная категория" or document["классификации"]["основное_деление"])))
 
 
-def resolve_person_names(
-    person_ids: Collection[str],
-    person_index: Mapping[str, Mapping[str, Any]],
-) -> list[str]:
-    """Заменяет идентификаторы персон отображаемыми именами."""
-    return [get_first_field(person_index[person_id], "полное_имя", "имя", default=person_id) for person_id in person_ids if person_id in person_index]
+def _people_dataframe(document: Mapping[str, Any], people: Collection[Mapping[str, Any]]) -> pd.DataFrame:
+    members = membership_index(document)
+    primary = document["классификации"]["основное_деление"]
+    primary_labels = primary_category_index(document)
+    facets = dimension_definitions(document, include_primary=False)
+    dimension_labels = build_person_dimension_labels(document)
+    fields = field_definitions(document)
+    columns = ["id", "Имя", "Отношение к школе"]
+    if primary:
+        columns.append("Основная категория")
+    columns += [f"field:{code}" for code in fields] + [f"facet:{code}" for code in facets]
+    columns += ["Число источников", "Идентификаторы источников", "Уверенность", "Разночтения и ограничения"]
+    rows = []
+    for person in people:
+        pid = person["id"]
+        sources = person_source_ids(document, pid)
+        confidence = person.get("оценка_уверенности") or {}
+        row = {"id": pid, "Имя": person["имя"],
+               "Отношение к школе": RELATION_LABELS.get(members.get(pid, {}).get("отношение_к_школе"), "Не установлено"),
+               "Число источников": len(sources), "Идентификаторы источников": "; ".join(sources),
+               "Уверенность": confidence.get("значение", float("nan")),
+               "Разночтения и ограничения": person_qualifications(document, pid)}
+        if primary:
+            row["Основная категория"] = primary_labels.get(pid, "Не классифицировано")
+        row.update({f"field:{code}": information_text(document, pid, code) for code in fields})
+        row.update({f"facet:{code}": "; ".join(dimension_labels.get(pid, {}).get(code, [])) for code in facets})
+        rows.append(row)
+    result = pd.DataFrame(rows, columns=columns)
+    result.attrs["column_labels"] = table_column_labels(document)
+    result.attrs["facet_memberships"] = build_dimension_memberships(document)
+    result.attrs["primary_labels"] = {c["id"]: c["название"] for c in primary["категории"]} if primary else {}
+    return result
 
 
-def build_people_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
-    """Формирует таблицу представителей школы."""
-    normalized = normalize_source_school_document(document)
-    group_labels = _group_labels(normalized)
-    relation_labels = build_person_primary_relation_index(normalized)
-    dimension_labels = build_person_dimension_labels(normalized) if has_canonical_assignments(normalized) else None
-    rows: list[dict[str, Any]] = []
-    for person in normalized["школа"]["персоны"]:
-        source_ids = [
-            attribution.get("идентификатор_источника")
-            for attribution in person.get("источниковые_атрибуции", [])
-            if isinstance(attribution, Mapping) and attribution.get("идентификатор_источника")
-        ]
-        rows.append(
-            {
-                "ID": person.get("id"),
-                "Представитель": get_first_field(person, "полное_имя", "имя"),
-                "Годы жизни": format_life_years(get_first_field(person, "годы_жизни", "даты")),
-                "Тип связи": relation_labels.get(str(person.get("id")), "Основатель" if "основатель" in as_list(person.get("роль_в_школе")) else ""),
-                "Категория": person.get("категория_включения", ""),
-                "Роли": _join_values(person.get("роль_в_школе", [])),
-                "Связь с Выготским": person.get("статус_связи_с_выготским", ""),
-                "Период взаимодействия": person.get("период_взаимодействия", ""),
-                "Группы и контексты": (
-                    _join_values(dimension_labels[str(person.get("id"))]["historical_group"])
-                    if dimension_labels is not None else _join_groups(person.get("группы_и_контексты", []), group_labels)
-                ),
-                "Основной вклад": get_first_field(person, "основной_вклад", "основные_идеи_или_вклад"),
-                "Разночтения и ограничения": _join_values([
-                    person.get("примечание"),
-                    person.get("разночтения"),
-                    person.get("источниковые_ограничения"),
-                ]),
-                "Уверенность": float(person["уверенность"]) if person.get("уверенность") not in (None, "") else float("nan"),
-                "Число источников": len(set(source_ids)),
-                "Идентификаторы источников": "; ".join(dict.fromkeys(source_ids)),
-            }
-        )
-        if dimension_labels is not None:
-            values = dimension_labels[str(person.get("id"))]
-            rows[-1]["Периоды развития"] = _join_values(values["period"])
-            rows[-1]["Научные направления"] = _join_values(values["research_direction"])
-    return pd.DataFrame(rows)
+def build_people_dataframe(document: Mapping[str, Any], *, display_only: bool = True) -> pd.DataFrame:
+    """Одна строка на включённую персону с произвольным набором полей и гибких измерений."""
+    return _people_dataframe(document, display_persons(document) if display_only else included_persons(document))
 
 
-def _contains_any(series: pd.Series, values: Collection[str]) -> pd.Series:
-    selected = set(values)
-    return series.fillna("").str.split("; ").apply(lambda items: bool(set(items) & selected))
+def build_candidates_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
+    candidates = {m["персона"] for m in document["состав"] if m["решение"] == "кандидат"}
+    return _people_dataframe(document, [p for p in document["объекты"]["персоны"] if p["id"] in candidates])
 
 
-def filter_people_dataframe(
-    dataframe: pd.DataFrame,
-    *,
-    query: str = "",
-    categories: Collection[str] = (),
-    relation_types: Collection[str] = (),
-    roles: Collection[str] = (),
-    groups: Collection[str] = (),
-    source_ids: Collection[str] = (),
-    minimum_confidence: float = 0.0,
-) -> pd.DataFrame:
-    """Фильтрует таблицу представителей без изменения исходного DataFrame."""
-    filtered = dataframe.copy()
-    mask = filtered["Уверенность"] >= minimum_confidence
-    if minimum_confidence <= 0:
-        mask |= filtered["Уверенность"].isna()
+def filter_people_dataframe(dataframe: pd.DataFrame, *, query: str = "",
+                            person_ids: Collection[str] | None = None,
+                            facet_selections: Mapping[str, Collection[str]] | None = None,
+                            primary_categories: Collection[str] = (), source_ids: Collection[str] = (),
+                            mode: str = "intersection") -> pd.DataFrame:
+    """ИЛИ внутри измерения; И/ИЛИ между измерениями. Текст и источники добавляют условие И."""
+    if mode not in {"intersection", "union"}:
+        raise ValueError(f"Неизвестная логика фильтров: {mode}")
+    if dataframe.empty:
+        return dataframe.copy()
+    mask = pd.Series(True, index=dataframe.index)
+    if person_ids is not None:
+        mask &= dataframe["id"].isin(set(person_ids))
     if query.strip():
-        query_lower = query.strip().lower()
-        search_columns = [
-            "Представитель",
-            "Тип связи",
-            "Категория",
-            "Роли",
-            "Связь с Выготским",
-            "Группы и контексты",
-            "Основной вклад",
-        ]
-        text = filtered[search_columns].fillna("").agg(" ".join, axis=1).str.lower()
-        mask &= text.str.contains(query_lower, regex=False)
-    if categories:
-        mask &= filtered["Категория"].isin(categories)
-    if relation_types:
-        mask &= filtered["Тип связи"].isin(relation_types)
-    if roles:
-        mask &= _contains_any(filtered["Роли"], roles)
-    if groups:
-        mask &= _contains_any(filtered["Группы и контексты"], groups)
+        searchable = dataframe.drop(columns=["Уверенность"], errors="ignore").fillna("").astype(str).agg(" ".join, axis=1)
+        mask &= searchable.str.contains(query.strip(), case=False, regex=False)
+    active_sets = []
+    memberships = dataframe.attrs.get("facet_memberships", {})
+    for dimension, selections in (facet_selections or {}).items():
+        if selections:
+            active_sets.append(set().union(*(set(memberships.get(dimension, {}).get(value, ())) for value in selections)))
+    if active_sets:
+        selected = set.union(*active_sets) if mode == "union" else set.intersection(*active_sets)
+        mask &= dataframe["id"].isin(selected)
+    if primary_categories:
+        labels = dataframe.attrs.get("primary_labels", {})
+        selected_labels = {labels.get(value, value) for value in primary_categories}
+        if "Основная категория" not in dataframe:
+            mask &= False
+        else:
+            mask &= dataframe["Основная категория"].isin(selected_labels)
     if source_ids:
-        mask &= _contains_any(filtered["Идентификаторы источников"], source_ids)
-    return filtered.loc[mask].copy()
+        selected = set(source_ids)
+        mask &= dataframe["Идентификаторы источников"].fillna("").str.split("; ").map(lambda values: bool(selected.intersection(values)))
+    return dataframe.loc[mask].copy()
 
 
 def build_sources_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
-    """Формирует таблицу библиографических источников."""
-    normalized = normalize_source_school_document(document)
-    numbers = build_source_number_index(normalized)
-    return pd.DataFrame(
-        [
-            {
-                "ID": source.get("id"),
-                "№": numbers.get(str(source.get("id")), ""),
-                "Источник": source.get("краткое_название") or source.get("библиографическое_описание", ""),
-                "Год": as_display_text(source.get("год", "")),
-                "Тип": source.get("тип", ""),
-                "DOI": source.get("doi", ""),
-                "Роль в описании": source.get("роль_в_описании", ""),
-                "Примечание": source.get("примечание", ""),
-            }
-            for source in normalized["школа"]["источники"]
-        ]
-    )
+    numbers = build_source_number_index(document)
+    return pd.DataFrame([{"id": source["id"], "№": numbers[source["id"]],
+                          "Источник": source["библиографическое_описание"], "Название": source["название"],
+                          "Год": source["год"], "Жанр": source["жанр"], "Языки": "; ".join(source["языки"]),
+                          "DOI": source.get("doi") or "", "Проверка": source["проверка"]["статус"],
+                          "Роль в описании": source.get("роль_в_описании") or "", "Примечание": source.get("примечание") or ""}
+                         for source in document["источники"]],
+                        columns=["id", "№", "Источник", "Название", "Год", "Жанр", "Языки", "DOI", "Проверка", "Роль в описании", "Примечание"])
 
 
 def build_evidence_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
-    """Формирует таблицу подтверждений с названиями источников."""
-    normalized = normalize_source_school_document(document)
-    labels = {
-        source["id"]: source.get("краткое_название") or source.get("библиографическое_описание", "")
-        for source in normalized["школа"]["источники"]
-    }
-    return pd.DataFrame(
-        [
-            {
-                "ID": evidence.get("id"),
-                "Источник": labels.get(evidence.get("идентификатор_источника"), evidence.get("идентификатор_источника")),
-                "Тип утверждения": evidence.get("тип_утверждения", ""),
-                "Содержание свидетельства": evidence.get("содержание_свидетельства", ""),
-                "Локатор": evidence.get("локатор", ""),
-                "Вид свидетельства": evidence.get("тип_утверждения", ""),
-                "Ограничения": evidence.get("ограничения", ""),
-                "Статус": "Явное утверждение" if evidence.get("явное_утверждение") else "Интерпретация",
-                "Уверенность": float(evidence["уверенность"]) if evidence.get("уверенность") not in (None, "") else float("nan"),
-            }
-            for evidence in normalized["школа"]["подтверждения"]
-        ]
-    )
+    sources = {s["id"]: s for s in document["источники"]}
+    rows = []
+    for evidence in document["основания"]:
+        fragment = evidence.get("фрагмент") or {}
+        rows.append({"id": evidence["id"], "ID источника": evidence["источник"],
+                     "Источник": sources[evidence["источник"]]["библиографическое_описание"],
+                     "ID файла": evidence.get("файл") or "", "Локатор": format_locator(evidence.get("локатор")),
+                     "Вид фрагмента": fragment.get("вид", ""), "Содержание свидетельства": fragment.get("текст", ""),
+                     "Вид свидетельства": evidence["тип_свидетельства"], "Явность": evidence["явность"],
+                     "Проверка": evidence["проверка"]["статус"], "Ограничения": "; ".join(evidence.get("ограничения", []))})
+    return pd.DataFrame(rows, columns=["id", "ID источника", "Источник", "ID файла", "Локатор", "Вид фрагмента", "Содержание свидетельства", "Вид свидетельства", "Явность", "Проверка", "Ограничения"])
 
 
 def build_classification_dataframes(document: Mapping[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Экспортирует назначения и адресные основания отдельными строками без потери статусов."""
-    school = document["школа"]
-    persons = {item["id"]: get_first_field(item, "полное_имя", "имя") for item in school["персоны"]}
-    sources = {item["id"]: item.get("краткое_название") or item.get("библиографическое_описание", "") for item in school["источники"]}
-    values = {
-        (dimension, str(item.get("id"))): get_first_field(item, "название", "название_периода", "название_направления")
-        for dimension, items in dimension_catalogs(document).items() for item in items
-    }
-    dimension_labels = {"historical_group": "Группа или контекст", "period": "Период развития", "research_direction": "Научное направление"}
-    assignment_rows, attribution_rows = [], []
-    for assignment in school.get("классификационные_назначения", []):
-        row = {
-            "ID назначения": assignment["id"],
-            "ID персоны": assignment["персона"],
-            "Представитель": persons.get(assignment["персона"], assignment["персона"]),
-            "Измерение": dimension_labels.get(assignment["измерение"], assignment["измерение"]),
-            "ID значения": assignment["значение"],
-            "Значение": values.get((assignment["измерение"], assignment["значение"]), assignment["значение"]),
-            "Статус": assignment["статус"],
-            "Временной контекст": as_display_text(assignment.get("временной_контекст", "")),
-            "Примечание": assignment.get("примечание", ""),
-        }
-        assignment_rows.append(row)
-        for attribution in assignment.get("источниковые_атрибуции", []):
-            attribution_rows.append({
-                **row,
-                "ID источника": attribution["идентификатор_источника"],
-                "Источник": sources.get(attribution["идентификатор_источника"], attribution["идентификатор_источника"]),
-                "ID подтверждения": attribution.get("подтверждение", ""),
-                "Локатор": attribution.get("локатор", ""),
-                "Утверждение": attribution.get("утверждение", ""),
-            })
-    columns = ["ID назначения", "ID персоны", "Представитель", "Измерение", "ID значения", "Значение", "Статус", "Временной контекст", "Примечание"]
-    return (
-        pd.DataFrame(assignment_rows, columns=columns),
-        pd.DataFrame(attribution_rows, columns=columns + ["ID источника", "Источник", "ID подтверждения", "Локатор", "Утверждение"]),
-    )
+    """Все решения об отнесении и их адресные основания, включая неактивные гипотезы."""
+    people = {p["id"]: p["имя"] for p in document["объекты"]["персоны"]}
+    definitions = dimension_definitions(document)
+    values = {(key, value["id"]): value["название"] for key, d in definitions.items()
+              for value in d.get("значения", d.get("категории", []))}
+    bases = {e["id"]: e for e in document["основания"]}
+    assertions = {r["id"]: r for key in ("сведения", "связи") for r in document[key]}
+    rows, attributions = [], []
+    for assignment in document["классификационные_назначения"]:
+        row = {"ID назначения": assignment["id"], "ID персоны": assignment["персона"], "Имя": people[assignment["персона"]],
+               "ID измерения": assignment["измерение"], "Измерение": definitions[assignment["измерение"]]["название"],
+               "ID значения": assignment["значение"], "Значение": values[(assignment["измерение"], assignment["значение"])],
+               "Решение": assignment["решение"], "Характер": assignment["характер"], "Проверка": assignment["проверка"]["статус"],
+               "Временной контекст": "; ".join(format_value({"вид": "интервал", "значение": i}) for i in assignment["интервалы"]),
+               "Примечание": assignment.get("примечание") or ""}
+        rows.append(row)
+        ids, visited = set(), set()
+        def collect(record: Mapping[str, Any]) -> None:
+            ids.update(record.get("основания", []))
+            for identifier in record.get("опирается_на", []):
+                if identifier not in visited and identifier in assertions:
+                    visited.add(identifier)
+                    collect(assertions[identifier])
+        collect(assignment)
+        for eid in (e["id"] for e in document["основания"] if e["id"] in ids):
+            e = bases[eid]
+            attributions.append({**row, "ID основания": eid, "ID источника": e["источник"],
+                                 "Локатор": format_locator(e.get("локатор")),
+                                 "Вид фрагмента": (e.get("фрагмент") or {}).get("вид", ""),
+                                 "Фрагмент": (e.get("фрагмент") or {}).get("текст", "")})
+    columns = ["ID назначения", "ID персоны", "Имя", "ID измерения", "Измерение", "ID значения", "Значение", "Решение", "Характер", "Проверка", "Временной контекст", "Примечание"]
+    return (pd.DataFrame(rows, columns=columns), pd.DataFrame(attributions, columns=columns + ["ID основания", "ID источника", "Локатор", "Вид фрагмента", "Фрагмент"]))
+
+
+def build_information_dataframe(document: Mapping[str, Any]) -> pd.DataFrame:
+    definitions = field_definitions(document)
+    return pd.DataFrame([{"id": r["id"], "Субъект": r["субъект"], "Поле": r["поле"],
+                          "Название поля": definitions[r["поле"]]["название"], "Значение": format_value(r["значение"]),
+                          "Роль значения": r["роль_значения"], "Характер": r["характер"], "Решение": r["решение"],
+                          "Проверка": r["проверка"]["статус"], "Основания": "; ".join(r["основания"])}
+                         for r in document["сведения"]], columns=["id", "Субъект", "Поле", "Название поля", "Значение", "Роль значения", "Характер", "Решение", "Проверка", "Основания"])
+
+
+def build_records_dataframe(records: Collection[Mapping[str, Any]]) -> pd.DataFrame:
+    """Преобразует записи реестра в таблицу с сохранением вложенного содержимого."""
+    return pd.DataFrame([{key: json.dumps(value, ensure_ascii=False) if isinstance(value, (list, dict)) else value
+                          for key, value in record.items()} for record in records])

@@ -10,7 +10,12 @@ from core.ui.tree_renderers import _markmap_node_content, build_markmap_html
 
 
 def document(name="Алексей Николаевич Леонтьев"):
-    return {"школа": {"персоны": [{"id": "leontiev", "имя": name, "роль_в_школе": ["основатель"]}]}}
+    from source_school_fixtures import synthetic_document
+    d = synthetic_document(facet_count=0)
+    d['объекты']['персоны'][0].update(id='leontiev', имя=name)
+    d['состав'][0]['персона'] = 'leontiev'
+    d['отображение']['центр'] = {'тип': 'персона', 'id': 'leontiev'}
+    return d
 
 
 def index(df):
@@ -73,6 +78,7 @@ def test_links_do_not_change_source_tree_edges_and_include_founder():
     assert set(linked.graph.edges) == set(plain.graph.edges)
     content = _markmap_node_content(linked.graph, linked.root_id)
     assert 'href="https://example.test/?tab=lineages&amp;root=Leontiev"' in content
+    assert '<svg ' in content
     assert 'target="_blank"' in content
     assert 'rel="noopener noreferrer"' in content
     for mode in ("bidirectional", "unidirectional"):
@@ -91,3 +97,59 @@ def test_node_content_escapes_text_and_rejects_script_urls():
     assert "<script>" not in content
     assert "&lt;script&gt;" in content
     assert "<a " not in content
+
+
+def test_native_alias_requires_real_evidence_and_unique_root():
+    doc=document('А. Н. Леонтьев')
+    person=doc['объекты']['персоны'][0]
+    person['варианты_имени']=[dict(написание='Алексей Николаевич Леонтьев', вид='как_в_источнике', основания=['evidence_alpha'])]
+    df=pd.DataFrame([{'Code':'1','candidate_name':'Ученик','supervisors_1.name':'Леонтьев Алексей Николаевич'}])
+    assert resolve_source_school_lineages(doc,df,index(df))['leontiev'].record_count==1
+    person['варианты_имени'][0]['основания']=['absent']
+    assert not resolve_source_school_lineages(doc,df,index(df))
+    person['варианты_имени'][0]['основания']=['evidence_alpha']
+    doc['основания'][0]['проверка']['статус']='ошибка'
+    assert not resolve_source_school_lineages(doc,df,index(df))
+
+
+def test_initials_partial_names_and_ambiguous_identification_do_not_create_tree():
+    df=pd.DataFrame([{'Code':'1','candidate_name':'Ученик','supervisors_1.name':'Леонтьев Алексей Николаевич'}])
+    assert not resolve_source_school_lineages(document('Леонтьев А. Н.'),df,index(df))
+    assert not resolve_source_school_lineages(document('Леонтьев Алексей Н.'),df,index(df))
+    doc=document();doc['объекты']['персоны'][0]['идентификация']['статус']='неоднозначная'
+    assert not resolve_source_school_lineages(doc,df,index(df))
+    doc=document();doc['состав'][0]['решение']='кандидат'
+    assert not resolve_source_school_lineages(doc,df,index(df))
+
+
+def test_only_confirmed_addressable_database_root_mapping_can_override_uncertain_name():
+    doc=document('А. Н. Леонтьев');person=doc['объекты']['персоны'][0]
+    person['идентификация']['статус']='вероятная'
+    identifier=dict(система='academic_genealogy:root_name', значение='Леонтьев Алексей Николаевич', решение='кандидат', основания=['evidence_alpha'])
+    person['внешние_идентификаторы']=[identifier]
+    df=pd.DataFrame([{'Code':'1','candidate_name':'Ученик','supervisors_1.name':'Леонтьев Алексей Николаевич'}])
+    assert not resolve_source_school_lineages(doc,df,index(df))
+    identifier['решение']='подтверждено'
+    assert resolve_source_school_lineages(doc,df,index(df))['leontiev'].record_count==1
+    identifier['система']='wikidata'
+    assert not resolve_source_school_lineages(doc,df,index(df))
+
+
+def test_two_attested_full_aliases_matching_distinct_roots_remain_ambiguous():
+    doc=document();doc['объекты']['персоны'][0]['варианты_имени']=[dict(написание='Александр Николаевич Леонтьев', вид='как_в_источнике', основания=['evidence_alpha'])]
+    df=pd.DataFrame([{'Code':'1','candidate_name':'A','supervisors_1.name':'Леонтьев Алексей Николаевич'},
+                     {'Code':'2','candidate_name':'B','supervisors_1.name':'Леонтьев Александр Николаевич'}])
+    assert not resolve_source_school_lineages(doc,df,index(df))
+
+
+def test_cache_invalidates_database_path_scope_and_alias_changes():
+    from core.source_schools.lineages import get_source_school_lineages, _cached_source_school_lineages
+    _cached_source_school_lineages.clear()
+    doc=document();df=pd.DataFrame([{'Code':'1','candidate_name':'A','supervisors_1.name':'Леонтьев Алексей Николаевич'}])
+    first=get_source_school_lineages(doc,df,index(df),('first.db',1,10))
+    assert first['leontiev'].record_count==1
+    expanded=pd.concat([df,pd.DataFrame([{'Code':'2','candidate_name':'B','supervisors_1.name':'Леонтьев Алексей Николаевич'}])],ignore_index=True)
+    assert get_source_school_lineages(doc,expanded,index(expanded),('second.db',1,10))['leontiev'].record_count==2
+    assert get_source_school_lineages(doc,expanded,index(expanded),('first.db',1,10))['leontiev'].record_count==2
+    doc['объекты']['персоны'][0]['имя']='Другое Полное Имя'
+    assert not get_source_school_lineages(doc,expanded,index(expanded),('first.db',1,10))

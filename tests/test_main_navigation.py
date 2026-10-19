@@ -57,7 +57,7 @@ def test_source_schools_follows_articles_comparison():
     ids = [tab_id for tab_id, _ in TAB_SPECS]
     labels = dict(TAB_SPECS)
     assert "source_schools" in ids
-    assert labels["source_schools"] == "Школы по источникам (демо)"
+    assert labels["source_schools"] == "Школы по источникам"
     assert ids.index("source_schools") == ids.index("articles_comparison") + 1
 
 

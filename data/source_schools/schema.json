@@ -1,0 +1,3375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:genealogy:source-school:2.1",
+  "title": "Универсальный формат школы по источникам — обновлённый проект v2",
+  "description": "Рабочая редакция 19.10.2026, v2.1 со странами и раздельными языками данных, работ и источников. Общий формат для научных и философских школ. Один документ на школу. Программный загрузчик этого формата ещё не реализован. Схема описывает форму; ссылочная, временная и источниковая согласованность проверяется отдельно по прилагаемому контракту.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "версия_схемы": {
+      "const": "2.1"
+    },
+    "метаданные": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "статус": {
+          "type": "string",
+          "enum": [
+            "шаблон",
+            "черновик",
+            "на_проверке",
+            "готово"
+          ]
+        },
+        "версия_данных": {
+          "type": "string",
+          "minLength": 1
+        },
+        "обновлено": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "языки_данных": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+            "description": "Языковая метка: ru, en, de, ru-Latn и т. п. Существование и корректность метки проверяются отдельно; это не полный валидатор BCP 47."
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "история_происхождения": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/document_event"
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "статус",
+        "версия_данных",
+        "обновлено",
+        "языки_данных"
+      ]
+    },
+    "школа": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "идентификатор_школы": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "каноническое_название": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "альтернативные_названия": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          }
+        },
+        "дисциплины": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "вид_объекта": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "редакторские_метки": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "страны": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/country_tag"
+          }
+        },
+        "языки_работ": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/work_language_tag"
+          }
+        },
+        "границы_описания": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "внешние_идентификаторы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/external_id"
+          }
+        }
+      },
+      "required": [
+        "идентификатор_школы",
+        "каноническое_название",
+        "альтернативные_названия",
+        "дисциплины",
+        "вид_объекта",
+        "редакторские_метки",
+        "страны",
+        "языки_работ",
+        "границы_описания",
+        "внешние_идентификаторы"
+      ],
+      "description": "Самостоятельная идентичность школы. Дисциплины множественные. Метки «региональная», «институциональная», «персональная» — редакторские характеристики; историческое обоснование единства хранится в сведениях с основаниями. Граница описания фиксирует конкретную школу или авторскую реконструкцию."
+    },
+    "словари": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "поля_сведений": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/field_definition"
+          }
+        },
+        "типы_связей": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relation_definition"
+          }
+        }
+      },
+      "required": [
+        "поля_сведений",
+        "типы_связей"
+      ]
+    },
+    "объекты": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "персоны": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/person"
+          }
+        },
+        "прочие": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/object"
+          }
+        }
+      },
+      "required": [
+        "персоны",
+        "прочие"
+      ]
+    },
+    "сведения": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/information"
+      }
+    },
+    "состав": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/membership"
+      }
+    },
+    "связи": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "классификации": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "основное_деление": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/primary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "гибкие_измерения": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/facet"
+          }
+        }
+      },
+      "required": [
+        "основное_деление",
+        "гибкие_измерения"
+      ]
+    },
+    "классификационные_назначения": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assignment"
+      }
+    },
+    "источники": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "основания": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "отображение": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "центр": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "тип": {
+              "type": "string",
+              "enum": [
+                "школа",
+                "персона"
+              ]
+            },
+            "id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "тип",
+            "id"
+          ]
+        },
+        "режим_по_умолчанию": {
+          "type": "string",
+          "enum": [
+            "дерево",
+            "таблица",
+            "вместе"
+          ]
+        },
+        "без_основного_деления": {
+          "const": "плоский_список"
+        },
+        "показывать_отношения_к_школе": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "представитель",
+              "связанное_лицо",
+              "не_установлено"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "логика_внутри_фильтра": {
+          "const": "ИЛИ"
+        },
+        "логика_между_фильтрами_по_умолчанию": {
+          "type": "string",
+          "enum": [
+            "И",
+            "ИЛИ"
+          ]
+        },
+        "режим_отбора_по_умолчанию": {
+          "type": "string",
+          "enum": [
+            "подсветка",
+            "скрытие"
+          ]
+        },
+        "колонки_таблицы_по_умолчанию": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/column"
+          },
+          "uniqueItems": true
+        },
+        "поля_карточки": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "разделы_паспорта": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "центр",
+        "режим_по_умолчанию",
+        "без_основного_деления",
+        "показывать_отношения_к_школе",
+        "логика_внутри_фильтра",
+        "логика_между_фильтрами_по_умолчанию",
+        "режим_отбора_по_умолчанию",
+        "колонки_таблицы_по_умолчанию",
+        "поля_карточки",
+        "разделы_паспорта"
+      ],
+      "description": "Только исходные настройки школы. Текущие фильтры, выбранная карточка, масштаб, готовые URL, счётчики и доступность генеалогического дерева не сохраняются здесь. Имя открывает карточку; отдельная ссылка открывает дерево руководства в новой вкладке."
+    },
+    "редактура": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "разночтения": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/disagreement"
+          }
+        },
+        "журнал_решений": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decision"
+          }
+        },
+        "перенос_из_прежнего_формата": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/migration"
+          }
+        }
+      },
+      "required": [
+        "ограничения",
+        "разночтения",
+        "журнал_решений",
+        "перенос_из_прежнего_формата"
+      ]
+    }
+  },
+  "required": [
+    "версия_схемы",
+    "метаданные",
+    "школа",
+    "словари",
+    "объекты",
+    "сведения",
+    "состав",
+    "связи",
+    "классификации",
+    "классификационные_назначения",
+    "источники",
+    "основания",
+    "отображение",
+    "редактура"
+  ],
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "статус": {
+          "type": "string",
+          "enum": [
+            "не_проверено",
+            "сверено",
+            "частично_сверено",
+            "унаследовано",
+            "ошибка"
+          ]
+        },
+        "дата": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "способ": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "статус"
+      ],
+      "description": "Состояние сверки, независимо от редакторского принятия. Унаследовано означает перенос прежней проверки без новой сверки оригинала; её исходный смысл сохраняется в примечании."
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "значение": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "происхождение": {
+          "type": "string",
+          "enum": [
+            "прежняя_разметка",
+            "редактор",
+            "модель"
+          ]
+        },
+        "пояснение": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "значение",
+        "происхождение",
+        "пояснение"
+      ],
+      "description": "Необязательная исходная оценка. Не является вероятностью истинности и не определяет автоматическое включение."
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "способ": {
+          "type": "string",
+          "enum": [
+            "ручная_разметка",
+            "миграция",
+            "машинное_извлечение"
+          ]
+        },
+        "документ": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "исходный_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "исходное_поле": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "способ"
+      ],
+      "description": "Трассировка записи, включая перенос старых атрибуций без вымышленных цитат и сохранение исходных id."
+    },
+    "country_tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "код": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "тип": {
+          "type": "string",
+          "enum": [
+            "современное_государство",
+            "историческое_государство"
+          ]
+        },
+        "код_iso_3166_1": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "характер_связи": {
+          "type": "string",
+          "enum": [
+            "возникновение",
+            "основная_деятельность",
+            "распространение"
+          ]
+        },
+        "интервалы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interval"
+          }
+        },
+        "характер": {
+          "type": "string",
+          "enum": [
+            "источниковое_сообщение",
+            "авторская_оценка",
+            "редакторская_интерпретация"
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "код",
+        "название",
+        "тип",
+        "код_iso_3166_1",
+        "характер_связи",
+        "интервалы",
+        "характер",
+        "основания",
+        "проверка"
+      ],
+      "description": "География школы, а не гражданство каждого участника. Исторические государства имеют собственные коды; СССР не заменяется современной Россией. Регион и город описываются объектами места. Повторный период добавляется в интервалы той же метки."
+    },
+    "work_language_tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "код": {
+          "type": "string",
+          "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+          "description": "Языковая метка: ru, en, de, ru-Latn и т. п. Существование и корректность метки проверяются отдельно; это не полный валидатор BCP 47."
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "роль": {
+          "type": "string",
+          "enum": [
+            "язык_оригиналов",
+            "язык_переводов",
+            "язык_работ_не_уточнён"
+          ]
+        },
+        "охват": {
+          "type": "string",
+          "minLength": 1
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "код",
+        "название",
+        "роль",
+        "охват",
+        "основания",
+        "проверка"
+      ],
+      "description": "Язык работ представителей школы. Отдельно от языка JSON-описания и языков изученной литературы о школе. Отмечаются только подтверждённые языки; неполный охват указывается явно."
+    },
+    "date": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "исходная_запись": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "год": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "месяц": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 12
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "день": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 31
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "эра": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "н_э",
+                "до_н_э"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "точность": {
+          "type": "string",
+          "enum": [
+            "день",
+            "месяц",
+            "год",
+            "десятилетие",
+            "век",
+            "не_установлена"
+          ]
+        },
+        "определённость": {
+          "type": "string",
+          "enum": [
+            "точно",
+            "приблизительно",
+            "не_ранее",
+            "не_позднее",
+            "под_вопросом",
+            "не_установлена"
+          ]
+        },
+        "календарь": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "григорианский",
+                "юлианский",
+                "не_установлен"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "исходная_запись",
+        "год",
+        "месяц",
+        "день",
+        "эра",
+        "точность",
+        "определённость"
+      ],
+      "description": "Исходная запись сохраняется. Неизвестные компоненты — null; век или десятилетие не превращаются в вымышленную точную дату. Варианты дат — отдельные сведения с разными основаниями.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "исходная_запись"
+          ],
+          "properties": {
+            "исходная_запись": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "год"
+          ],
+          "properties": {
+            "год": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "месяц"
+          ],
+          "properties": {
+            "месяц": {
+              "type": "integer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "день"
+          ],
+          "properties": {
+            "день": {
+              "type": "integer"
+            }
+          }
+        }
+      ]
+    },
+    "bound": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "состояние": {
+          "type": "string",
+          "enum": [
+            "известна",
+            "неизвестна",
+            "открыта"
+          ]
+        },
+        "дата": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "состояние",
+        "дата"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "состояние": {
+                "const": "известна"
+              }
+            }
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "дата": {
+                "$ref": "#/$defs/date"
+              }
+            }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "дата": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "исходная_запись": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "начало": {
+          "$ref": "#/$defs/bound"
+        },
+        "конец": {
+          "$ref": "#/$defs/bound"
+        },
+        "дата_среза": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "исходная_запись",
+        "начало",
+        "конец"
+      ],
+      "description": "Неизвестная и открытая границы различаются. «По настоящее время» относится к источнику и его дате среза. Повторные интервалы хранятся массивом, без искусственного заполнения промежутков."
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "вид": {
+              "const": "текст"
+            },
+            "значение": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "вид",
+            "значение"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "вид": {
+              "const": "число"
+            },
+            "значение": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "вид",
+            "значение"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "вид": {
+              "const": "логическое"
+            },
+            "значение": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "вид",
+            "значение"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "вид": {
+              "const": "дата"
+            },
+            "значение": {
+              "$ref": "#/$defs/date"
+            }
+          },
+          "required": [
+            "вид",
+            "значение"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "вид": {
+              "const": "интервал"
+            },
+            "значение": {
+              "$ref": "#/$defs/interval"
+            }
+          },
+          "required": [
+            "вид",
+            "значение"
+          ]
+        }
+      ]
+    },
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "написание": {
+          "type": "string",
+          "minLength": 1
+        },
+        "вид": {
+          "type": "string",
+          "enum": [
+            "как_в_источнике",
+            "нормализация",
+            "транслитерация",
+            "прежнее_название"
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "написание",
+        "вид",
+        "основания"
+      ]
+    },
+    "external_id": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "система": {
+          "type": "string",
+          "minLength": 1
+        },
+        "значение": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^https?://[^\\s]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "решение": {
+          "type": "string",
+          "enum": [
+            "подтверждено",
+            "кандидат"
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "система",
+        "значение",
+        "решение",
+        "основания"
+      ],
+      "description": "Общий или внешний id для сопоставления между школами. Кандидат не создаёт автоматическое тождество или ссылку на дерево руководства."
+    },
+    "identification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "статус": {
+          "type": "string",
+          "enum": [
+            "установлена",
+            "вероятная",
+            "неоднозначная",
+            "не_установлена"
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "исходная_формулировка": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "статус",
+        "основания"
+      ]
+    },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "имя": {
+          "type": "string",
+          "minLength": 1
+        },
+        "варианты_имени": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          }
+        },
+        "идентификация": {
+          "$ref": "#/$defs/identification"
+        },
+        "внешние_идентификаторы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/external_id"
+          }
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "имя",
+        "варианты_имени",
+        "идентификация",
+        "внешние_идентификаторы"
+      ],
+      "description": "Идентификация персоны. Запись сама по себе не включает человека в состав; даты и вклад описываются сведениями, исторические роли — связями."
+    },
+    "object": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "тип": {
+          "type": "string",
+          "enum": [
+            "школа",
+            "организация",
+            "коллектив",
+            "место",
+            "направление",
+            "период",
+            "работа",
+            "результат",
+            "метод",
+            "понятие",
+            "событие"
+          ]
+        },
+        "подтип": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "варианты_названия": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alias"
+          }
+        },
+        "идентификация": {
+          "$ref": "#/$defs/identification"
+        },
+        "внешние_идентификаторы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/external_id"
+          }
+        },
+        "источник_публикации": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "тип",
+        "название",
+        "варианты_названия",
+        "идентификация",
+        "внешние_идентификаторы"
+      ],
+      "description": "Общий каталог: учреждения, коллективы, места, направления, периоды, работы, результаты, методы, понятия, события и другие школы. Теорема или эксперимент — подтип результата. Если работа также является источником, библиография хранится один раз в источнике."
+    },
+    "field_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "код": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "раздел": {
+          "type": "string",
+          "minLength": 1
+        },
+        "вид_значения": {
+          "type": "string",
+          "enum": [
+            "текст",
+            "число",
+            "логическое",
+            "дата",
+            "интервал"
+          ]
+        },
+        "кардинальность": {
+          "type": "string",
+          "enum": [
+            "одно_основное",
+            "несколько_основных"
+          ]
+        },
+        "описание": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "код",
+        "название",
+        "раздел",
+        "вид_значения",
+        "кардинальность",
+        "описание"
+      ],
+      "description": "Определение поля сведений. Стандартные коды имеют фиксированный смысл; дополнительные поля задаются здесь и отображаются по своей подписи без отдельного обработчика школы."
+    },
+    "relation_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "код": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "направленность": {
+          "type": "string",
+          "enum": [
+            "направленная",
+            "симметричная"
+          ]
+        },
+        "типы_начала": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "персона",
+              "школа",
+              "организация",
+              "коллектив",
+              "место",
+              "направление",
+              "период",
+              "работа",
+              "результат",
+              "метод",
+              "понятие",
+              "событие"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "типы_конца": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "персона",
+              "школа",
+              "организация",
+              "коллектив",
+              "место",
+              "направление",
+              "период",
+              "работа",
+              "результат",
+              "метод",
+              "понятие",
+              "событие"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "описание": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "код",
+        "название",
+        "направленность",
+        "типы_начала",
+        "типы_конца",
+        "описание"
+      ]
+    },
+    "information": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "субъект": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "поле": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "значение": {
+          "$ref": "#/$defs/value"
+        },
+        "роль_значения": {
+          "type": "string",
+          "enum": [
+            "основное",
+            "вариант",
+            "дополнение"
+          ]
+        },
+        "характер": {
+          "type": "string",
+          "enum": [
+            "источниковое_сообщение",
+            "авторская_оценка",
+            "редакторская_интерпретация"
+          ]
+        },
+        "решение": {
+          "type": "string",
+          "enum": [
+            "принято",
+            "гипотеза",
+            "отклонено"
+          ]
+        },
+        "порядок": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "опирается_на": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "язык": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+              "description": "Языковая метка: ru, en, de, ru-Latn и т. п. Существование и корректность метки проверяются отдельно; это не полный валидатор BCP 47."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "субъект",
+        "поле",
+        "значение",
+        "роль_значения",
+        "характер",
+        "решение",
+        "порядок",
+        "основания",
+        "проверка"
+      ],
+      "description": "Содержательный абзац или структурированное поле с основаниями. Не требуется атомизация каждого предложения. Несогласованные даты могут оставаться вариантами без выбранного основного значения."
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "от": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "тип": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "к": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "формулировка_источника": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "нормализованная_роль": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "интервалы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interval"
+          }
+        },
+        "характер": {
+          "type": "string",
+          "enum": [
+            "источниковое_сообщение",
+            "авторская_оценка",
+            "редакторская_интерпретация"
+          ]
+        },
+        "решение": {
+          "type": "string",
+          "enum": [
+            "принято",
+            "гипотеза",
+            "отклонено"
+          ]
+        },
+        "опирается_на": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "от",
+        "тип",
+        "к",
+        "интервалы",
+        "характер",
+        "решение",
+        "основания",
+        "проверка"
+      ],
+      "description": "Типизированная историческая связь. Ученичество, научное руководство, диссертационное руководство, соавторство, штатная работа и участие в событии различаются. Связь не создаёт классификационное назначение автоматически."
+    },
+    "membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "персона": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "отношение_к_школе": {
+          "type": "string",
+          "enum": [
+            "представитель",
+            "связанное_лицо",
+            "не_установлено"
+          ]
+        },
+        "решение": {
+          "type": "string",
+          "enum": [
+            "включено",
+            "кандидат",
+            "исключено"
+          ]
+        },
+        "характер": {
+          "type": "string",
+          "enum": [
+            "источниковое_сообщение",
+            "авторская_оценка",
+            "редакторская_интерпретация"
+          ]
+        },
+        "интервалы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interval"
+          }
+        },
+        "опирается_на": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "персона",
+        "отношение_к_школе",
+        "решение",
+        "характер",
+        "интервалы",
+        "основания",
+        "проверка"
+      ],
+      "description": "Одна редакторская запись включения на персону. Связанные лица, в том числе оппоненты, могут присутствовать в описании и дереве с явной подписью. Кандидаты не входят в рабочую выборку."
+    },
+    "category": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "код": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "критерий": {
+          "type": "string",
+          "minLength": 1
+        },
+        "порядок": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "id",
+        "название",
+        "критерий",
+        "порядок"
+      ]
+    },
+    "primary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "правила_отнесения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "период_описания": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/interval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "область_применения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "представитель",
+              "связанное_лицо",
+              "не_установлено"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "исключённые_персоны": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "категории": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/category"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "id",
+        "название",
+        "правила_отнесения",
+        "период_описания",
+        "область_применения",
+        "исключённые_персоны",
+        "категории"
+      ],
+      "description": "Единственное необязательное итоговое взаимоисключающее деление для устойчивой раскладки. Правила задают приоритеты. Исторические смены ролей живут в связях, не создавая несколько основных категорий одновременно."
+    },
+    "facet_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "объект": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "описание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "порядок": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "id",
+        "название",
+        "объект",
+        "основания",
+        "порядок"
+      ]
+    },
+    "facet": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "описание": {
+          "type": "string",
+          "minLength": 1
+        },
+        "значения": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/facet_value"
+          }
+        },
+        "порядок": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "показывать_по_умолчанию": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "название",
+        "описание",
+        "значения",
+        "порядок",
+        "показывать_по_умолчанию"
+      ],
+      "description": "Гибкое многозначное измерение. Число измерений и число значений не хранятся отдельными счётчиками."
+    },
+    "column": {
+      "type": "string",
+      "pattern": "^(?:system:(?:name|primary_category|sources|genealogy)|(?:field|facet):[a-z][a-z0-9_-]*)$",
+      "description": "system:name/primary_category/sources/genealogy — служебные колонки; field:<код> — поле сведений; facet:<id> — гибкое измерение. Существование поля/измерения проверяется семантически."
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "персона": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "измерение": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "значение": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "характер": {
+          "type": "string",
+          "enum": [
+            "источниковое_отнесение",
+            "классификационная_интерпретация"
+          ]
+        },
+        "решение": {
+          "type": "string",
+          "enum": [
+            "принято",
+            "гипотеза",
+            "отклонено"
+          ]
+        },
+        "интервалы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interval"
+          }
+        },
+        "порядок": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "опирается_на": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "персона",
+        "измерение",
+        "значение",
+        "характер",
+        "решение",
+        "интервалы",
+        "основания",
+        "проверка"
+      ],
+      "description": "Единственный реестр принадлежностей для дерева, таблицы, карточек, счётчиков и экспорта. Одна запись person×dimension×value; дополнительные основания и повторные интервалы добавляются в эту запись. Для основного деления интервалы пусты: оно является итоговым отнесением по правилу школы."
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "обозначение": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "страницы_pdf": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        },
+        "печатные_страницы": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "раздел": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "архивный_шифр": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "временная_метка": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "якорь": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "страницы_pdf",
+        "печатные_страницы"
+      ],
+      "description": "PDF нумеруется с 1. Печатные страницы, развороты, глава, параграф, архивный шифр или временная метка сохраняются без выдуманной нумерации.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "страницы_pdf"
+          ],
+          "properties": {
+            "страницы_pdf": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "печатные_страницы"
+          ],
+          "properties": {
+            "печатные_страницы": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "обозначение"
+          ],
+          "properties": {
+            "обозначение": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "раздел"
+          ],
+          "properties": {
+            "раздел": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "архивный_шифр"
+          ],
+          "properties": {
+            "архивный_шифр": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "временная_метка"
+          ],
+          "properties": {
+            "временная_метка": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "якорь"
+          ],
+          "properties": {
+            "якорь": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "fragment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "вид": {
+          "type": "string",
+          "enum": [
+            "цитата",
+            "пересказ",
+            "сводка"
+          ]
+        },
+        "текст": {
+          "type": "string",
+          "minLength": 1
+        },
+        "язык": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+              "description": "Языковая метка: ru, en, de, ru-Latn и т. п. Существование и корректность метки проверяются отдельно; это не полный валидатор BCP 47."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "примечание_к_транскрипции": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "вид",
+        "текст"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "источник": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "файл": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "локатор": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/locator"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "область_ссылки": {
+          "type": "string",
+          "enum": [
+            "конкретное_место",
+            "источник_в_целом",
+            "не_установлена"
+          ]
+        },
+        "фрагмент": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fragment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "тип_свидетельства": {
+          "type": "string",
+          "enum": [
+            "прямое_сообщение",
+            "воспоминание",
+            "письмо",
+            "редакторский_комментарий",
+            "авторская_реконструкция",
+            "официальный_документ",
+            "подпись_к_изображению",
+            "другое",
+            "не_установлен"
+          ]
+        },
+        "явность": {
+          "type": "string",
+          "enum": [
+            "явное",
+            "интерпретированное",
+            "не_установлена"
+          ]
+        },
+        "связанные_основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "оценка_уверенности": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "источник",
+        "файл",
+        "локатор",
+        "область_ссылки",
+        "фрагмент",
+        "тип_свидетельства",
+        "явность",
+        "проверка"
+      ],
+      "description": "Источник + локатор уже образуют допустимое основание; фрагмент может быть null. Пояснение редактора не превращается в цитату. Статус сверки и историческая истинность различаются."
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "путь_ресурса": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\\\r\\n]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "медиа_тип": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "число_страниц_pdf": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "полнота": {
+          "type": "string",
+          "enum": [
+            "полный_текст",
+            "фрагмент",
+            "оглавление",
+            "не_установлена"
+          ]
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "путь_ресурса",
+        "sha256",
+        "число_страниц_pdf",
+        "полнота"
+      ],
+      "description": "Публикуемый ресурс указывается относительным путём. null сохраняет сведения об известном экземпляре, ещё не подготовленном для публикации, включая его хеш и число страниц. Локальные домашние пути не попадают в JSON школы."
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "назначение": {
+          "type": "string",
+          "enum": [
+            "издатель",
+            "полный_текст",
+            "альтернативный_экземпляр",
+            "эпилог",
+            "каталог",
+            "другое"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://[^\\s]+$"
+        },
+        "дата_обращения": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "назначение",
+        "url",
+        "проверка"
+      ]
+    },
+    "edition_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "источник": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "вид": {
+          "type": "string",
+          "enum": [
+            "перевод",
+            "редакция",
+            "переиздание",
+            "часть_издания",
+            "другое"
+          ]
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "источник",
+        "вид"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "библиографическое_описание": {
+          "type": "string",
+          "minLength": 1
+        },
+        "название": {
+          "type": "string",
+          "minLength": 1
+        },
+        "авторы": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "редакторы": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "год": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "жанр": {
+          "type": "string",
+          "minLength": 1
+        },
+        "языки": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+            "description": "Языковая метка: ru, en, de, ru-Latn и т. п. Существование и корректность метки проверяются отдельно; это не полный валидатор BCP 47."
+          },
+          "uniqueItems": true
+        },
+        "роль_в_описании": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "дата_свидетельства": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doi": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "доступы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/access"
+          }
+        },
+        "файлы": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file"
+          }
+        },
+        "родительский_источник": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "связанные_издания": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edition_link"
+          }
+        },
+        "группа_зависимости": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "библиографическое_описание",
+        "название",
+        "авторы",
+        "редакторы",
+        "год",
+        "жанр",
+        "языки",
+        "доступы",
+        "файлы",
+        "связанные_издания",
+        "проверка"
+      ],
+      "description": "Одна запись на конкретную публикацию, а не на копию файла. Фрагмент статьи в сборнике получает собственный id и связь с изданием. Два перевода одной автобиографии не становятся независимыми свидетельствами."
+    },
+    "record_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "реестр": {
+          "type": "string",
+          "enum": [
+            "школа",
+            "персона",
+            "объект",
+            "сведение",
+            "связь",
+            "состав",
+            "назначение",
+            "источник",
+            "основание",
+            "измерение",
+            "файл",
+            "решение",
+            "разночтение"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "поле": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "реестр",
+        "id"
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "дата": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "предмет": {
+          "type": "string",
+          "minLength": 1
+        },
+        "записи": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/record_ref"
+          }
+        },
+        "до_проверки": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "выявлено": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "исходная_рекомендация": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "старое_значение": {},
+        "новое_значение": {},
+        "принятое_решение": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "результат": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "основания": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$"
+          },
+          "uniqueItems": true
+        },
+        "проверка": {
+          "$ref": "#/$defs/check"
+        },
+        "ограничения": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "происхождение": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/origin"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "дата",
+        "предмет",
+        "записи",
+        "основания",
+        "проверка"
+      ],
+      "description": "Структурированная история проверки. Старое и новое значения могут сохранять JSON-массив или объект без потери структуры. Архивные снимки не интерпретируются как текущие данные и не переопределяют реестр назначений."
+    },
+    "disagreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "тема": {
+          "type": "string",
+          "minLength": 1
+        },
+        "варианты": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "формулировка": {
+                "type": "string",
+                "minLength": 1
+              },
+              "записи": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/record_ref"
+                }
+              },
+              "основания": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]*$"
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "формулировка",
+              "записи",
+              "основания"
+            ]
+          },
+          "minItems": 1
+        },
+        "статус": {
+          "type": "string",
+          "enum": [
+            "открыто",
+            "сохранены_варианты",
+            "разрешено"
+          ]
+        },
+        "редакторское_решение": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "тема",
+        "варианты",
+        "статус",
+        "редакторское_решение"
+      ]
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "исходный_документ": {
+          "type": "string",
+          "minLength": 1
+        },
+        "исходный_путь_или_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "новые_записи": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/record_ref"
+          }
+        },
+        "примечание": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "исходный_документ",
+        "исходный_путь_или_id",
+        "новые_записи"
+      ],
+      "description": "Необязательный отчёт разового переноса. Не адаптер времени выполнения и не копия старого документа."
+    },
+    "document_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "событие": {
+          "type": "string",
+          "minLength": 1
+        },
+        "время": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "метод": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "исходный_документ": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "исходная_версия": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "коммит": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "область_работы": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "основание_схемы": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "параметры": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "событие"
+      ],
+      "description": "Техническая история происхождения документа: точные исходные timestamps, commit, scope, модель и параметры. Архивные параметры не влияют на научную классификацию и интерфейс."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "метаданные": {
+            "type": "object",
+            "properties": {
+              "статус": {
+                "not": {
+                  "const": "шаблон"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "школа": {
+            "type": "object",
+            "properties": {
+              "идентификатор_школы": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]*$"
+              },
+              "каноническое_название": {
+                "type": "string",
+                "minLength": 1
+              },
+              "границы_описания": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "отображение": {
+            "type": "object",
+            "properties": {
+              "центр": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_-]*$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

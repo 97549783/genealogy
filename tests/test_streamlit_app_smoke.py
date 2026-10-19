@@ -29,7 +29,7 @@ def test_streamlit_app_imports_and_builds_navigation(monkeypatch, tmp_path) -> N
     app.run(timeout=30)
     assert not app.exception
     assert len(app.tabs) == 0
-    assert any("main-navigation" in item.value and "Анализ статей (демо)" in item.value and "Школы по источникам (демо)" in item.value for item in app.markdown)
+    assert any("main-navigation" in item.value and "Анализ статей (демо)" in item.value and "Школы по источникам" in item.value for item in app.markdown)
 
 
 def test_streamlit_app_has_registry_labels_in_navigation(monkeypatch, tmp_path) -> None:
@@ -45,7 +45,7 @@ def test_streamlit_app_has_registry_labels_in_navigation(monkeypatch, tmp_path) 
     assert "Поиск диссертаций" in navigation
     assert "Поиск информации о диссертациях" not in navigation
     assert "Поиск по тематическим профилям" not in navigation
-    assert "Школы по источникам (демо)" in navigation
+    assert "Школы по источникам" in navigation
 
 
 def test_streamlit_app_admin_secret_short_circuits(monkeypatch, tmp_path) -> None:
@@ -122,6 +122,6 @@ def test_streamlit_app_renders_source_schools_tab(monkeypatch, tmp_path) -> None
 
     assert not app.exception
     all_text = _visible_text(app)
-    assert "Школы по источникам (демо)" in all_text
+    assert "Школы по источникам" in all_text
     assert app.selectbox[0].label == "Научная школа"
-    assert "Лев Семёнович Выготский" in app.selectbox[0].options
+    assert any("Выготского" in label for label in app.selectbox[0].options)

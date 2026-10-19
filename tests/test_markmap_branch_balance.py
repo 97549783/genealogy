@@ -68,7 +68,7 @@ def test_many_equal_weights_and_one_larger_branch_can_be_balanced_exactly():
 
 
 def test_source_school_balances_without_changing_groups_colors_or_filter_placement():
-    document = json.loads(Path("data/source_schools/vygotsky_school_sources_demo.v1.json").read_text(encoding="utf-8"))
+    document = json.loads(Path("data/source_schools/schools/vygotsky_cultural_historical_school.json").read_text(encoding="utf-8"))
     url = "https://example.test/?tab=lineages&root=Leontiev"
     tree = build_source_school_overview_tree(document, lineage_links={"alexei_leontiev": {"href": url}})
     html, _ = build_markmap_html(tree.graph, tree.root_id)
