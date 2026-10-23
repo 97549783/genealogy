@@ -1,0 +1,157 @@
+{
+  "prepared_on": "2026-10-23",
+  "database": "genealogy.db",
+  "table": "diss_metadata",
+  "columns": [
+    "Code",
+    "defense_council",
+    "leading_organization",
+    "specialties_1.code",
+    "specialties_1.name",
+    "specialties_2.code",
+    "specialties_2.name",
+    "supervisors_1.name",
+    "supervisors_1.degree",
+    "supervisors_1.title",
+    "supervisors_1.other",
+    "supervisors_2.name",
+    "supervisors_2.degree",
+    "supervisors_2.title",
+    "supervisors_2.other",
+    "defense_location",
+    "year",
+    "opponents_1.name",
+    "opponents_1.degree",
+    "opponents_1.title",
+    "opponents_1.other",
+    "opponents_2.name",
+    "opponents_2.degree",
+    "opponents_2.title",
+    "opponents_2.other",
+    "opponents_3.name",
+    "opponents_3.degree",
+    "opponents_3.title",
+    "opponents_3.other",
+    "candidate_name",
+    "degree.degree_level",
+    "degree.science_field",
+    "institution_prepared",
+    "title",
+    "city",
+    "supervisors",
+    "opponents",
+    "specialties"
+  ],
+  "row_count": 8,
+  "encoding": "UTF-8 без BOM",
+  "delimiter": ",",
+  "line_endings": "CRLF",
+  "missing_values": "Пустая строка. Не обозначает отсутствие соответствующего факта.",
+  "aggregate_columns": "supervisors, opponents, specialties: JSON-массивы, как в существующих строках diss_metadata. Для неизвестных руководителей и оппонентов поле пустое.",
+  "excluded": [],
+  "records": [
+    {
+      "Code": "mn20261023001",
+      "candidate_name": "Яшин Александр Михайлович",
+      "sources": [
+        "https://www.dissercat.com/content/ispolzovanie-metodicheskogo-kompleksa-po-bazam-dannykh-na-osnove-intranet-tekhnologii-v-sist"
+      ],
+      "notes": [
+        "Диссертация идентифицирована. Научное руководство О. Г. Смоляниновой не подтверждено: все поля supervisors оставлены пустыми.",
+        "Идентификация с исходным именем «Яшина Александр» вероятна; отчество и библиографические данные взяты из найденной диссертации.",
+        "Город относится к библиографическому описанию диссертации; место заседания диссертационного совета не установлено."
+      ]
+    },
+    {
+      "Code": "mn20261023002",
+      "candidate_name": "Шмис Тигран Гамлетович",
+      "sources": [
+        "https://famous-scientists.ru/school/1227",
+        "https://www.dissercat.com/content/razrabotka-informatsionnoi-obrazovatelnoi-sredy-na-osnove-deyatelnostnogo-podkhoda-dlya-sist",
+        "https://dspace.lgpu.org/bitstream/123456789/4813/1/1376-21_m.pdf"
+      ],
+      "notes": [
+        "Имя, год, специальность, тема и руководство подтверждены перечнем диссертаций научной школы. Город указан в библиографическом описании цитируемой диссертации.",
+        "Степень и звание руководителя дополнены по автореферату Шилиной 2003 года; в записи о школе Смолянинова также указана доктором педагогических наук, профессором.",
+        "Учреждение подготовки, совет, оппоненты и ведущая организация не установлены и оставлены пустыми."
+      ]
+    },
+    {
+      "Code": "mn20261023003",
+      "candidate_name": "Шишканов Денис Владимирович",
+      "sources": [
+        "https://bik.sfu-kras.ru/elib/view?from=similar&id=BOOK1-%D0%91%D0%91%D0%9A74%2F%D0%A8+655-387841950",
+        "https://www.nauka-pedagogika.com/pedagogika-13-00-02/dissertaciya-razvitie-soderzhaniya-kursa-tehnicheskie-i-audiovizualnye-sredstva-obucheniya-v-vuze-na-osnove-kompetentnostnogo-podhoda"
+      ],
+      "notes": [
+        "Указание Смоляниновой научным руководителем перенесено из присланной пользователем подборки предыдущей беседы со ссылкой на каталог СФУ. Повторно прочитать карточку в текущем сеансе не удалось: HTTP 429.",
+        "Название, автор, степень, год и город подтверждаются найденным описанием диссертации. Степень и звание руководителя дополнены по автореферату Шилиной 2003 года.",
+        "Учреждение подготовки, совет, оппоненты и ведущая организация не установлены и оставлены пустыми."
+      ]
+    },
+    {
+      "Code": "000199_000009_003238535",
+      "candidate_name": "Шилина Наталья Георгиевна",
+      "sources": [
+        "Локальный автореферат: 000199_000009_003238535-Общеобразовательная_подготовка_по_информатике_в_системе_медицинского.pdf",
+        "https://famous-scientists.ru/school/1227"
+      ],
+      "notes": [
+        "Основные метаданные извлечены с первой и второй страниц локального автореферата; вторая страница также проверена визуально.",
+        "Имена оппонентов сохранены с инициалами, как в автореферате, без недоказанного раскрытия имён и отчеств.",
+        "Дата защиты, указанная в автореферате: 28 ноября 2003 года. В схеме diss_metadata отдельного столбца для полной даты нет."
+      ]
+    },
+    {
+      "Code": "mn20261023004",
+      "candidate_name": "Достовалова Елена Викторовна",
+      "sources": [
+        "https://famous-scientists.ru/school/1227",
+        "https://sfu.ru/ru/about/people/bac57f77-f795-4508-8bbb-c92a3ffa8df4?tab=publications",
+        "https://www.nauka-pedagogika.com/pedagogika-13-00-02/dissertaciya-formirovanie-informatsionno-kommunikativnoy-kompetentnosti-sotsialnogo-pedagoga-na-osnove-uchebno-metodicheskogo-kompleks"
+      ],
+      "notes": [
+        "Руководство, год и специальность подтверждены перечнем диссертаций школы; название и год также приведены в публикациях сотрудника на сайте СФУ.",
+        "Степень и звание руководителя дополнены по автореферату Шилиной 2003 года. Город указан по библиографическому описанию диссертации.",
+        "Учреждение подготовки, совет, оппоненты и ведущая организация не установлены и оставлены пустыми."
+      ]
+    },
+    {
+      "Code": "000199_000009_015112170",
+      "candidate_name": "Ануфриенко Евгений Константинович",
+      "sources": [
+        "Локальный автореферат: 000199_000009_015112170-Методика_обучения_подростков_разработке_приложений_с_дополненной_реальностью.pdf",
+        "https://rusacademedu.ru/01062026-1/",
+        "https://sfu.ru/ru/science/dissertations/7aba33ad-d8e1-4809-9d92-975c98057c33"
+      ],
+      "notes": [
+        "Метаданные извлечены с первой и второй страниц локального автореферата; вторая страница также проверена визуально.",
+        "Успешная защита 28 мая 2026 года и научное руководство дополнительно подтверждены сообщением РАО."
+      ]
+    },
+    {
+      "Code": "000199_000009_015112169",
+      "candidate_name": "Солдатов Дмитрий Павлович",
+      "sources": [
+        "Локальный автореферат: 000199_000009_015112169-Методика_развития_цифровой_компетентности_будущих_педагогов-тьюторов.pdf",
+        "https://rusacademedu.ru/01062026-1/",
+        "https://sfu.ru/ru/science/dissertations/0028e5d1-2b6c-4df1-9e5f-0dec0f7ddd5f"
+      ],
+      "notes": [
+        "Метаданные извлечены с первой и второй страниц локального автореферата; вторая страница также проверена визуально.",
+        "Успешная защита 28 мая 2026 года и научное руководство дополнительно подтверждены сообщением РАО."
+      ]
+    },
+    {
+      "Code": "mn20261023005",
+      "candidate_name": "Агапова Светлана",
+      "sources": [
+        "Прямое указание пользователя в текущей беседе от 23 октября 2026 года."
+      ],
+      "notes": [
+        "По указанию пользователя заполнены только имя соискателя и имя научного руководителя. Дополнительно присвоен следующий служебный код mn20261023005.",
+        "Все остальные поля оставлены пустыми, включая степень и звание руководителя, тему, год, город, специальность и агрегированные JSON-поля. Внешняя документальная проверка связи не выполнялась."
+      ]
+    }
+  ]
+}
